@@ -1,0 +1,90 @@
+# Copy these names into Apps Script → Project Settings → Script properties.
+# Do not commit real values. This file is an example only.
+#
+# POE_API_KEY
+#   Required. Create a key at https://poe.com/api/keys
+#   Example value shape: paste the key, do not invent one in git.
+#
+# ALLOWED_USER_HASHES
+#   Required in production. SHA-256 hex of each trimmed, lowercased username.
+#   Comma, newline, or space separated. Do not commit real hashes.
+#   In the bound spreadsheet: 出題代理 → 計算使用者名稱雜湊.
+#   Paste each username only in that dialog, then copy the hex here.
+#   Fake shape only (do not paste this into Script properties):
+#   0000000000000000000000000000000000000000000000000000000000000000
+#   Or locally, and do not commit the output:
+#   printf '%s' 'user_a' | shasum -a 256
+#
+# ALLOWED_USERS
+#   Legacy / development only. Leave unset on the production project.
+#   Comma-separated plaintext usernames. The site lowercases them first.
+#   Example placeholders: user_a,user_b,user_c
+#
+# POE_MODEL
+#   Optional fallback when the client omits `model`.
+#   Used only if it is exactly one of:
+#   Claude-Sonnet-5.5, GPT-6.1-Sol, Gemini-3.8-Flash
+#   Any other value is ignored. Default in Code.gs: Claude-Sonnet-5.5
+#   The modal sends one of those three ids. Do not put other model ids here.
+#
+# POE_MAX_REFERENCES
+#   Optional. Default: 40. How many filtered questions are sent as style samples.
+#
+# POE_MAX_REFERENCE_CHARS
+#   Optional. Default: 80000. Extra questions are dropped after this size.
+#
+# POE_MIN_INTERVAL_SECONDS
+#   Optional. Default: 20. Per-username cooldown between generations.
+#   testModel uses the same number of seconds on a separate cooldown. 0 disables.
+#
+# POE_DAILY_LIMIT
+#   Optional. Default: 40 successful generations per username per script-timezone day.
+#   Set 0 for no daily cap.
+#
+# POE_MAX_TOKENS
+#   Optional. Leave empty to let the model decide. A low cap cuts answers short.
+#
+# POE_TEMPERATURE
+#   Optional. Leave empty to use the model default.
+#
+# SPREADSHEET_ID
+#   Optional when this project is bound to the question-log spreadsheet.
+#   Set it if the script is standalone. The id is the long string in the sheet URL.
+#
+# LOG_SHEET_NAME
+#   Optional. Default: UsageLog
+#   Do not point this at an existing data tab.
+#
+# BACKUP_SHEET_NAME
+#   Optional. Default: GenerationBackup
+#   Successful generateQuestions and testModel replies are appended here.
+#   Do not point this at UsageLog or a data tab.
+#
+# GitHub sync. Names only. Never commit real values, and never put the
+# token, owner, or repository name in the public site.
+#
+# GITHUB_TOKEN
+#   Fine-grained PAT. Repository access: only the private data repository.
+#   Permission: Contents read and write. No other permissions.
+#
+# GITHUB_OWNER
+#   GitHub user or organization that owns the private data repository.
+#
+# GITHUB_REPO
+#   Private repository name. Not the public site repository.
+#
+# GITHUB_BRANCH
+#   Optional. The script uses main when this is empty.
+#
+# GITHUB_DATA_PATH
+#   Question JSON path inside that user's folder. Not a shared file.
+#   Shape example only: data/questions.json
+#   Stored as users/<username>/data/questions.json
+#
+# GITHUB_AI_BACKUP_DIR
+#   Directory for that user's timestamped model-reply backups.
+#   Shape example only: ai-backups
+#   Stored as users/<username>/ai-backups/<timestamp>-….json
+#
+# <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
+# Do not put a real username in this file.

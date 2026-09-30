@@ -1,0 +1,159 @@
+/* ============================================
+   Tabs and Navigation Components
+   ============================================ */
+
+/* Tab Navigation */
+.tabs {
+    display: flex;
+    background: var(--light-bg);
+    border-bottom: 2px solid var(--border-color);
+    overflow-x: auto;
+}
+
+.tab {
+    padding: 15px 30px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    font-size: 16px;
+    color: var(--text-color);
+    transition: all var(--transition-normal);
+    white-space: nowrap;
+}
+
+.tab:hover {
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.tab.active {
+    background: var(--white-bg);
+    border-bottom: 3px solid var(--secondary-color);
+    font-weight: bold;
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+    padding: var(--spacing-xl);
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* ============================================
+   Badges and Tags
+   ============================================ */
+
+.badge {
+    padding: 4px 12px;
+    border-radius: var(--radius-xl);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.badge-year {
+    background: #3498db;
+    color: var(--text-white);
+}
+
+.badge-type {
+    background: #9b59b6;
+    color: var(--text-white);
+}
+
+.badge-marks {
+    background: var(--danger-color);
+    color: var(--text-white);
+}
+
+.badge-section {
+    background: var(--warning-color);
+    color: var(--text-white);
+}
+
+/* Tag Container */
+.tag-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin: 10px 0;
+}
+
+.tag {
+    padding: 4px 10px;
+    background: var(--light-bg);
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+}
+
+.tag:hover {
+    background: var(--secondary-color);
+    color: var(--text-white);
+    transform: scale(1.05);
+}
+
+/* ============================================
+   Pagination
+   ============================================ */
+
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: var(--spacing-lg) 0;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+#pagination-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+#pagination-info-text {
+    font-size: 14px;
+    color: var(--text-light);
+}
+
+#pagination-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.pagination-btn {
+    padding: 8px 12px;
+    border: 2px solid var(--border-color);
+    background: var(--white-bg);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    font-size: 14px;
+}
+
+.pagination-btn:hover:not(.active) {
+    background: var(--light-bg);
+}
+
+.pagination-btn.active {
+    background: var(--secondary-color);
+    color: var(--text-white);
+    border-color: var(--secondary-color);
+}
+
+/* ============================================
+   Empty State
+   ============================================ */
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-light);
+    font-size: 16px;
+}

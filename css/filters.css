@@ -1,0 +1,995 @@
+/* ============================================
+   Modern Filter UI
+   ============================================ */
+
+.filters-container {
+    background: var(--white-bg);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid var(--border-light);
+}
+
+/* --- Row 1: Search Input Group --- */
+.search-row {
+    margin-bottom: var(--spacing-lg);
+}
+
+.search-input-group {
+    display: flex;
+    align-items: center;
+    background: #fff;
+    border: 2px solid var(--secondary-color);
+    border-radius: 50px; /* Pill shape */
+    overflow: hidden;
+    box-shadow: 0 4px 10px rgba(52, 152, 219, 0.1);
+    transition: all 0.3s ease;
+}
+
+.search-input-group:focus-within {
+    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.25);
+    transform: translateY(-1px);
+}
+
+.scope-select-wrapper {
+    position: relative;
+    border-right: 1px solid #eee;
+    background: #f8f9fa;
+}
+
+.scope-select-wrapper select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: none;
+    padding: 14px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary-color);
+    cursor: pointer;
+    outline: none;
+    min-width: 110px;
+    text-align: center;
+}
+
+.scope-select-wrapper::after {
+    content: '▼';
+    font-size: 10px;
+    color: #7f8c8d;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.search-input-group input {
+    flex: 1;
+    border: none;
+    padding: 14px 20px;
+    font-size: 16px;
+    outline: none;
+    color: var(--text-color);
+}
+
+.search-icon {
+    padding: 0 20px;
+    font-size: 18px;
+    opacity: 0.5;
+}
+
+/* --- Row 2: Primary Filter Grid --- */
+.filter-primary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-item {
+    position: relative;
+}
+
+/* Standardizing Buttons and Selects
+   .btn-clear-filter removed from this group — it was forcing the
+   "重置篩選條件" button to width:100% / height:42px. Only the explicit
+   .full-width variant gets the standardized sizing now. */
+.dropdown-btn, 
+.modern-select,
+.btn-clear-filter.full-width {
+    width: 100%;
+    height: 42px;
+    padding: 0 15px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    position: relative; /* Important for indicator */
+}
+
+/* Dropdown Buttons */
+.dropdown-btn {
+    background: var(--white-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.dropdown-btn:hover {
+    border-color: var(--secondary-color);
+    background: #f8f9fa;
+}
+
+.dropdown-btn .arrow {
+    font-size: 10px;
+    opacity: 0.6;
+}
+
+/* Ensure dropdowns anchor correctly */
+.dropdown-filter {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+}
+
+/* Modern Select */
+.modern-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--white-bg) url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right 12px center;
+    background-size: 14px;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.modern-select:focus {
+    border-color: var(--secondary-color);
+    outline: none;
+}
+
+/* Clear Button Override */
+.btn-clear-filter.full-width {
+    justify-content: center;
+    font-weight: 600;
+    border: none;
+}
+
+/* Dropdown Content Styling (Standard) — the dropdown itself scrolls */
+.dropdown-content {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    width: 100%;
+    min-width: auto;
+    background: white;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+    z-index: 100;
+    display: none;
+    padding: 5px;
+    max-height: 320px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.dropdown-content.active {
+    display: block;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Range Dropdown Specifics */
+.range-dropdown {
+    min-width: auto;
+    width: 100%;
+    overflow: visible; /* sliders don't need scrolling; avoid thumb clipping */
+}
+
+/* The Blue Dot Indicator */
+.active-indicator {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    background-color: var(--secondary-color);
+    border-radius: 50%;
+    display: none;
+    z-index: 10;
+    box-shadow: 0 0 0 2px white;
+}
+
+.active-indicator.visible {
+    display: block;
+}
+
+/* --- Active Filters Badges --- */
+.active-filters-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 15px;
+    background: #f0f8ff;
+    border-radius: 8px;
+    border-left: 4px solid var(--secondary-color);
+    margin-bottom: var(--spacing-lg);
+    align-items: center;
+    display: none;
+}
+
+.search-info-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--secondary-color);
+    margin-right: 5px;
+}
+
+.badges-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.filter-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.filter-badge.blue { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+.filter-badge.green { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.filter-badge.red { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+
+
+/* --- Sort Controls --- */
+.sort-controls-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid #eee;
+    font-size: 14px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.sort-label {
+    color: #7f8c8d;
+    font-weight: 500;
+}
+
+#sort-order {
+    border: none;
+    background: transparent;
+    font-weight: 600;
+    color: var(--primary-color);
+    cursor: pointer;
+    outline: none;
+}
+
+#sort-order:hover {
+    color: var(--secondary-color);
+}
+
+.total-count {
+    margin-left: auto;
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* ============================================
+   Tri-State Checkbox Styles
+   ============================================ */
+
+.tri-state-label {
+    padding: 8px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.tri-state-label:hover { 
+    background: #f5f5f5; 
+}
+
+.tri-state-checkbox {
+    padding-left: 25px;
+    position: relative;
+    font-size: 13px;
+    color: #333;
+}
+
+.tri-state-checkbox::before {
+    content: '';
+    position: absolute;
+    left: 0; 
+    top: 1px;
+    width: 16px; 
+    height: 16px;
+    border: 2px solid #ddd;
+    border-radius: 3px;
+    background: white;
+    transition: all 0.2s;
+}
+
+.tri-state-label.checked .tri-state-checkbox::before,
+.tri-state-checkbox.checked::before {
+    content: '✔';
+    background: var(--secondary-color);
+    border-color: var(--secondary-color);
+    color: white;
+    font-size: 12px;
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+}
+
+.tri-state-label.excluded .tri-state-checkbox::before,
+.tri-state-checkbox.excluded::before {
+    content: '✕';
+    background: var(--danger-color);
+    border-color: var(--danger-color);
+    color: white;
+    font-size: 12px;
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+}
+
+/* ============================================
+   Custom Grid Dropdowns (Curriculum / Feature)
+   ============================================ */
+
+.custom-grid-dropdown {
+    display: none; 
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    width: 100%;
+    background: white;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+    z-index: 1000;
+    padding: 10px;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    max-height: 400px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.custom-grid-dropdown[style*="display: grid"] {
+    display: grid !important;
+}
+
+/* ============================================
+   Chapter Dropdown (number + full chapter name)
+   ============================================ */
+
+#chapter-options.chapter-grid-width {
+    width: 100%;
+    min-width: 380px;
+    max-width: calc(100vw - 40px);
+}
+
+#chapter-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+}
+
+#chapter-options .chapter-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+    padding: 6px 8px;
+    overflow: hidden;
+}
+
+#chapter-options .ch-num {
+    flex-shrink: 0;
+    font-weight: 700;
+}
+
+#chapter-options .ch-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 400;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Compact mode: number-only (forced for the 'Colleagues' user group) */
+#chapter-options.hide-chapter-names {
+    min-width: 0;
+}
+#chapter-options.hide-chapter-names .ch-name {
+    display: none !important;
+}
+#chapter-options.hide-chapter-names #chapter-list {
+    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+}
+#chapter-options.hide-chapter-names .chapter-item {
+    justify-content: center;
+    padding: 8px 0;
+}
+
+/* ============================================
+   Year Dropdown (grouped by decade)
+   ============================================ */
+
+#year-options {
+    display: none; 
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    width: 100%;
+    min-width: 340px;
+    max-width: calc(100vw - 40px);
+    background: white;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+    z-index: 1000;
+    padding: 10px;
+    grid-template-columns: 1fr;  /* one decade group per row */
+    gap: 8px;
+    max-height: 420px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+#year-options[style*="display: grid"] {
+    display: grid !important;
+}
+
+.year-global-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.year-group {
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+    padding: 8px;
+    background: #fafbfc;
+}
+
+.year-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.year-group-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.year-decade-btn {
+    font-size: 11px;
+}
+
+.year-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+    gap: 4px;
+}
+
+/* ============================================
+   Shared Button Styles for Chapter & Year items
+   ============================================ */
+
+#chapter-options .tri-state-checkbox,
+#year-options .tri-state-checkbox {
+    padding: 6px 4px;
+    text-align: center;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    color: #666;
+    padding-left: 4px;
+}
+
+/* Hide the default pseudo-element checkbox */
+#chapter-options .tri-state-checkbox::before,
+#year-options .tri-state-checkbox::before {
+    display: none;
+}
+
+/* Active States */
+#chapter-options .tri-state-checkbox.checked,
+#year-options .tri-state-checkbox.checked {
+    background: var(--secondary-color);
+    color: white;
+    border-color: var(--secondary-color);
+}
+
+#chapter-options .tri-state-checkbox.excluded,
+#year-options .tri-state-checkbox.excluded {
+    background: var(--danger-color);
+    color: white;
+    border-color: var(--danger-color);
+}
+
+#chapter-options .tri-state-checkbox:hover,
+#year-options .tri-state-checkbox:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Keep name text colour consistent with state */
+#chapter-options .tri-state-checkbox.checked .ch-name,
+#chapter-options .tri-state-checkbox.excluded .ch-name {
+    color: white;
+}
+
+/* ============================================
+   Range Slider Styles
+   ============================================ */
+.range-filter-wrapper { padding: 5px; }
+.range-filter-header { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.range-clear-btn { background: none; border: none; color: #999; font-size: 12px; cursor: pointer; }
+.range-clear-btn:hover { color: var(--danger-color); text-decoration: underline; }
+.range-info { text-align: center; font-size: 13px; color: var(--primary-color); font-weight: 600; margin-bottom: 15px; }
+
+.range-slider-container { position: relative; height: 30px; }
+.range-slider-track { position: absolute; top: 50%; width: 100%; height: 4px; background: #eee; border-radius: 2px; }
+.range-slider-fill { position: absolute; top: 50%; height: 4px; background: var(--secondary-color); border-radius: 2px; }
+.range-slider-input {
+    position: absolute; top: 50%; width: 100%; height: 4px;
+    background: transparent; -webkit-appearance: none; pointer-events: none; margin: 0;
+}
+.range-slider-input::-webkit-slider-thumb {
+    pointer-events: auto; -webkit-appearance: none;
+    width: 18px; height: 18px; background: white; border: 2px solid var(--secondary-color);
+    border-radius: 50%; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    transform: translateY(-40%);
+}
+.marks-filter .range-slider-fill { background: #9b59b6; }
+.marks-filter .range-slider-input::-webkit-slider-thumb { border-color: #9b59b6; }
+
+.qnum-filter .range-slider-fill { background: #16a085; }
+.qnum-filter .range-slider-input::-webkit-slider-thumb { border-color: #16a085; }
+
+/* ============================================
+   AI Filter Dropdown Position and Width
+   ============================================ */
+#ai-options {
+    position: relative; 
+    left: auto;
+    top: auto;
+    width: fit-content;
+    min-width: 200px;
+    margin-top: 5px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+
+/* ============================================
+   Hide AI Filter by Default (shown when data exists)
+   ============================================ */
+
+.dropdown-filter:has(#ai-options),
+.dropdown-filter:has(#ai-filter-btn) {
+    display: none;
+}
+
+/* ============================================
+   Filter Header / Clear Buttons
+   ============================================ */
+.filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.clear-btn {
+    background: none;
+    border: none;
+    color: #95a5a6;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 5px;
+}
+
+.clear-btn:hover {
+    color: #e74c3c;
+    text-decoration: underline;
+}
+
+/* Curriculum / Feature items as list */
+#curriculum-options .tri-state-label,
+#feature-options .tri-state-label {
+    padding: 8px 10px;
+    border-radius: 4px;
+}
+
+#curriculum-options .tri-state-label:hover,
+#feature-options .tri-state-label:hover {
+    background-color: #f5f5f5;
+}
+
+/* ============================================
+   Logic Toggle Switch (OR / AND)
+   ============================================ */
+.logic-toggle {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 22px;
+    vertical-align: middle;
+}
+
+.logic-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.logic-toggle label {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #3498db; /* Default Blue for OR */
+    transition: .4s;
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+    font-size: 10px;
+    font-weight: bold;
+    color: white;
+}
+
+.logic-toggle label:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    z-index: 2;
+}
+
+.logic-toggle input:checked + label {
+    background-color: #9b59b6; /* Purple for AND */
+}
+
+.logic-toggle input:checked + label:before {
+    transform: translateX(28px);
+}
+
+.logic-text {
+    z-index: 1;
+    pointer-events: none;
+}
+
+.logic-text.or {
+    margin-left: 18px;
+    display: block;
+}
+
+.logic-text.and {
+    display: none;
+    margin-right: 18px;
+}
+
+.logic-toggle input:checked + label .logic-text.or {
+    display: none;
+}
+
+.logic-toggle input:checked + label .logic-text.and {
+    display: block;
+}
+
+/* ============================================
+   Modal Filter Triggers (圖表/表格/計算/複選/概念/題型)
+   ============================================ */
+
+.modal-filter-trigger .mf-trigger-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.modal-filter-trigger.mf-trigger-active {
+    border-color: var(--secondary-color);
+    color: var(--secondary-color);
+    font-weight: 600;
+}
+
+.mf-badge {
+    display: inline-block;
+    min-width: 18px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--secondary-color);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.4;
+}
+
+/* BUGFIX: display:inline-block above beats the browser's default
+   [hidden]{display:none} rule, so zero-count badges rendered as empty
+   pills. This rule restores the hidden behavior. */
+.mf-badge[hidden] {
+    display: none !important;
+}
+
+/* ============================================
+   Filter Modal
+   ============================================ */
+
+.mf-modal-open { overflow: hidden; }
+
+.mf-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.mf-dialog {
+    background: #fff;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.mf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+}
+
+.mf-header h3 { margin: 0; font-size: 17px; }
+
+.mf-close {
+    border: none;
+    background: none;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #666;
+}
+
+.mf-hint {
+    padding: 0 16px 8px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.mf-search {
+    margin: 0 16px 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.mf-search:focus {
+    outline: none;
+    border-color: var(--secondary-color);
+}
+
+.mf-list {
+    overflow-y: auto;
+    padding: 0 12px 8px;
+    flex: 1;
+}
+
+.mf-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 10px;
+    margin-bottom: 4px;
+    text-align: left;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.mf-option:hover { background: #f3f4f6; }
+
+.mf-mark {
+    width: 18px;
+    flex-shrink: 0;
+    text-align: center;
+    font-weight: 700;
+}
+
+.mf-include { border-color: var(--secondary-color); background: #e3f2fd; }
+.mf-include .mf-mark { color: var(--secondary-color); }
+
+.mf-exclude { border-color: var(--danger-color); background: #ffebee; }
+.mf-exclude .mf-mark { color: var(--danger-color); }
+
+.mf-option-label {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word; /* long Chinese option text wraps */
+}
+
+.mf-count {
+    flex-shrink: 0;
+    font-size: 12px;
+    opacity: 0.55;
+}
+
+.mf-empty {
+    padding: 24px;
+    text-align: center;
+    color: #9ca3af;
+}
+
+.mf-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.mf-clear-btn {
+    background: none;
+    border: 1px solid var(--danger-color);
+    color: var(--danger-color);
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+}
+
+.mf-done-btn {
+    background: var(--secondary-color);
+    border: 1px solid var(--secondary-color);
+    color: #fff;
+    border-radius: 8px;
+    padding: 8px 18px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* ============================================
+   Responsive Adjustments
+   ============================================ */
+@media (max-width: 768px) {
+    .filter-primary-grid {
+        grid-template-columns: 1fr 1fr; 
+    }
+    
+    .advanced-grid {
+        grid-template-columns: 1fr; 
+    }
+    
+    .sort-controls-wrapper {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .total-count {
+        margin-left: 0;
+    }
+
+    /* Stack the custom grids on mobile */
+    .custom-grid-dropdown,
+    #year-options {
+        width: 100%;
+        min-width: 0;
+        position: static;
+        box-shadow: none;
+        border: 1px solid #eee;
+        margin-top: 5px;
+    }
+    
+    /* Chapters: not enough space — fall back to number-only grid */
+    #chapter-options.chapter-grid-width {
+        min-width: 0;
+    }
+    #chapter-options .ch-name {
+        display: none;
+    }
+    #chapter-list {
+        grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+    }
+    #chapter-options .chapter-item {
+        justify-content: center;
+        padding: 8px 0;
+    }
+
+    /* Years: slightly tighter grid */
+    .year-group-grid {
+        grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    /* Modal becomes a bottom sheet on phones */
+    .mf-overlay {
+        padding: 0;
+        align-items: flex-end;
+    }
+    .mf-dialog {
+        max-width: none;
+        max-height: 92vh;
+        border-radius: 12px 12px 0 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .filter-primary-grid {
+        grid-template-columns: 1fr; 
+    }
+    
+    .search-input-group {
+        flex-direction: column;
+        border-radius: 12px;
+    }
+    
+    .scope-select-wrapper {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .scope-select-wrapper select {
+        width: 100%;
+        text-align: left;
+    }
+}

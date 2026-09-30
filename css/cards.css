@@ -1,0 +1,175 @@
+/* ============================================
+   Card Components
+   ============================================ */
+
+/* Question Grid */
+.question-grid {
+    display: grid;
+    gap: var(--spacing-lg);
+}
+
+/* Question Card */
+.question-card {
+    background: var(--white-bg);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    transition: all var(--transition-normal);
+}
+
+.question-card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: var(--spacing-md);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.question-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--primary-color);
+    flex: 1;
+}
+
+.question-badges {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.question-content {
+    margin: var(--spacing-md) 0;
+    line-height: 1.8;
+}
+
+.question-text {
+    background: var(--light-bg);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+}
+
+.question-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin: var(--spacing-md) 0;
+    font-size: 14px;
+}
+
+.info-item {
+    padding: var(--spacing-sm);
+    background: rgba(52, 152, 219, 0.05);
+    border-radius: var(--radius-md);
+}
+
+.info-item strong {
+    color: var(--secondary-color);
+    margin-right: 5px;
+}
+
+/* ============================================
+   Statistics Cards
+   ============================================ */
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-md);
+}
+
+.stat-card {
+    background: var(--white-bg);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    transition: box-shadow var(--transition-fast);
+}
+
+.stat-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.stat-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.stat-details {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+
+/* ============================================
+   Item Cards (Publishers, Topics, etc.)
+   ============================================ */
+
+.items-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-md);
+}
+
+.item-card {
+    background: var(--white-bg);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    transition: box-shadow var(--transition-fast);
+}
+
+.item-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.item-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.item-count {
+    background: #e3f2fd;
+    color: var(--info-color);
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.item-comment textarea {
+    width: 100%;
+    min-height: 60px;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+    transition: border-color var(--transition-fast);
+}
+
+.item-comment textarea:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}

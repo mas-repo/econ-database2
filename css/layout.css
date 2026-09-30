@@ -1,0 +1,150 @@
+/* ============================================
+   Layout and Container Styles
+   ============================================ */
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: var(--white-bg);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    overflow: hidden;
+}
+
+/* Header Section */
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: var(--text-white);
+    padding: var(--spacing-xl);
+    text-align: center;
+    position: relative;
+}
+
+header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+}
+
+header p {
+    opacity: 0.9;
+    font-size: 1.1em;
+}
+
+/* Storage Status Indicator
+   FIXED: pinned to the top-left corner of the header with fit-content
+   width, instead of rendering as a full-width block. Hidden entirely
+   when it has no text. */
+#storage-status {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    width: fit-content;
+    max-width: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    color: var(--text-color);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#storage-status:empty {
+    display: none;
+}
+
+#storage-status.connected {
+    border: 2px solid var(--success-color);
+}
+
+#storage-status.disconnected {
+    border: 2px solid var(--danger-color);
+}
+
+/* Sync Status */
+#sync-status {
+    display: inline-block;
+    margin-top: 15px;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.2);
+    font-size: 14px;
+    color: var(--text-white);
+}
+
+/* Loading Indicator */
+#loading-indicator {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(102, 126, 234, 0.95);
+    color: white;
+    padding: 15px;
+    text-align: center;
+    z-index: 9999;
+    font-size: 16px;
+    font-weight: 600;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Status Bar */
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--light-bg);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Action Bar */
+.action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: var(--spacing-lg) 0;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+.action-bar h2 {
+    font-size: 1.5em;
+    color: var(--text-color);
+    margin: 0;
+}
+
+.action-bar > div {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+/* Scroll to Top Button */
+#scroll-to-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 50px;
+    height: 50px;
+    background: var(--secondary-color);
+    color: var(--text-white);
+    border: none;
+    border-radius: var(--radius-round);
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: all var(--transition-normal);
+    z-index: var(--z-tooltip);
+    display: none;
+}
+
+#scroll-to-top:hover {
+    background: #2980b9;
+    transform: translateY(-5px);
+}
