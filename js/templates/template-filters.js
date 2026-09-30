@@ -14,8 +14,8 @@
 function renderFiltersTemplate() {
 
     // Helper: standard tri-state label item (used for hardcoded static filters)
-    const triLabel = (filter, value, display) => `
-        <div class="tri-state-label" onclick="toggleTriState(this)" data-filter="${filter}" data-value="${value}">
+    const triLabel = (filter, value, display, extraAttrs) => `
+        <div class="tri-state-label" onclick="toggleTriState(this)" data-filter="${filter}" data-value="${value}" ${extraAttrs || ''}>
             <div class="tri-state-checkbox" data-filter="${filter}" data-value="${value}">
                 <span>${display || value}</span>
             </div>
@@ -70,7 +70,7 @@ function renderFiltersTemplate() {
                         </button>
                         <span class="active-indicator" id="indicator-publisher"></span>
                         <div class="dropdown-content" id="publisher-options">
-                            ${triLabel('publisher', '雅集出版社')}
+                            ${triLabel('publisher', '雅集出版社', '', 'data-mock-only="1" hidden')}
                             ${triLabel('publisher', 'HKEAA')}
                         </div>
                     </div>
