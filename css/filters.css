@@ -422,7 +422,12 @@
     text-overflow: ellipsis;
 }
 
-/* Compact mode: number-only (forced for the 'Colleagues' user group) */
+/* Hide mock-only controls when the proxy did not grant mockTests. */
+[data-mock-only="1"][hidden] {
+    display: none !important;
+}
+
+/* Compact mode: number-only chapter list */
 #chapter-options.hide-chapter-names {
     min-width: 0;
 }

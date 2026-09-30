@@ -360,9 +360,14 @@
     transform: scale(0.95);
 }
 
-/* Logout Button - Only visible in admin mode */
+/* .btn sets display, which would otherwise ignore the hidden attribute. */
+#admin-mode-btn[hidden] {
+    display: none !important;
+}
+
+/* Logout stays available after sign-in. */
 #logout-btn {
-    display: none;
+    display: inline-flex;
     background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
     color: white;
     box-shadow: 0 4px 12px rgba(231, 76, 60, 0.25);
