@@ -114,19 +114,12 @@ function closeAllDropdowns() {
 
 /**
  * Helper: Applies tooltips to Chapter options based on constants.js.
- * Also enforces the "Colleagues" rule: that group must not see chapter names,
- * so the full-name spans are hidden via the 'hide-chapter-names' class.
+ * Chapter titles come from CHAPTER_DESCRIPTIONS.
  */
 function applyChapterTooltips() {
     const container = document.getElementById('chapter-options');
     if (!container) return;
 
-    // Colleagues: hide names and tooltips entirely
-    if (window.authManager && window.authManager.userGroup === 'Colleagues') {
-        container.classList.add('hide-chapter-names');
-        container.querySelectorAll('[data-value]').forEach(item => item.removeAttribute('title'));
-        return;
-    }
     container.classList.remove('hide-chapter-names');
 
     if (typeof CHAPTER_DESCRIPTIONS === 'undefined') return;
@@ -608,8 +601,9 @@ async function updateDynamicDropdowns() {
         }
 
         if (mockYears.length > 0) {
+            const mockHidden = window.accessRights && window.accessRights.mockTests ? '' : ' hidden';
             html += `
-                <div class="year-group">
+                <div class="year-group" data-mock-only="1"${mockHidden}>
                     <div class="year-group-header">
                         <span class="year-group-title">Mock Test</span>
                     </div>

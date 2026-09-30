@@ -1,6 +1,6 @@
 // storage-core.js
 // IndexedDB wrapper (window.storage). Questions only — IndexedDB is a
-// disposable cache rebuilt from data/database.json on every load.
+// disposable cache rebuilt from the shared question bank on every load.
 //
 // v4: Removed the legacy metadata object stores (publishers / topics /
 // concepts / patterns) and their accessor methods (updateMetadata,

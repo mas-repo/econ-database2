@@ -2,6 +2,8 @@
 // Dependencies: storage-sync.js (QuestionJsonSource)
 
 const CONFIG = {
+    // Local fallback only. The hosted site loads shared/data/database.json
+    // through the Apps Script proxy. Do not commit that file here.
     QUESTIONS_JSON_URL: 'data/database.json',
     // Apps Script web app (/exec) from econ-database/apps-script/README.md.
     // Leave empty until that deployment exists. This URL is not a secret.

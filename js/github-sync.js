@@ -1,6 +1,6 @@
-// Git sync for allowlisted users. The browser only talks to the Apps Script
-// web app already used by AI出題. The token, owner, and repository name stay
-// in Script properties and are never read or stored here.
+// Git sync when the proxy sets githubSync. The browser only talks to the
+// Apps Script web app already used by AI出題. The token, owner, and repository
+// name stay in Script properties and are never read or stored here.
 // Auto-sync is a local preference only (localStorage).
 
 var GIT_AUTO_SYNC_KEY = 'econ_git_auto_sync';
@@ -134,11 +134,10 @@ async function gitProxyRequest(payload, timeoutMs) {
 async function refreshGitSyncAccess() {
     showGitPanel(false);
     gitSyncState.allowed = false;
-    var username = gitUsername();
-    if (!username || !gitProxyUrl()) return false;
+    if (typeof refreshAccessRights !== 'function') return false;
     try {
-        var data = await gitProxyRequest({ action: 'checkAccess', username: username }, 20000);
-        gitSyncState.allowed = !!(data && data.ok === true && data.allowed === true);
+        var rights = await refreshAccessRights();
+        gitSyncState.allowed = !!(rights && rights.githubSync === true);
     } catch (error) {
         gitSyncState.allowed = false;
     }
@@ -178,7 +177,9 @@ async function uploadQuestionsToGit(options) {
         }
         return;
     }
-    await runGitJob(options.auto ? 'auto' : 'manual', async function () {
+    var mode = options.auto ? 'auto' : 'manual';
+    await runGitJob(mode, async function () {
+        console.log('[GitHub upload] ' + new Date().toISOString() + ' starting (' + mode + ')');
         setGitStatus(options.auto ? '正在自動同步到 GitHub…' : '正在上傳到 GitHub…', '');
         try {
             var exportData = typeof buildQuestionExport === 'function'
@@ -198,11 +199,13 @@ async function uploadQuestionsToGit(options) {
                 throw failed;
             }
             var count = exportData.questionCount;
+            console.log('[GitHub upload] ' + new Date().toISOString() + ' succeeded (' + count + ' questions)');
             var message = '已上傳 ' + count + ' 題到 GitHub';
             setGitStatus(message, 'ok');
             if (typeof showNotification === 'function') showNotification(message, 'success');
         } catch (error) {
             var message = gitFailureText(error);
+            console.warn('[GitHub upload] ' + new Date().toISOString() + ' failed: ' + message);
             setGitStatus(message, 'error');
             if (typeof showNotification === 'function') showNotification(message, 'error');
         }

@@ -99,17 +99,31 @@ class QuestionJsonSource {
     }
 
     async fetchPayload() {
-        // index.html starts this fetch as soon as the page loads.
+        // The public site does not ship the question bank. Allowlisted users
+        // receive it from the private repository through Apps Script.
+        // A local data/database.json is only a developer fallback.
         if (window.databaseReady) {
             const pending = window.databaseReady;
             window.databaseReady = null;
             return pending;
         }
-        const response = await fetch(this.jsonUrl, { cache: 'no-cache' });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: 無法讀取 JSON 資料`);
+        let proxyError = null;
+        if (typeof fetchSharedQuestionBank === 'function') {
+            try {
+                return await fetchSharedQuestionBank();
+            } catch (error) {
+                proxyError = error;
+                console.warn('共用題庫讀取失敗，改試本機檔案');
+            }
         }
-        return response.json();
+        try {
+            const response = await fetch(this.jsonUrl, { cache: 'no-cache' });
+            if (response.ok) return response.json();
+        } catch (error) {
+            // No local file. The proxy error below is the one to show.
+        }
+        if (proxyError) throw proxyError;
+        throw new Error('無法讀取題庫');
     }
 
     async syncOnLoad() {

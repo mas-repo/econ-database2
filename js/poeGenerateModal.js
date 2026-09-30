@@ -302,11 +302,10 @@
     }
 
     async function poeCheckAccess() {
-        var username = currentUsername();
-        if (!username || !proxyUrl()) return false;
+        if (typeof refreshAccessRights !== 'function') return false;
         try {
-            var data = await proxyRequest({ action: 'checkAccess', username: username }, 20000, null);
-            return !!(data && data.ok === true && data.allowed === true);
+            var rights = await refreshAccessRights();
+            return !!(rights && rights.ai === true);
         } catch (error) {
             return false;
         }

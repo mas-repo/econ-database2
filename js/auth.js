@@ -20,18 +20,12 @@ class AuthManager {
             try {
                 const userData = JSON.parse(decodeURIComponent(rawData));
                 this.currentUser = userData.username;
-                this.displayName = userData.displayName;
-                this.userGroup = userData.userGroup;
-                // Re-apply the local ACL so an older cookie cannot keep Mock access
-                // after a username is added to LOCAL_USERS (e.g. Vicky / Sarah).
-                if (typeof this.resolveLocalUser === 'function') {
-                    const profile = this.resolveLocalUser(userData.username);
-                    this.displayName = profile.displayName || this.displayName;
-                    this.userGroup = profile.userGroup || this.userGroup;
-                    this._canViewMockTests = profile.canViewMockTests;
-                } else {
-                    this._canViewMockTests = userData.canViewMockTests !== false;
-                }
+                this.displayName = userData.displayName || userData.username;
+                this.userGroup = 'Local';
+                // Mock tests stay hidden until the proxy returns mockTests.
+                // An older cookie cannot grant that on its own.
+                this._canViewMockTests = false;
+                this._canEdit = false;
                if (userData.username) {
                     try {
                         localStorage.setItem('username', userData.username);
@@ -51,19 +45,19 @@ class AuthManager {
     
     // Save user credentials to persistence layer
     // Dependencies: None
-    saveUser(username, displayName, userGroup, options = {}) {
+    saveUser(username, displayName, userGroup) {
         const userData = {
             username,
             displayName,
             userGroup,
-            canViewMockTests: options.canViewMockTests !== false,
             loginTime: new Date().toISOString()
         };
         
         this.currentUser = username;
         this.displayName = displayName;
-        this.userGroup = userGroup;
-        this._canViewMockTests = options.canViewMockTests !== false;
+        this.userGroup = userGroup || 'Local';
+        this._canViewMockTests = false;
+        this._canEdit = false;
         
         this.persistAuthData(userData);
 
@@ -207,27 +201,20 @@ class AuthManager {
     // Check permissions
     // Dependencies: None
     canEdit() {
-        return this.userGroup === 'Admin';
+        return this._canEdit === true;
     }
 
-    // Mock papers (雅集 / MT…) are hidden from Colleagues such as Vicky and Sarah.
+    // Mock papers stay hidden unless the proxy set mockTests for this sign-in.
     canViewMockTests() {
-        if (typeof this._canViewMockTests === 'boolean') {
-            return this._canViewMockTests;
-        }
-        return this.userGroup !== 'Colleagues';
+        return this._canViewMockTests === true;
     }
 
     resolveLocalUser(username) {
         const key = String(username || '').trim().toLowerCase();
-        const profile = (typeof LOCAL_USERS !== 'undefined' && LOCAL_USERS[key])
-            ? LOCAL_USERS[key]
-            : (typeof DEFAULT_LOCAL_USER !== 'undefined' ? DEFAULT_LOCAL_USER : { userGroup: 'Local', canViewMockTests: true });
         return {
             username: key,
-            displayName: profile.displayName || username,
-            userGroup: profile.userGroup || 'Local',
-            canViewMockTests: profile.canViewMockTests !== false
+            displayName: username,
+            userGroup: 'Local'
         };
     }
 }
@@ -342,8 +329,7 @@ async function attemptLogin() {
         window.authManager.saveUser(
             profile.username,
             profile.displayName,
-            profile.userGroup,
-            { canViewMockTests: profile.canViewMockTests }
+            profile.userGroup
         );
         document.getElementById('login-modal').remove();
         showWelcomeMessage(profile.displayName);
