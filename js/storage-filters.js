@@ -27,7 +27,7 @@ IndexedDBStorage.prototype.applyPermissionFilter = function(questions) {
 };
 
 IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
-    // Hard permission gate: Colleagues such as Vicky/Sarah never see Mock Tests.
+    // Mock papers are omitted unless the proxy granted mockTests.
     questions = this.applyPermissionFilter(questions);
 
     // Apply search filter with Scope

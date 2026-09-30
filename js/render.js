@@ -34,7 +34,7 @@ function renderOriginalBadge(paths, label) {
 }
 
 function openOriginalImages(encoded) {
-    const list = decodeURIComponent(encoded).split(',').filter(Boolean);
+    const list = decodeURIComponent(encoded).split(',').map(item => item.trim()).filter(Boolean);
     let overlay = document.getElementById('original-image-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -45,11 +45,34 @@ function openOriginalImages(encoded) {
         });
         document.body.appendChild(overlay);
     }
-    overlay.innerHTML = `<div style="max-width:920px;margin:0 auto;background:#fff;border-radius:12px;padding:16px;">
+    const shell = (body) => `<div style="max-width:920px;margin:0 auto;background:#fff;border-radius:12px;padding:16px;">
         <div style="text-align:right;margin-bottom:8px;"><button type="button" id="original-image-close" class="btn btn-cancel">關閉</button></div>
-        ${list.map(src => `<img src="${escapeHTML(src)}" alt="" style="width:100%;margin-bottom:12px;border:1px solid #e5e7eb;">`).join('')}
+        ${body}
     </div>`;
-    document.getElementById('original-image-close').onclick = () => overlay.remove();
+    const bindClose = () => {
+        const close = document.getElementById('original-image-close');
+        if (close) close.onclick = () => overlay.remove();
+    };
+    overlay.innerHTML = shell('<p style="text-align:center;color:#7f8c8d;">載入圖片中...</p>');
+    bindClose();
+    Promise.all(list.map(async (src) => {
+        if (typeof sharedAssetPathOk === 'function' && sharedAssetPathOk(src) && typeof sharedAssetObjectUrl === 'function') {
+            try {
+                return await sharedAssetObjectUrl(src);
+            } catch (error) {
+                return '';
+            }
+        }
+        return '';
+    })).then((urls) => {
+        if (!overlay.isConnected) return;
+        const pictures = urls.filter(Boolean);
+        const body = pictures.length
+            ? pictures.map(url => `<img src="${escapeHTML(url)}" alt="" style="width:100%;margin-bottom:12px;border:1px solid #e5e7eb;">`).join('')
+            : '<p style="text-align:center;color:#7f8c8d;">圖片未能載入</p>';
+        overlay.innerHTML = shell(body);
+        bindClose();
+    });
 }
 
 function safeHttpUrl(url) {
@@ -139,7 +162,7 @@ async function renderQuestions() {
             const before = lines.slice(0, cut).join('\n');
             const after = lines.slice(cut).join('\n');
             return escapeHTML(before)
-                + images.map(src => `<img class="inline-diagram" src="${escapeHTML(src)}" alt="圖">`).join('')
+                + images.map(src => `<img class="inline-diagram" src="${SHARED_IMG_PLACEHOLDER}" data-shared-src="${escapeHTML(src)}" alt="圖">`).join('')
                 + escapeHTML(after);
         }
         let html = '';
@@ -150,7 +173,7 @@ async function renderQuestions() {
                 const src = images[used];
                 if (src) {
                     const alt = marks[i].slice(2, -1);
-                    html += `<img class="inline-diagram" src="${escapeHTML(src)}" alt="${escapeHTML(alt)}">`;
+                    html += `<img class="inline-diagram" src="${SHARED_IMG_PLACEHOLDER}" data-shared-src="${escapeHTML(src)}" alt="${escapeHTML(alt)}">`;
                     used += 1;
                 } else {
                     html += escapeHTML(marks[i]);
@@ -158,7 +181,7 @@ async function renderQuestions() {
             }
         });
         while (used < images.length) {
-            html += `<img class="inline-diagram" src="${escapeHTML(images[used])}" alt="圖">`;
+            html += `<img class="inline-diagram" src="${SHARED_IMG_PLACEHOLDER}" data-shared-src="${escapeHTML(images[used])}" alt="圖">`;
             used += 1;
         }
         return html;
@@ -409,6 +432,7 @@ async function renderQuestions() {
         </div>
     `;
     }).join('');
+    if (typeof hydrateSharedImages === 'function') hydrateSharedImages(grid);
 }
 
 // Copy every question that matches the current filters, in the current sort
