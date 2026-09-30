@@ -18,12 +18,13 @@ plain lists instead.
 
 ## 1. Quick Start
 
-1. Serve the project folder with any static web server (or open
-   index.html directly — but a server is recommended so fetch/CORS
-   behaves consistently).
-2. index.html starts reading data/database.json as soon as the page loads.
-   The app shows「載入中...」while it finishes that read and
-   writes the questions into IndexedDB.
+1. Serve the project folder with any static web server over http or https.
+   A file:// page cannot call the Apps Script proxy that holds the question bank.
+2. After sign-in, a known username loads the bank from the private data
+   repository (shared/data/database.json) through that proxy. The app shows
+   「載入中...」while that read finishes and the questions are written into
+   IndexedDB. The bank, diagrams, and paper packs are not files in this
+   public folder.
 3. When sync completes, a「✓ 資料載入完成」pill appears in the header
    corner and the question list renders.
 
@@ -52,7 +53,8 @@ JavaScript (js/):
   sort state, ...).
 - storage-core.js — IndexedDB wrapper (window.storage). Questions store
   only; DB version 4 (legacy metadata stores deleted on upgrade).
-- auth.js — Login + user groups (Admin / Colleagues / ...).
+- auth.js — Sign-in. Rights come from the Apps Script proxy (access-rights.js),
+  not from a username map in this repo.
 - utils.js — Clipboard, HTML escaping (escapeHTML — the single escaping
   authority; coerces non-strings), debounce (single source of truth),
   static filter population, panel toggling, scroll helpers.
@@ -120,10 +122,14 @@ Templates (js/templates/):
   dropdowns are never clipped by the wrapper.
 
 ### Permissions
-- Elements with class btn-admin-only are hidden for non-admin users, and
-  the 'Colleagues' group never sees chapter names (filter or stats).
-- Note: this is UI-level gating only. The JSON file is the source of
-  truth; IndexedDB edits last until the next JSON reload.
+- The proxy returns admin, ai, githubSync, and mockTests. The page shows
+  AI出題 only for ai, the GitHub panel only for githubSync, and 管理員模式
+  (btn-admin-only) only for admin. Without mockTests, mock-test questions
+  and the mock publisher filter stay hidden. Chapter names are shown for
+  every signed-in user.
+- Edit controls are also checked on the server for AI and GitHub. Mock
+  rows are removed from the shared bank when mockTests is false. IndexedDB
+  edits last until the next JSON reload.
 
 ### Data & Security
 - IndexedDB is treated as a disposable cache: it is wiped and rebuilt
@@ -242,8 +248,7 @@ Templates (js/templates/):
 - Removed the「添加備註」feature from statistics tabs (comments were
   never persisted — IndexedDB is rebuilt on every sync). tabs.js is now
   a thin delegation layer; saveMetadata() removed.
-- 「Chapters統計」cards now show full chapter names from
-  CHAPTER_DESCRIPTIONS (hidden for the Colleagues group).
+- 「Chapters統計」cards show full chapter names from CHAPTER_DESCRIPTIONS.
 - Fixed oversized「✓ 資料載入完成」status pill (now fit-content, pinned
   in header, hidden when empty) and the「🔄 重置篩選條件」button no
   longer stretches to full width.

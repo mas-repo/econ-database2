@@ -3,7 +3,7 @@
 ## Purpose / 用途
 
 First-bank JSON question database for HKDSE / related Economics past papers.
-Primary data file: data/database.json (served into IndexedDB by the SPA).
+The question bank is not in this folder. The hosted page loads `shared/data/database.json` from the private data repository through the Apps Script proxy (`fetchSharedAsset`). Diagrams and original crops use the same proxy. A file at `data/database.json` is only a local fallback and is gitignored.
 
 Future agents editing mock papers or bulk fields: read this file first.
 Records with reviewedByAI equal to Y must not be overwritten by builders that fill other fields. stemPatterns fills are additive (merge / union), not a wipe-and-replace of reviewed rows.
@@ -57,13 +57,19 @@ Derived from reviewing live values in the bank:
 
 ## AI generation / 依篩選出題
 
-The button **AI出題** is hidden until Apps Script says the signed-in username is allowed. The modal sends an editable 出題指示 with either the filtered questions or questions the user pasted. It has four 出題模式, a model dropdown (`Claude-Sonnet-5.5`, `GPT-6.1-Sol`, `Gemini-3.8-Flash`), and a **測試** button that only pings the selected model. Setup, the hash allowlist, and the API key are admin-only and are not stored in this repository. Follow `apps-script/README.md`. Put the deployed `/exec` URL in `js/config.js` as `POE_PROXY_WEB_APP_URL`. After a proxy change is merged, paste `apps-script/Code.gs` into the live Apps Script project and deploy a new version of the existing `/exec` URL.
+The button **AI出題** is hidden until Apps Script returns `ai: true` for the signed-in username. The modal sends an editable 出題指示 with either the filtered questions or questions the user pasted. It has four 出題模式, a model dropdown (`Claude-Sonnet-5.5`, `GPT-6.1-Sol`, `Gemini-3.8-Flash`), and a **測試** button that only pings the selected model. Setup, the three role hash lists, and the API key are admin-only and are not stored in this repository. Follow `apps-script/README.md`. Put the deployed `/exec` URL in `js/config.js` as `POE_PROXY_WEB_APP_URL`. After a proxy change is merged, paste `apps-script/Code.gs` into the live Apps Script project and deploy a new version of the existing `/exec` URL.
+
+## GitHub sync buttons (admin only)
+
+**自動同步**, **上傳到 GitHub**, and **從 GitHub 載入** appear only when Apps Script returns githubSync: true. That flag is the admin role (ALLOWED_ADMIN_HASHES). In production the admin role only (`ALLOWED_ADMIN_HASHES`). AI editors and restricted users must never see these controls. AI出題 uses the separate i flag. Do not show GitHub UI based on a combined legacy llowed flag.
 
 ## Git sync / Git 同步
 
-Allowed users (the same hash allowlist as AI出題) see **自動同步**, **上傳到 GitHub**, and **從 GitHub 載入**. The checkbox is stored only in that browser. The page POSTs the question JSON to the same Apps Script `/exec` URL. It does not call GitHub and it must not contain a token, owner, or repository name.
+**自動同步**, **上傳到 GitHub**, and **從 GitHub 載入** appear only when `githubSync` is true. That flag is the admin role. An AI editor can use AI出題 and mock tests and does not see this panel. The checkbox is stored only in that browser. The page POSTs the question JSON to the same Apps Script `/exec` URL. It does not call GitHub and it must not contain a token, owner, or repository name.
 
-Set `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `GITHUB_DATA_PATH`, and `GITHUB_AI_BACKUP_DIR` in Apps Script Script properties, then redeploy. The token is a fine-grained PAT with Contents read and write on the private data repository only. Never commit those values. Each allowed user's question file is `users/<username>/` plus `GITHUB_DATA_PATH`, and model replies are `users/<username>/` plus `GITHUB_AI_BACKUP_DIR`. `<username>` is the trimmed, lowercased signed-in name. The page does not choose that path. Details: `apps-script/README.md`.
+Set `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `GITHUB_DATA_PATH`, and `GITHUB_AI_BACKUP_DIR` in Apps Script Script properties, then redeploy. The token is a fine-grained PAT with Contents read and write on the private data repository only. Never commit those values. Each admin user's question file is `users/<username>/` plus `GITHUB_DATA_PATH`, and model replies are `users/<username>/` plus `GITHUB_AI_BACKUP_DIR`. `<username>` is the trimmed, lowercased signed-in name. The page does not choose that path.
+
+`GITHUB_SHARED_PREFIX` is optional and defaults to `shared`. A known username (admin, AI editor, or restricted) can read `shared/data/database.json`, `shared/diagrams/`, `shared/originals/`, and `shared/papers/` through `fetchSharedAsset` and `listSharedData`. Those actions never return the token, owner, or repository name. An unknown username does not receive the bank. Without `mockTests`, the proxy strips mock-test rows from `database.json` and refuses mock-only paths (`diagrams/`, `papers/mock-tests/`, numbered `originals/` folders, `build/`, and `database.js`). Past papers under `originals/dse/` and `papers/past-papers/` stay available. Details: `apps-script/README.md`.
 
 ## Import scripts / 匯入腳本
 
