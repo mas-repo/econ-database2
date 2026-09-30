@@ -5,20 +5,31 @@
 #   Required. Create a key at https://poe.com/api/keys
 #   Example value shape: paste the key, do not invent one in git.
 #
-# ALLOWED_USER_HASHES
-#   Required in production. SHA-256 hex of each trimmed, lowercased username.
+# ALLOWED_ADMIN_HASHES
+#   Full rights. SHA-256 hex of each trimmed, lowercased username.
 #   Comma, newline, or space separated. Do not commit real hashes.
 #   In the bound spreadsheet: 出題代理 → 計算使用者名稱雜湊.
 #   Paste each username only in that dialog, then copy the hex here.
-#   Fake shape only (do not paste this into Script properties):
-#   0000000000000000000000000000000000000000000000000000000000000000
-#   Or locally, and do not commit the output:
-#   printf '%s' 'user_a' | shasum -a 256
+#   Grants AI出題, GitHub sync, 管理員模式, and mock tests.
 #
-# ALLOWED_USERS
-#   Legacy / development only. Leave unset on the production project.
-#   Comma-separated plaintext usernames. The site lowercases them first.
-#   Example placeholders: user_a,user_b,user_c
+# ALLOWED_AI_HASHES
+#   AI出題 and mock tests. No GitHub buttons, no Auto-sync, no 管理員模式.
+#   Same hash steps as ALLOWED_ADMIN_HASHES. Put each hex in only one list.
+#
+# ALLOWED_RESTRICTED_HASHES
+#   Browse without AI出題, without GitHub sync, and without mock tests.
+#   Everyone on this list has the same rights. The shared bank still loads,
+#   with mock-test rows removed.
+#
+# If one hash is in more than one list, the highest role wins:
+# admin, then AI editor, then restricted.
+# A value that is not 64 hex characters does not match.
+# Delete ALLOWED_USER_HASHES and ALLOWED_USERS if they are still set.
+# The script does not read them.
+# Fake shape only (do not paste this into Script properties):
+# 0000000000000000000000000000000000000000000000000000000000000000
+# Or locally, and do not commit the output:
+# printf '%s' 'user_a' | shasum -a 256
 #
 # POE_MODEL
 #   Optional fallback when the client omits `model`.
@@ -88,3 +99,17 @@
 #
 # <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
 # Do not put a real username in this file.
+#
+# GITHUB_SHARED_PREFIX
+#   Optional. Folder for diagrams, the question bank, and paper packs.
+#   The script uses shared when this is empty.
+#   Do not set this to users or to a path under users.
+#   Shape example only: shared
+#   The site then reads paths such as:
+#   shared/data/database.json
+#   shared/diagrams/...
+#   shared/originals/...
+#   shared/papers/mock-tests/...
+#   shared/papers/past-papers/...
+#   shared/build/...
+#   Per-user files stay under users/<username>/ and are not shared.
