@@ -32,6 +32,10 @@ async function init() {
     
     console.log('✅ 使用者已驗證:', window.authManager.displayName);
 
+    if (typeof refreshAccessRights === 'function') {
+        await refreshAccessRights();
+    }
+
     if (typeof logQuestionToolLogin === 'function') {
         logQuestionToolLogin();
     }
@@ -69,8 +73,12 @@ async function init() {
             }
         } catch (error) {
             console.error('Failed to load JSON:', error);
-            console.warn('⚠️ JSON 載入失敗:', error.message);
-            updateStorageStatus('disconnected', '✗ JSON 載入失敗');
+            const detail = error && error.message ? String(error.message) : '';
+            const safe = detail && detail.length <= 80 && detail.indexOf('token') === -1 && detail.indexOf('github.com') === -1
+                ? detail
+                : 'JSON 載入失敗';
+            console.warn('⚠️ JSON 載入失敗:', safe);
+            updateStorageStatus('disconnected', '✗ ' + safe);
         }
     }
     
@@ -128,7 +136,10 @@ async function initializeApp() {
     // Populate the dynamic filters
     if (typeof populateDynamicFilters === 'function') {
         await populateDynamicFilters();
-    }    
+    }
+    if (typeof applyAccessRights === 'function') {
+        applyAccessRights(window.accessRights);
+    }
     await renderQuestions();
     await refreshStatistics();
 
@@ -169,7 +180,7 @@ function showLoadingState(show) {
     }
 }
 
-// Reload questions from the bundled JSON file.
+// Reload questions from the shared bank (or a local JSON fallback).
 async function manualSync() {
     if (!window.questionJsonSource) {
         alert('JSON 資料來源未設定，請檢查 config.js');

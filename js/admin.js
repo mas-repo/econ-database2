@@ -21,14 +21,17 @@ async function hashPassword(password) {
  * Dependencies: render.js (renderQuestions)
  */
 async function toggleAdminMode() {
+    if (!window.accessRights || window.accessRights.admin !== true) {
+        isAdminMode = false;
+        updateAdminUI();
+        return;
+    }
     if (isAdminMode) {
-        // If already in admin mode, turn it off
         isAdminMode = false;
         updateAdminUI();
         renderQuestions();
         showNotification('已退出管理員模式', 'info');
     } else {
-        // Local dataset: there is no Apps Script password check.
         if (!confirm('進入管理員模式後可編輯本機題庫。重新載入 JSON 會覆蓋未匯出的修改。繼續？')) {
             return;
         }
@@ -54,6 +57,10 @@ function updateAdminUI() {
     }
     
     // Update admin mode toggle button
+    if (logoutButton) {
+        logoutButton.style.display = 'inline-flex';
+    }
+
     if (isAdminMode) {
         statusElement.textContent = '✓ 已啟用';
         statusElement.style.color = '#27ae60';
@@ -63,11 +70,6 @@ function updateAdminUI() {
         toggleButton.style.color = 'white';
         toggleButton.style.borderColor = '#27ae60';
         toggleButton.innerHTML = '🔓 管理員模式';
-        
-        // Show logout button when admin mode is active
-        if (logoutButton) {
-            logoutButton.style.display = 'inline-flex';
-        }
     } else {
         statusElement.textContent = '';
         toggleButton.style.opacity = '0.3';
@@ -75,11 +77,6 @@ function updateAdminUI() {
         toggleButton.style.color = '';
         toggleButton.style.borderColor = '';
         toggleButton.innerHTML = '🔒 管理員模式';
-        
-        // Hide logout button when admin mode is not active
-        if (logoutButton) {
-            logoutButton.style.display = 'none';
-        }
     }
     
     // Update admin-only buttons (Import/Export JSON, Add Question, Clear Database)

@@ -98,9 +98,8 @@ async function renderTopicStats() {
 }
 
 // Dependencies: storage-core.js (window.storage), constants.js (CHAPTER_DESCRIPTIONS)
-// UPDATED: Each chapter card now also shows the full chapter name from
-// CHAPTER_DESCRIPTIONS (e.g. "Ch01 基本經濟概念"). Names are hidden for
-// the 'Colleagues' user group, consistent with the chapter filter rule.
+// Each chapter card shows the full chapter name from CHAPTER_DESCRIPTIONS
+// (e.g. "Ch01 基本經濟概念") when that map is loaded.
 async function renderChapterStats() {
     const questions = await window.storage.getQuestions();
     const stats = {};
@@ -126,9 +125,7 @@ async function renderChapterStats() {
         return;
     }
     
-    // Colleagues must not see chapter names
-    const showNames = !(window.authManager && window.authManager.userGroup === 'Colleagues') &&
-                      typeof CHAPTER_DESCRIPTIONS !== 'undefined';
+    const showNames = typeof CHAPTER_DESCRIPTIONS !== 'undefined';
     
     grid.innerHTML = Object.entries(stats)
         .sort((a, b) => {
