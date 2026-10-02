@@ -681,6 +681,205 @@
         await transactionDone(tx);
     }
 
+    function remoteBackupCreatedAt(backup, name) {
+        var parsed = Date.parse(String(backup && backup.createdAt || ''));
+        if (isFinite(parsed) && parsed > 0) return parsed;
+        var m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(String(name || ''));
+        if (!m) return 0;
+        // Backup filenames use the Apps Script timezone (Asia/Hong_Kong).
+        parsed = Date.parse(m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] + '+08:00');
+        return isFinite(parsed) ? parsed : 0;
+    }
+
+    function mapRemoteBackup(backup, username) {
+        if (!backup || typeof backup !== 'object') return null;
+        var action = String(backup.action || '');
+        if (action && action !== 'generateQuestions') return null;
+        var name = String(backup.name || '').replace(/^.*\//, '');
+        var content = String(backup.content == null ? '' : backup.content);
+        var source = backup.referenceSource || backup.source || 'filter';
+        source = source === 'paste' ? 'paste' : 'filter';
+        var createdAt = remoteBackupCreatedAt(backup, name);
+        var id = name
+            ? ('remote:' + name)
+            : ('remote:' + username + ':' + String(createdAt || Date.now()));
+        return {
+            id: id,
+            username: username,
+            createdAt: createdAt || Date.now(),
+            content: content,
+            model: String(backup.model || ''),
+            modeId: String(backup.modeId || ''),
+            modeName: String(backup.modeName || ''),
+            instruction: String(backup.instruction || ''),
+            sentCount: Number(backup.sentCount) || 0,
+            filteredCount: Number(backup.filteredCount) || Number(backup.sentCount) || 0,
+            truncated: false,
+            referenceSource: source,
+            referenceIds: [],
+            pastedReferences: [],
+            filterSummary: '',
+            durationMs: Number(backup.durationMs) || 0,
+            remoteName: name,
+            lean: !content
+        };
+    }
+
+    function contentDedupeKey(record) {
+        return String(record && record.content || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function mergeGenerationRecords(localRecords, remoteRecords) {
+        var merged = [];
+        var byId = {};
+        var byContent = {};
+
+        function prefer(existing, next) {
+            if (!existing) return next;
+            // Keep local rows that still have reference ids / pasted stems.
+            var existingLocal = String(existing.id || '').indexOf('remote:') !== 0;
+            var nextLocal = String(next.id || '').indexOf('remote:') !== 0;
+            if (existingLocal && !nextLocal) {
+                if (!existing.content && next.content) existing.content = next.content;
+                if (!existing.modeId && next.modeId) existing.modeId = next.modeId;
+                if (!existing.modeName && next.modeName) existing.modeName = next.modeName;
+                if (!existing.instruction && next.instruction) existing.instruction = next.instruction;
+                if (!existing.model && next.model) existing.model = next.model;
+                if (!existing.remoteName && next.remoteName) existing.remoteName = next.remoteName;
+                if (existing.lean && next.content) existing.lean = false;
+                return existing;
+            }
+            if (!existing.content && next.content) return next;
+            if ((next.modeName || next.instruction) && !(existing.modeName || existing.instruction)) return next;
+            if ((next.createdAt || 0) > (existing.createdAt || 0)) {
+                if (!next.referenceIds || !next.referenceIds.length) {
+                    next.referenceIds = existing.referenceIds || [];
+                    next.pastedReferences = existing.pastedReferences || [];
+                    next.filterSummary = next.filterSummary || existing.filterSummary || '';
+                }
+                return next;
+            }
+            return existing;
+        }
+
+        function add(record) {
+            if (!record || !record.id) return;
+            var existing = byId[record.id];
+            var key = contentDedupeKey(record);
+            if (!existing && key && byContent[key]) existing = byContent[key];
+            var chosen = prefer(existing, record);
+            if (existing && existing !== chosen) {
+                merged = merged.filter(function (item) { return item !== existing; });
+                delete byId[existing.id];
+                var oldKey = contentDedupeKey(existing);
+                if (oldKey && byContent[oldKey] === existing) delete byContent[oldKey];
+            }
+            if (!byId[chosen.id]) merged.push(chosen);
+            byId[chosen.id] = chosen;
+            var chosenKey = contentDedupeKey(chosen);
+            if (chosenKey) byContent[chosenKey] = chosen;
+        }
+
+        (localRecords || []).forEach(add);
+        (remoteRecords || []).forEach(add);
+        merged.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+        return merged.slice(0, HISTORY_LIMIT);
+    }
+
+    async function fetchRemoteBackups(username) {
+        if (!username || !proxyUrl()) return [];
+        var data = await proxyRequest({
+            action: 'listAiBackups',
+            username: username
+        }, 90000, null);
+        if (!data || data.ok !== true || !Array.isArray(data.backups)) return [];
+        return data.backups
+            .map(function (item) { return mapRemoteBackup(item, username); })
+            .filter(Boolean);
+    }
+
+    async function fillLeanRemoteRecord(record) {
+        if (!record || !record.lean || record.content || !record.remoteName) return record;
+        var username = currentUsername();
+        if (!username) return record;
+        try {
+            var data = await proxyRequest({
+                action: 'getAiBackup',
+                username: username,
+                name: record.remoteName
+            }, 90000, null);
+            if (!data || data.ok !== true || !data.backup) return record;
+            var filled = mapRemoteBackup(data.backup, username);
+            if (!filled || !filled.content) return record;
+            record.content = filled.content;
+            if (!record.model && filled.model) record.model = filled.model;
+            if (!record.modeId && filled.modeId) record.modeId = filled.modeId;
+            if (!record.modeName && filled.modeName) record.modeName = filled.modeName;
+            if (!record.instruction && filled.instruction) record.instruction = filled.instruction;
+            if (!record.referenceSource && filled.referenceSource) record.referenceSource = filled.referenceSource;
+            if (!record.sentCount && filled.sentCount) record.sentCount = filled.sentCount;
+            if (!record.filteredCount && filled.filteredCount) record.filteredCount = filled.filteredCount;
+            if (!record.durationMs && filled.durationMs) record.durationMs = filled.durationMs;
+            record.lean = false;
+            try { await saveGeneration(record); } catch (error) {}
+        } catch (error) {
+            // Keep the lean row selectable after a later retry.
+        }
+        return record;
+    }
+
+    async function syncRemoteHistory(username) {
+        if (!username) return null;
+        var local = [];
+        try {
+            local = await listGenerations(username);
+        } catch (error) {
+            local = [];
+        }
+        var remote = [];
+        try {
+            remote = await fetchRemoteBackups(username);
+        } catch (error) {
+            return null;
+        }
+        if (!remote.length) return local;
+        var merged = mergeGenerationRecords(local, remote);
+        for (var i = 0; i < merged.length; i++) {
+            var row = merged[i];
+            if (!row || !row.content) continue;
+            var known = local.some(function (item) {
+                return item && (item.id === row.id || (contentDedupeKey(item) && contentDedupeKey(item) === contentDedupeKey(row)));
+            });
+            if (known && String(row.id || '').indexOf('remote:') !== 0) continue;
+            try {
+                await saveGeneration(row);
+            } catch (error) {
+                // Quota or private-mode storage failures must not block the UI.
+            }
+        }
+        try {
+            return await listGenerations(username);
+        } catch (error) {
+            return merged;
+        }
+    }
+
+    function syncRemoteHistoryIntoUi(username) {
+        if (!username) return;
+        syncRemoteHistory(username).then(function (records) {
+            if (!records) return;
+            if (!isPoeGenerateModalOpen()) return;
+            if (currentUsername() !== username) return;
+            poeUi.records = records;
+            if (poeUi.activeRecord) {
+                var activeId = poeUi.activeRecord.id;
+                var refreshed = records.filter(function (item) { return item.id === activeId; })[0];
+                if (refreshed) poeUi.activeRecord = refreshed;
+            }
+            renderHistory();
+        }).catch(function () {});
+    }
+
     function ensureModal() {
         if (poeUi.overlay) return;
         var overlay = document.createElement('div');
@@ -699,7 +898,7 @@
             + '  <div class="poe-body">'
             + '    <aside class="poe-history" aria-label="過往生成">'
             + '      <div class="poe-history-head">'
-            + '        <h3>此瀏覽器的紀錄</h3>'
+            + '        <h3>過往紀錄</h3>'
             + '        <button type="button" class="poe-text-btn" id="poe-history-clear">清除</button>'
             + '      </div>'
             + '      <div id="poe-history-list"></div>'
@@ -840,12 +1039,15 @@
         syncActionButtons();
         var closeButton = poeUi.overlay.querySelector('.poe-close');
         if (closeButton) closeButton.focus();
+        var historyUser = currentUsername();
         try {
-            poeUi.records = await listGenerations(currentUsername());
+            poeUi.records = await listGenerations(historyUser);
         } catch (error) {
             poeUi.records = [];
         }
         renderHistory();
+        // Cross-device history: merge GitHub AI backups without blocking the modal.
+        syncRemoteHistoryIntoUi(historyUser);
         var usable = [];
         try {
             usable = await loadFilteredQuestions();
@@ -1142,9 +1344,17 @@
         });
     }
 
-    function selectRecord(record) {
-        if (poeUi.busy) return;
+    async function selectRecord(record) {
+        if (poeUi.busy || !record) return;
         poeUi.activeRecord = record;
+        renderHistory();
+        syncActionButtons();
+        if (record.lean && !record.content && record.remoteName) {
+            setStatus('正在載入這筆過往紀錄…');
+            await fillLeanRemoteRecord(record);
+            if (!isPoeGenerateModalOpen()) return;
+            if (poeUi.activeRecord !== record) return;
+        }
         showResult(record);
         var bits = [formatTime(record.createdAt), record.filterSummary || ''];
         if (record.modeName) bits.push(record.modeName);
