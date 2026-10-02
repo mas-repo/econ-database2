@@ -150,22 +150,59 @@
         return text;
     }
 
+    function sanitizePoeModelId(value) {
+        var text = String(value == null ? '' : value).trim();
+        if (!text || text.length > 120) return '';
+        if (!/^[A-Za-z0-9][A-Za-z0-9._\-]*$/.test(text)) return '';
+        if (text.indexOf('..') !== -1) return '';
+        return text;
+    }
+
+    function sanitizeModelId(provider, value) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER
+            ? sanitizeOpenRouterModelId(value)
+            : sanitizePoeModelId(value);
+    }
+
+    function settingsModelSelect(provider) {
+        provider = normalizeProvider(provider);
+        return document.getElementById(provider === PROVIDER_OPENROUTER
+            ? 'poe-settings-model-openrouter'
+            : 'poe-settings-model-poe');
+    }
+
+    function settingsModelCustom(provider) {
+        provider = normalizeProvider(provider);
+        return document.getElementById(provider === PROVIDER_OPENROUTER
+            ? 'poe-settings-model-custom-openrouter'
+            : 'poe-settings-model-custom-poe');
+    }
+
+    function settingsModelsPanel(provider) {
+        provider = normalizeProvider(provider);
+        return document.getElementById(provider === PROVIDER_OPENROUTER
+            ? 'poe-settings-models-openrouter'
+            : 'poe-settings-models-poe');
+    }
+
+    function syncProviderModelPanels(provider) {
+        provider = normalizeProvider(provider);
+        var poePanel = settingsModelsPanel(PROVIDER_POE);
+        var orPanel = settingsModelsPanel(PROVIDER_OPENROUTER);
+        if (poePanel) poePanel.hidden = provider !== PROVIDER_POE;
+        if (orPanel) orPanel.hidden = provider !== PROVIDER_OPENROUTER;
+    }
+
     function currentModel() {
         var provider = currentProvider();
-        if (provider === PROVIDER_OPENROUTER) {
-            var custom = document.getElementById('poe-settings-model-custom');
-            var customValue = custom ? sanitizeOpenRouterModelId(custom.value) : '';
-            if (customValue) return customValue;
-        }
-        var select = document.getElementById('poe-settings-model');
+        var custom = settingsModelCustom(provider);
+        var customValue = custom ? sanitizeModelId(provider, custom.value) : '';
+        if (customValue) return customValue;
+        var select = settingsModelSelect(provider);
         if (select) {
             var value = String(select.value || '').trim();
-            if (provider === PROVIDER_OPENROUTER) {
-                var sanitized = sanitizeOpenRouterModelId(value);
-                if (sanitized) return sanitized;
-            } else if (POE_MODELS.indexOf(value) !== -1) {
-                return value;
-            }
+            var sanitized = sanitizeModelId(provider, value);
+            if (sanitized) return sanitized;
         }
         return readStoredModel(provider);
     }
@@ -263,18 +300,16 @@
         provider = normalizeProvider(provider == null ? readStoredProvider() : provider);
         try {
             var id = localStorage.getItem(modelStorageKey(provider));
-            if (provider === PROVIDER_OPENROUTER) {
-                var sanitized = sanitizeOpenRouterModelId(id);
-                if (sanitized) return sanitized;
-            } else if (POE_MODELS.indexOf(id) !== -1) {
-                return id;
-            } else if (provider === PROVIDER_POE) {
+            var sanitized = sanitizeModelId(provider, id);
+            if (sanitized) return sanitized;
+            if (provider === PROVIDER_POE) {
                 // Migrate legacy single-model key once.
                 var legacy = localStorage.getItem(MODEL_KEY_LEGACY);
-                if (POE_MODELS.indexOf(legacy) !== -1) {
-                    writeStoredModel(legacy, PROVIDER_POE);
+                var legacyOk = sanitizePoeModelId(legacy);
+                if (legacyOk) {
+                    writeStoredModel(legacyOk, PROVIDER_POE);
                     try { localStorage.removeItem(MODEL_KEY_LEGACY); } catch (error) {}
-                    return legacy;
+                    return legacyOk;
                 }
             }
         } catch (error) {}
@@ -285,16 +320,9 @@
         provider = normalizeProvider(provider == null ? currentProvider() : provider);
         try {
             var key = modelStorageKey(provider);
-            if (provider === PROVIDER_OPENROUTER) {
-                id = sanitizeOpenRouterModelId(id);
-                if (!id || id === OPENROUTER_DEFAULT_MODEL) {
-                    localStorage.removeItem(key);
-                    return;
-                }
-                localStorage.setItem(key, id);
-                return;
-            }
-            if (POE_MODELS.indexOf(id) === -1 || id === POE_DEFAULT_MODEL) {
+            id = sanitizeModelId(provider, id);
+            var fallback = defaultModelForProvider(provider);
+            if (!id || id === fallback) {
                 localStorage.removeItem(key);
                 return;
             }
@@ -435,9 +463,10 @@
     }
 
     function fillSettingsModelOptions(provider) {
-        var modelSelect = document.getElementById('poe-settings-model');
-        if (!modelSelect) return;
         provider = normalizeProvider(provider);
+        syncProviderModelPanels(provider);
+        var modelSelect = settingsModelSelect(provider);
+        if (!modelSelect) return;
         var list = modelsForProvider(provider);
         var selected = readStoredModel(provider);
         modelSelect.textContent = '';
@@ -449,20 +478,16 @@
             modelSelect.appendChild(option);
             if (model === selected) seen = true;
         });
-        if (provider === PROVIDER_OPENROUTER && selected && !seen) {
+        if (selected && !seen) {
             var customOption = document.createElement('option');
             customOption.value = selected;
             customOption.textContent = selected + '（自訂）';
             modelSelect.appendChild(customOption);
         }
         modelSelect.value = selected;
-        var custom = document.getElementById('poe-settings-model-custom');
-        var customWrap = document.getElementById('poe-settings-model-custom-wrap');
-        if (customWrap) customWrap.hidden = provider !== PROVIDER_OPENROUTER;
+        var custom = settingsModelCustom(provider);
         if (custom && document.activeElement !== custom) {
-            custom.value = (provider === PROVIDER_OPENROUTER && selected && list.indexOf(selected) === -1)
-                ? selected
-                : '';
+            custom.value = (selected && list.indexOf(selected) === -1) ? selected : '';
         }
     }
 
@@ -490,9 +515,9 @@
     function onSettingsModelChange() {
         if (poeUi.busy) return;
         var provider = currentProvider();
-        var select = document.getElementById('poe-settings-model');
-        var custom = document.getElementById('poe-settings-model-custom');
-        if (provider === PROVIDER_OPENROUTER && custom) custom.value = '';
+        var select = settingsModelSelect(provider);
+        var custom = settingsModelCustom(provider);
+        if (custom) custom.value = '';
         var model = select ? String(select.value || '').trim() : '';
         writeStoredModel(model, provider);
         refreshProviderSummary();
@@ -501,9 +526,8 @@
     function onSettingsCustomModelInput() {
         if (poeUi.busy) return;
         var provider = currentProvider();
-        if (provider !== PROVIDER_OPENROUTER) return;
-        var custom = document.getElementById('poe-settings-model-custom');
-        var value = custom ? sanitizeOpenRouterModelId(custom.value) : '';
+        var custom = settingsModelCustom(provider);
+        var value = custom ? sanitizeModelId(provider, custom.value) : '';
         if (!value) return;
         writeStoredModel(value, provider);
         fillSettingsModelOptions(provider);
@@ -1266,7 +1290,9 @@
     function syncSettingsBusyState() {
         if (!poeUi.settingsOverlay) return;
         var busy = !!poeUi.busy;
-        ['poe-settings-api-key', 'poe-settings-model', 'poe-settings-model-custom',
+        ['poe-settings-api-key',
+         'poe-settings-model-poe', 'poe-settings-model-custom-poe',
+         'poe-settings-model-openrouter', 'poe-settings-model-custom-openrouter',
          'poe-settings-save', 'poe-settings-api-save', 'poe-settings-api-clear',
          'poe-settings-close', 'poe-settings-done'].forEach(function (id) {
             var node = document.getElementById(id);
@@ -1309,12 +1335,23 @@
             + '      <p class="poe-api-key-hint" id="poe-settings-api-key-hint"></p>'
             + '    </div>'
             + '    <div class="poe-settings-model-row">'
-            + '      <label class="poe-field" for="poe-settings-model">模型'
-            + '        <select id="poe-settings-model" aria-label="模型"></select>'
-            + '      </label>'
-            + '      <div class="poe-field" id="poe-settings-model-custom-wrap" hidden>'
-            + '        <label for="poe-settings-model-custom">OpenRouter 自訂模型 id（選填）</label>'
-            + '        <input type="text" id="poe-settings-model-custom" autocomplete="off" spellcheck="false" maxlength="120" placeholder="例如 anthropic/claude-3.5-sonnet" aria-label="OpenRouter 自訂模型 id">'
+            + '      <div class="poe-settings-models-panel" id="poe-settings-models-poe">'
+            + '        <label class="poe-field" for="poe-settings-model-poe">Poe 模型'
+            + '          <select id="poe-settings-model-poe" aria-label="Poe 模型"></select>'
+            + '        </label>'
+            + '        <div class="poe-field">'
+            + '          <label for="poe-settings-model-custom-poe">Poe 自訂模型 id（選填）</label>'
+            + '          <input type="text" id="poe-settings-model-custom-poe" autocomplete="off" spellcheck="false" maxlength="120" placeholder="例如 Claude-Opus-4.6" aria-label="Poe 自訂模型 id">'
+            + '        </div>'
+            + '      </div>'
+            + '      <div class="poe-settings-models-panel" id="poe-settings-models-openrouter" hidden>'
+            + '        <label class="poe-field" for="poe-settings-model-openrouter">OpenRouter 模型'
+            + '          <select id="poe-settings-model-openrouter" aria-label="OpenRouter 模型"></select>'
+            + '        </label>'
+            + '        <div class="poe-field">'
+            + '          <label for="poe-settings-model-custom-openrouter">OpenRouter 自訂模型 id（選填）</label>'
+            + '          <input type="text" id="poe-settings-model-custom-openrouter" autocomplete="off" spellcheck="false" maxlength="120" placeholder="例如 anthropic/claude-3.5-sonnet" aria-label="OpenRouter 自訂模型 id">'
+            + '        </div>'
             + '      </div>'
             + '    </div>'
             + '    <p class="poe-settings-status" id="poe-settings-status" aria-live="polite"></p>'
@@ -1340,8 +1377,12 @@
         overlay.querySelectorAll('input[name="poe-settings-provider"]').forEach(function (input) {
             input.addEventListener('change', onSettingsProviderChange);
         });
-        overlay.querySelector('#poe-settings-model').addEventListener('change', onSettingsModelChange);
-        overlay.querySelector('#poe-settings-model-custom').addEventListener('change', onSettingsCustomModelInput);
+        ['poe-settings-model-poe', 'poe-settings-model-openrouter'].forEach(function (id) {
+            overlay.querySelector('#' + id).addEventListener('change', onSettingsModelChange);
+        });
+        ['poe-settings-model-custom-poe', 'poe-settings-model-custom-openrouter'].forEach(function (id) {
+            overlay.querySelector('#' + id).addEventListener('change', onSettingsCustomModelInput);
+        });
         overlay.querySelector('#poe-settings-api-key').addEventListener('keydown', function (event) {
             if (event.key === 'Enter') {
                 event.preventDefault();
