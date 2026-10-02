@@ -852,7 +852,7 @@ body.poe-result-enlarged {
 }
 
 .poe-settings-overlay {
-    z-index: 10060;
+    z-index: 14000;
 }
 
 .poe-settings-dialog {

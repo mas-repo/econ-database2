@@ -1,4 +1,4 @@
-/* Main CSS Entry Point */
+﻿/* Main CSS Entry Point */
 @import url('reset.css?v=2026.09.30.6');
 @import url('variables.css?v=2026.09.30.6');
 @import url('layout.css?v=2026.09.30.6');
@@ -10,4 +10,4 @@
 @import url('responsive.css?v=2026.09.30.6');
 @import url('sort.css?v=2026.09.30.6');
 @import url('expand.css?v=2026.09.30.6');
-@import url('poe-modal.css?v=2026.10.02.2');
+@import url('poe-modal.css?v=2026.10.02.3');
