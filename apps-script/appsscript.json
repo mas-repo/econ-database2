@@ -10,6 +10,7 @@
   ],
   "urlFetchWhitelist": [
     "https://api.poe.com/",
+    "https://openrouter.ai/",
     "https://api.github.com/"
   ],
   "webapp": {

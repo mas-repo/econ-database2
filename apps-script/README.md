@@ -1,6 +1,6 @@
 # AI question proxy (admin setup)
 
-The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), and one allowlisted model id to this Apps Script web app. The script calls the upstream question API and appends a row to the spreadsheet. The browser never receives the server API key. Users may send their own `poeApiKey` from localStorage. Script property `POE_API_KEY` is a shared fallback **only for the admin role** (`ALLOWED_ADMIN_HASHES` / `admin` + `githubSync`; production: a single operator). Other AI users must supply their own browser key or calls return `missing_api_key`. The public repository does not contain the allowlist or any key.
+The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), `provider` (`poe` | `openrouter`), and a model id to this Apps Script web app. The script calls Poe (`https://api.poe.com/v1/chat/completions`) or OpenRouter (`https://openrouter.ai/api/v1/chat/completions`) and appends a row to the spreadsheet. The browser never receives the server API key. Users may send their own `poeApiKey` or `openRouterApiKey` from localStorage (settings modal). Script property `POE_API_KEY` is a shared Poe fallback **only for the admin role**; optional `OPENROUTER_API_KEY` is the same for OpenRouter. Other AI users must supply their own browser key or calls return `missing_api_key`. The public repository does not contain the allowlist or any key.
 
 **After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores `testModel`, the model allowlist, and the backup tab.
 
@@ -12,13 +12,13 @@ GitHub Pages is a static host. A private repository’s raw file URL answers 404
 
 ## Security model
 
-- `POE_API_KEY`, the allowlist, and every `GITHUB_*` value live only in **Apps Script → Project Settings → Script properties**.
+- `POE_API_KEY`, optional `OPENROUTER_API_KEY`, the allowlist, and every `GITHUB_*` value live only in **Apps Script → Project Settings → Script properties**.
 - The page calls `POST` on the web app URL. It does not call the upstream API host or `api.github.com`.
 - Never commit the token, the GitHub owner, or the private repository name into this public site. Not in JavaScript, HTML, README examples, or `js/config.js`. The `/exec` URL is the only client setting, and it is not a secret.
 - `checkAccess` (alias `checkRights`) returns `{ "ok": true, "admin": false, "ai": false, "githubSync": false, "mockTests": false, "allowed": false }`. It does not return a username, a hash, or a role name. `allowed` mirrors `githubSync` only (admin). An older page that still checks `data.allowed` therefore shows the GitHub panel only for admin; AI出題 must use the `ai` flag on the current page. The current page uses `ai`, `githubSync`, `admin`, and `mockTests` and ignores `allowed`.
 - `generateQuestions` and `testModel` require `ai`. GitHub upload and download require `githubSync`. Shared reads require a known username. A refused call does not reveal who is listed.
-- The modal sends `model`. The script accepts only `Claude-Sonnet-5.5`, `GPT-6.1-Sol`, and `Gemini-3.8-Flash`. Any other string is ignored and the call uses `Claude-Sonnet-5.5`. If the client omits `model`, `POE_MODEL` is used only when it is one of those three ids; otherwise the same default applies.
-- `appsscript.json` limits `UrlFetchApp` to `https://api.poe.com/` and `https://api.github.com/`.
+- The modal sends `provider` and `model`. For Poe, the script accepts only `Claude-Sonnet-5.5`, `GPT-6.1-Sol`, and `Gemini-3.8-Flash` (else `Claude-Sonnet-5.5` / optional `POE_MODEL`). For OpenRouter, the script accepts a validated free-text model id (else `openai/gpt-4o-mini` / optional `OPENROUTER_MODEL`).
+- `appsscript.json` limits `UrlFetchApp` to `https://api.poe.com/`, `https://openrouter.ai/`, and `https://api.github.com/`.
 - Do not commit real usernames, hashes of real usernames, or the API key. Examples below use placeholders such as `user_a` and an obviously fake hash. Never paste a production hash into git.
 
 ## 1. Open the spreadsheet
@@ -265,7 +265,7 @@ The user message starts with the 出題指示, then the reference questions (ste
 
 The modal can send the current filter or questions the user pasted. The request field `source` is `filter` or `paste`. Anything else is stored as `filter`. UsageLog metadata, the `GenerationBackup` sheet, and the private GitHub reply file record that value. The pasted text itself is not written to the usage log.
 
-The modal has four 出題模式. Choosing one fills 出題指示 with that mode’s prompt. The user can still edit the textarea. **回復預設** restores the prompt of the mode that is currently selected. The last edit, mode, and model are kept in that browser’s `localStorage`. The request fields are `instruction`, `modeId`, `model`, and optional `poeApiKey` (per-browser key; required for non-admin AI users; never written to UsageLog, GenerationBackup, or GitHub backups). Non-admin clients block **測試** / **出題** early when the local key is empty, and focus the key field on `missing_api_key`.
+The modal has four 出題模式. Choosing one fills 出題指示 with that mode’s prompt. The user can still edit the textarea. **回復預設** restores the prompt of the mode that is currently selected. The last edit, mode, and model are kept in that browser’s `localStorage`. The request fields are `instruction`, `modeId`, `provider`, `model`, and optional `poeApiKey` or `openRouterApiKey` (per-browser key for the chosen provider; required for non-admin AI users; never written to UsageLog, GenerationBackup, or GitHub backups). Provider, keys, and models are edited in **API／模型設定**, not the main generate modal. Non-admin clients block **測試** / **出題** early when the local key is empty, and open that settings modal on `missing_api_key`.
 
 The mode prompts live in `POE_GENERATION_MODES` in `js/poeGenerateModal.js`. The server does not store those prompts. It records `modeId` only when it is one of `style-continue`, `vary-examples`, `add-novelty`, or `different-types`.
 
@@ -280,7 +280,7 @@ The script keeps a client instruction only when it is a non-empty string after t
 
 > 參考以下題目，撰寫全新的題目，並參考過程題目的風格、用字、句式撰寫解釋。請盡量提供最多的題目。一條題目不一定只涉及一件事件。有沒有甚麼有少許新意的問法？請同樣提供問題與解釋，並說明它創新之處。
 
-The browser may send up to 60 questions. The script then applies `POE_MAX_REFERENCES` and `POE_MAX_REFERENCE_CHARS`. The upstream call is `POST https://api.poe.com/v1/chat/completions`. The full reply is returned to the modal (Apps Script does not stream the body back to the browser). The modal keeps past replies in IndexedDB on that browser, keyed by the signed-in username and time, and falls back to `localStorage` if IndexedDB is unavailable.
+The browser may send up to 60 questions. The script then applies `POE_MAX_REFERENCES` and `POE_MAX_REFERENCE_CHARS`. The upstream call is `POST https://api.poe.com/v1/chat/completions` or `POST https://openrouter.ai/api/v1/chat/completions`, chosen from `provider`. The full reply is returned to the modal (Apps Script does not stream the body back to the browser). The modal keeps past replies in IndexedDB on that browser, keyed by the signed-in username and time, and falls back to `localStorage` if IndexedDB is unavailable.
 
 ## Local pages
 
