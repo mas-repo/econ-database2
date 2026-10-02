@@ -1,9 +1,10 @@
 // poeGenerateModal.js
 // Modal for generating new questions from the current filters.
 // The browser only talks to the Apps Script web app in config.js.
-// The allowlist stays in Apps Script properties. A shared POE_API_KEY may also
-// live there as a fallback. Each browser can store its own Poe key in localStorage
-// and send it as `poeApiKey` (never written to backups or logs).
+// The allowlist stays in Apps Script properties. Script property POE_API_KEY is
+// an admin-only shared fallback (server gates on admin/githubSync). Every other
+// AI user must store their own Poe key in localStorage and send it as `poeApiKey`
+// (never written to backups or logs).
 // Modes, the edited 出題指示, and the chosen model are stored in localStorage.
 // The request sends `instruction`, `modeId`, `model`, and optional `poeApiKey`.
 
@@ -214,6 +215,35 @@
         return payload;
     }
 
+    // Admin (githubSync) may omit a browser key and use the server shared
+    // POE_API_KEY. Everyone else must enter a personal key before test/generate.
+    function mayUseSharedServerKey() {
+        var rights = (typeof currentAccessRights === 'function')
+            ? currentAccessRights()
+            : (window.accessRights || null);
+        return !!(rights && rights.admin === true);
+    }
+
+    function ensureApiKeyReady() {
+        if (apiKeyForRequest()) return true;
+        if (mayUseSharedServerKey()) return true;
+        showError('missing_api_key');
+        setStatus(ERROR_TEXT.missing_api_key);
+        var input = apiKeyField();
+        if (input) {
+            try { input.focus(); } catch (error) {}
+        }
+        return false;
+    }
+
+    function focusApiKeyFieldIfMissing(code) {
+        if (code !== 'missing_api_key') return;
+        var input = apiKeyField();
+        if (input) {
+            try { input.focus(); } catch (error) {}
+        }
+    }
+
     function apiKeyField() {
         return document.getElementById('poe-api-key-input');
     }
@@ -232,10 +262,10 @@
         }
         if (hint) {
             if (stored) {
-                hint.textContent = '已在此瀏覽器儲存金鑰。出題與測試時會一併送出；伺服器不會把它寫入紀錄或備份。若留空則改用伺服器共用金鑰（若有）。';
+                hint.textContent = '已在此瀏覽器儲存金鑰。出題與測試時會一併送出；伺服器不會把它寫入紀錄或備份。';
                 hint.classList.remove('is-warn');
             } else {
-                hint.textContent = '尚未儲存個人金鑰。若伺服器也沒有共用金鑰，出題會失敗。金鑰只存在此瀏覽器的 localStorage，不會提交到 Git。';
+                hint.textContent = '尚未儲存個人金鑰。請先輸入並按「儲存」後再測試或出題（非管理員必須使用個人金鑰）。金鑰只存在此瀏覽器的 localStorage，不會提交到 Git。';
                 hint.classList.add('is-warn');
             }
         }
@@ -1697,6 +1727,10 @@
             syncActionButtons();
             return;
         }
+        if (!ensureApiKeyReady()) {
+            syncActionButtons();
+            return;
+        }
         var filteredCount = references.length;
         var sending = references.slice(0, CLIENT_SEND_CAP);
         var instruction = currentInstructionForRequest();
@@ -1731,6 +1765,7 @@
                 var code = data && data.error ? data.error : 'server_error';
                 if (code === 'feature_unavailable') hideGenerateButton();
                 showError(code);
+                focusApiKeyFieldIfMissing(code);
                 setStatus('');
                 return;
             }
@@ -1830,6 +1865,10 @@
 
     async function testSelectedModel() {
         if (poeUi.busy) return;
+        if (!ensureApiKeyReady()) {
+            syncActionButtons();
+            return;
+        }
         var model = currentModel();
         writeStoredModel(model);
         poeUi.busy = true;
@@ -1849,6 +1888,7 @@
                 var code = data && data.error ? data.error : 'server_error';
                 if (code === 'feature_unavailable') hideGenerateButton();
                 showTestBanner('fail', errorTextFor(code, 'test'));
+                focusApiKeyFieldIfMissing(code);
                 setStatus('模型測試失敗。');
                 return;
             }
@@ -1871,7 +1911,9 @@
                 setStatus('已取消這次測試。');
                 return;
             }
-            showTestBanner('fail', errorTextFor(error && error.code ? error.code : 'network', 'test'));
+            var failCode = error && error.code ? error.code : 'network';
+            showTestBanner('fail', errorTextFor(failCode, 'test'));
+            focusApiKeyFieldIfMissing(failCode);
             setStatus('模型測試失敗。');
         } finally {
             poeUi.busy = false;
