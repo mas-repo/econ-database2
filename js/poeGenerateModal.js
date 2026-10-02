@@ -1,9 +1,11 @@
 // poeGenerateModal.js
 // Modal for generating new questions from the current filters.
 // The browser only talks to the Apps Script web app in config.js.
-// The upstream API key and the allowlist stay in Apps Script properties.
+// The allowlist stays in Apps Script properties. A shared POE_API_KEY may also
+// live there as a fallback. Each browser can store its own Poe key in localStorage
+// and send it as `poeApiKey` (never written to backups or logs).
 // Modes, the edited 出題指示, and the chosen model are stored in localStorage.
-// The request sends `instruction`, `modeId`, and `model`.
+// The request sends `instruction`, `modeId`, `model`, and optional `poeApiKey`.
 
 (function () {
     // Mode prompts live in this one object. style-continue must stay identical
@@ -38,12 +40,14 @@
     var INSTRUCTION_KEY = 'econ_ai_instruction_v1';
     var MODE_KEY = 'econ_ai_mode_v1';
     var MODEL_KEY = 'econ_ai_model_v1';
+    var API_KEY_KEY = 'econ_poe_api_key_v1';
     var CLIENT_SEND_CAP = 60;
     var LOCAL_KEY = 'econ_poe_generations_v1';
     var HISTORY_LIMIT = 30;
     var ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
         proxy_not_configured: '出題服務尚未完成設定。',
+        missing_api_key: '尚未設定 Poe API Key。請在上方輸入你的金鑰後按「儲存」。',
         no_reference_questions: '沒有可送出的參考題目。請先篩選出含題幹的題目，或改為貼上題目。',
         empty_paste: '請先貼上至少一題題目。',
         missing_references: '找不到當時的參考題。請再選擇來源後出題。',
@@ -70,7 +74,9 @@
         trigger: null,
         db: null,
         storeMode: null,
-        busyAction: ''
+        busyAction: '',
+        resultExpanded: false,
+        enlargeOverlay: null
     };
 
     function modeById(id) {
@@ -168,6 +174,97 @@
             localStorage.setItem(MODEL_KEY, id);
         } catch (error) {}
     }
+
+    function readStoredApiKey() {
+        try {
+            var raw = localStorage.getItem(API_KEY_KEY);
+            if (raw == null) return '';
+            return String(raw).trim();
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function writeStoredApiKey(value) {
+        try {
+            var text = String(value == null ? '' : value).trim();
+            if (!text) {
+                localStorage.removeItem(API_KEY_KEY);
+                return;
+            }
+            localStorage.setItem(API_KEY_KEY, text);
+        } catch (error) {
+            // Quota or private mode.
+        }
+    }
+
+    function clearStoredApiKey() {
+        try {
+            localStorage.removeItem(API_KEY_KEY);
+        } catch (error) {}
+    }
+
+    function apiKeyForRequest() {
+        return readStoredApiKey();
+    }
+
+    function withOptionalApiKey(payload) {
+        var key = apiKeyForRequest();
+        if (key) payload.poeApiKey = key;
+        return payload;
+    }
+
+    function apiKeyField() {
+        return document.getElementById('poe-api-key-input');
+    }
+
+    function apiKeyHint() {
+        return document.getElementById('poe-api-key-hint');
+    }
+
+    function refreshApiKeyUi() {
+        var input = apiKeyField();
+        var hint = apiKeyHint();
+        var stored = readStoredApiKey();
+        if (input && document.activeElement !== input) {
+            input.value = stored ? stored : '';
+            input.placeholder = stored ? '••••••••（已儲存在此瀏覽器）' : '貼上你的 Poe API Key';
+        }
+        if (hint) {
+            if (stored) {
+                hint.textContent = '已在此瀏覽器儲存金鑰。出題與測試時會一併送出；伺服器不會把它寫入紀錄或備份。若留空則改用伺服器共用金鑰（若有）。';
+                hint.classList.remove('is-warn');
+            } else {
+                hint.textContent = '尚未儲存個人金鑰。若伺服器也沒有共用金鑰，出題會失敗。金鑰只存在此瀏覽器的 localStorage，不會提交到 Git。';
+                hint.classList.add('is-warn');
+            }
+        }
+    }
+
+    function saveApiKeyFromInput() {
+        if (poeUi.busy) return;
+        var input = apiKeyField();
+        var value = input ? String(input.value || '').trim() : '';
+        if (!value) {
+            setStatus('請先貼上 Poe API Key，或按「清除」移除已儲存的金鑰。');
+            return;
+        }
+        writeStoredApiKey(value);
+        if (input) input.value = value;
+        refreshApiKeyUi();
+        setStatus('已儲存 Poe API Key 到此瀏覽器。');
+    }
+
+    function clearApiKeyFromUi() {
+        if (poeUi.busy) return;
+        clearStoredApiKey();
+        var input = apiKeyField();
+        if (input) input.value = '';
+        refreshApiKeyUi();
+        setStatus('已清除此瀏覽器上的 Poe API Key。');
+    }
+
+
 
     function instructionField() {
         return document.getElementById('poe-instruction-input');
@@ -922,6 +1019,16 @@
             + '        </label>'
             + '        <button type="button" class="btn btn-outline-primary" id="poe-test">測試</button>'
             + '      </div>'
+            + '      <div class="poe-api-key" id="poe-api-key-wrap">'
+            + '        <label class="poe-field" for="poe-api-key-input">Poe API Key（個人）'
+            + '          <input type="password" id="poe-api-key-input" autocomplete="off" spellcheck="false" maxlength="200" aria-describedby="poe-api-key-hint" placeholder="貼上你的 Poe API Key">'
+            + '        </label>'
+            + '        <div class="poe-api-key-actions">'
+            + '          <button type="button" class="btn btn-outline-primary" id="poe-api-key-save">儲存</button>'
+            + '          <button type="button" class="poe-text-btn" id="poe-api-key-clear">清除</button>'
+            + '        </div>'
+            + '        <p class="poe-api-key-hint" id="poe-api-key-hint"></p>'
+            + '      </div>'
             + '      <div id="poe-test-banner" class="poe-test-banner" hidden role="status" aria-live="polite"></div>'
             + '      <details class="poe-instruction" open>'
             + '        <summary>出題指示</summary>'
@@ -931,6 +1038,10 @@
             + '        </div>'
             + '        <textarea id="poe-instruction-input" maxlength="4000" rows="4" aria-label="出題指示" aria-describedby="poe-instruction-hint"></textarea>'
             + '      </details>'
+            + '      <div class="poe-stage-bar">'
+            + '        <span class="poe-stage-label">出題結果</span>'
+            + '        <button type="button" class="poe-text-btn" id="poe-enlarge" hidden>放大檢視</button>'
+            + '      </div>'
             + '      <div class="poe-stage" id="poe-stage" tabindex="0"></div>'
             + '    </section>'
             + '  </div>'
@@ -965,6 +1076,15 @@
         overlay.querySelector('#poe-instruction-input').addEventListener('input', function (event) {
             writeStoredInstruction(event.target.value);
         });
+        overlay.querySelector('#poe-api-key-save').addEventListener('click', saveApiKeyFromInput);
+        overlay.querySelector('#poe-api-key-clear').addEventListener('click', clearApiKeyFromUi);
+        overlay.querySelector('#poe-api-key-input').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                saveApiKeyFromInput();
+            }
+        });
+        overlay.querySelector('#poe-enlarge').addEventListener('click', enlargeResult);
         overlay.querySelector('#poe-copy').addEventListener('click', copyActive);
         overlay.querySelector('#poe-cancel').addEventListener('click', function () { cancelGeneration(false); });
         overlay.querySelector('#poe-history-clear').addEventListener('click', clearHistory);
@@ -973,6 +1093,11 @@
 
     function onDialogKeydown(event) {
         if (!isPoeGenerateModalOpen()) return;
+        if (event.key === 'Escape' && poeUi.resultExpanded) {
+            event.preventDefault();
+            closeEnlargeOverlay();
+            return;
+        }
         if (event.key === 'Tab') trapTab(event);
     }
 
@@ -1001,6 +1126,7 @@
     function closePoeGenerateModal() {
         if (!isPoeGenerateModalOpen()) return;
         if (poeUi.busy) cancelGeneration(true);
+        closeEnlargeOverlay();
         poeUi.overlay.hidden = true;
         document.body.classList.remove('poe-modal-open');
         stopElapsed();
@@ -1025,6 +1151,7 @@
         }
         ensureModal();
         loadComposer();
+        refreshApiKeyUi();
         clearTestBanner();
         var pasteWrap = document.getElementById('poe-paste-wrap');
         if (pasteWrap) pasteWrap.hidden = currentSource() !== 'paste';
@@ -1103,6 +1230,8 @@
     function showIdle(count, counting) {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
+        closeEnlargeOverlay();
+        setEnlargeButtonVisible(false);
         stage.textContent = '';
         var lead = document.createElement('p');
         lead.className = 'poe-lead';
@@ -1129,6 +1258,8 @@
     function showLoading() {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
+        closeEnlargeOverlay();
+        setEnlargeButtonVisible(false);
         stage.textContent = '';
         var wrap = document.createElement('div');
         wrap.className = 'poe-loading';
@@ -1154,21 +1285,36 @@
     function showError(code) {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
+        closeEnlargeOverlay();
+        setEnlargeButtonVisible(false);
         stage.textContent = '';
         var box = document.createElement('div');
         box.className = 'poe-error';
         box.setAttribute('role', 'alert');
         var title = document.createElement('p');
         title.className = 'poe-error-title';
-        title.textContent = '未能完成出題';
+        title.textContent = (code === 'missing_api_key') ? '需要 Poe API Key' : '未能完成出題';
         var message = document.createElement('p');
         message.textContent = ERROR_TEXT[code] || ERROR_TEXT.server_error;
         box.appendChild(title);
         box.appendChild(message);
+        if (code === 'missing_api_key') {
+            var tip = document.createElement('p');
+            tip.className = 'poe-note';
+            tip.textContent = '在上方「Poe API Key（個人）」貼上金鑰後按「儲存」，再試一次。每位使用者可用自己的金鑰，不必共用伺服器上的設定。';
+            box.appendChild(tip);
+            var input = apiKeyField();
+            if (input) {
+                try { input.focus(); } catch (error) {}
+            }
+        }
         stage.appendChild(box);
     }
 
     function escapeHtml(text) {
+        if (window.PoeMarkdown && typeof window.PoeMarkdown.escapeHtml === 'function') {
+            return window.PoeMarkdown.escapeHtml(text);
+        }
         return String(text)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -1177,20 +1323,11 @@
             .replace(/'/g, '&#39;');
     }
 
-    // Escape first, then allow only strong/em. A function replacer avoids
-    // treating $&, $`, or $' in the model text as replacement patterns.
     function inlineMarkdownHtml(text) {
-        var html = escapeHtml(text);
-        html = html.replace(/\*\*([^*\n]+?)\*\*/g, function (_match, inner) {
-            return '<strong>' + inner + '</strong>';
-        });
-        html = html.replace(/__([^_\n]+?)__/g, function (_match, inner) {
-            return '<strong>' + inner + '</strong>';
-        });
-        html = html.replace(/(^|[\s（(])\*([^*\s](?:[^*]*[^*\s])?)\*(?=[\s。，、；：！？)）」]|$)/g, function (_match, prefix, inner) {
-            return prefix + '<em>' + inner + '</em>';
-        });
-        return html;
+        if (window.PoeMarkdown && typeof window.PoeMarkdown.inlineOnly === 'function') {
+            return window.PoeMarkdown.inlineOnly(text);
+        }
+        return escapeHtml(text);
     }
 
     function setInlineMarkdown(element, text) {
@@ -1198,52 +1335,77 @@
     }
 
     function renderStructured(container, text) {
-        container.textContent = '';
-        var lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
-        var list = null;
-        function endList() {
-            if (!list) return;
-            container.appendChild(list);
-            list = null;
+        if (window.PoeMarkdown && typeof window.PoeMarkdown.renderInto === 'function') {
+            window.PoeMarkdown.renderInto(container, text);
+            return;
         }
-        lines.forEach(function (line) {
-            var trimmed = line.trim();
-            var heading = /^(#{1,3})\s+(.*)$/.exec(trimmed);
-            var bullet = /^[-*•]\s+(.*)$/.exec(trimmed);
-            if (!trimmed) {
-                endList();
-                return;
-            }
-            if (heading) {
-                endList();
-                var level = heading[1].length;
-                var head = document.createElement(level === 1 ? 'h3' : 'h4');
-                head.className = 'poe-md-h';
-                setInlineMarkdown(head, heading[2]);
-                container.appendChild(head);
-                return;
-            }
-            if (bullet) {
-                if (!list) {
-                    list = document.createElement('ul');
-                    list.className = 'poe-md-list';
-                }
-                var item = document.createElement('li');
-                setInlineMarkdown(item, bullet[1]);
-                list.appendChild(item);
-                return;
-            }
-            endList();
-            var paragraph = document.createElement('p');
-            setInlineMarkdown(paragraph, line);
-            container.appendChild(paragraph);
+        container.textContent = String(text || '');
+    }
+
+    function setEnlargeButtonVisible(show) {
+        var btn = document.getElementById('poe-enlarge');
+        if (btn) btn.hidden = !show;
+    }
+
+    function closeEnlargeOverlay() {
+        if (poeUi.enlargeOverlay) {
+            poeUi.enlargeOverlay.hidden = true;
+        }
+        poeUi.resultExpanded = false;
+        document.body.classList.remove('poe-result-enlarged');
+    }
+
+    function ensureEnlargeOverlay() {
+        if (poeUi.enlargeOverlay) return poeUi.enlargeOverlay;
+        var overlay = document.createElement('div');
+        overlay.id = 'poe-enlarge-overlay';
+        overlay.className = 'poe-enlarge-overlay';
+        overlay.hidden = true;
+        overlay.innerHTML = ''
+            + '<div class="poe-enlarge-dialog" role="dialog" aria-modal="true" aria-labelledby="poe-enlarge-title">'
+            + '  <header class="poe-enlarge-header">'
+            + '    <h2 id="poe-enlarge-title">出題結果</h2>'
+            + '    <div class="poe-enlarge-actions">'
+            + '      <button type="button" class="btn btn-outline-primary" id="poe-enlarge-copy">複製內容</button>'
+            + '      <button type="button" class="btn btn-secondary" id="poe-enlarge-restore">還原</button>'
+            + '      <button type="button" class="poe-close" id="poe-enlarge-close" aria-label="關閉放大檢視">×</button>'
+            + '    </div>'
+            + '  </header>'
+            + '  <div class="poe-enlarge-body" id="poe-enlarge-body"></div>'
+            + '</div>';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeEnlargeOverlay();
         });
-        endList();
-        if (!container.childNodes.length) {
-            var empty = document.createElement('p');
-            empty.textContent = '（沒有內容）';
-            container.appendChild(empty);
-        }
+        overlay.querySelector('#poe-enlarge-restore').addEventListener('click', closeEnlargeOverlay);
+        overlay.querySelector('#poe-enlarge-close').addEventListener('click', closeEnlargeOverlay);
+        overlay.querySelector('#poe-enlarge-copy').addEventListener('click', function () {
+            if (poeUi.activeRecord && poeUi.activeRecord.content) copyActive();
+        });
+        overlay.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeEnlargeOverlay();
+            }
+        });
+        poeUi.enlargeOverlay = overlay;
+        return overlay;
+    }
+
+    function enlargeResult() {
+        if (!poeUi.activeRecord || !poeUi.activeRecord.content) return;
+        var overlay = ensureEnlargeOverlay();
+        var body = overlay.querySelector('#poe-enlarge-body');
+        body.textContent = '';
+        var article = document.createElement('article');
+        article.className = 'poe-result poe-result-enlarged-view';
+        renderStructured(article, poeUi.activeRecord.content);
+        body.appendChild(article);
+        overlay.hidden = false;
+        poeUi.resultExpanded = true;
+        document.body.classList.add('poe-result-enlarged');
+        var restore = overlay.querySelector('#poe-enlarge-restore');
+        if (restore) restore.focus();
     }
 
     function showResult(record) {
@@ -1255,6 +1417,8 @@
         renderStructured(article, record.content);
         stage.appendChild(article);
         stage.scrollTop = 0;
+        setEnlargeButtonVisible(!!(record && record.content));
+        if (poeUi.resultExpanded) enlargeResult();
     }
 
     function formatTime(timestamp) {
@@ -1439,6 +1603,13 @@
         if (mode) mode.disabled = !!poeUi.busy;
         if (model) model.disabled = !!poeUi.busy;
         if (test) test.disabled = !!poeUi.busy;
+        var apiInput = apiKeyField();
+        var apiSave = document.getElementById('poe-api-key-save');
+        var apiClear = document.getElementById('poe-api-key-clear');
+        if (apiInput) apiInput.disabled = !!poeUi.busy;
+        if (apiSave) apiSave.disabled = !!poeUi.busy;
+        if (apiClear) apiClear.disabled = !!poeUi.busy;
+        setEnlargeButtonVisible(!poeUi.busy && !!(poeUi.activeRecord && poeUi.activeRecord.content));
         var dialog = poeUi.overlay && poeUi.overlay.querySelector('.poe-dialog');
         if (dialog) dialog.setAttribute('aria-busy', poeUi.busy ? 'true' : 'false');
     }
@@ -1545,7 +1716,7 @@
             ? '正在送出前 ' + sending.length + ' / ' + filteredCount + ' 題參考。'
             : '正在送出 ' + sending.length + ' 題參考。');
         try {
-            var data = await proxyRequest({
+            var data = await proxyRequest(withOptionalApiKey({
                 action: 'generateQuestions',
                 username: currentUsername(),
                 filteredCount: filteredCount,
@@ -1554,7 +1725,7 @@
                 source: source,
                 modeId: mode.id,
                 model: model
-            }, 240000, poeUi.control);
+            }), 240000, poeUi.control);
             if (!isPoeGenerateModalOpen()) return;
             if (!data || data.ok !== true || !data.content) {
                 var code = data && data.error ? data.error : 'server_error';
@@ -1624,6 +1795,7 @@
     function errorTextFor(code, action) {
         if (action === 'test' && code === 'rate_limited') return '測試太頻密，請稍後再試。';
         if (action === 'test' && code === 'upstream_timeout') return '模型測試逾時，請再試一次。';
+        if (code === 'missing_api_key') return ERROR_TEXT.missing_api_key;
         return ERROR_TEXT[code] || ERROR_TEXT.server_error;
     }
 
@@ -1667,11 +1839,11 @@
         showTestBanner('pending', '正在測試模型「' + model + '」。這不會根據篩選出題。');
         setStatus('正在測試模型…');
         try {
-            var data = await proxyRequest({
+            var data = await proxyRequest(withOptionalApiKey({
                 action: 'testModel',
                 username: currentUsername(),
                 model: model
-            }, 90000, poeUi.control);
+            }), 90000, poeUi.control);
             if (!isPoeGenerateModalOpen()) return;
             if (!data || data.ok !== true || !data.content) {
                 var code = data && data.error ? data.error : 'server_error';
