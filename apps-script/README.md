@@ -1,10 +1,10 @@
-﻿# AI question proxy (admin setup)
+# AI question proxy (admin setup)
 
-The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), and one allowlisted model id to this Apps Script web app. The script calls the upstream question API and appends a row to the spreadsheet. The browser never receives the API key, and the public repository does not contain the allowlist.
+The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), and one allowlisted model id to this Apps Script web app. The script calls the upstream question API and appends a row to the spreadsheet. The browser never receives the server API key. Users may send their own `poeApiKey` from localStorage. Script property `POE_API_KEY` is a shared fallback **only for the admin role** (`ALLOWED_ADMIN_HASHES` / `admin` + `githubSync`; production: a single operator). Other AI users must supply their own browser key or calls return `missing_api_key`. The public repository does not contain the allowlist or any key.
 
 **After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores `testModel`, the model allowlist, and the backup tab.
 
-Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download a personal question JSON. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
+Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
 
 GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the token must not be in the page. `fetchSharedAsset` and `listSharedData` are how the site reads those files. The question bank is not committed under `econ-database/data/`.
 
@@ -55,7 +55,9 @@ Production roles are **only** these three hash lists. Do not store plaintext use
 4. For each person, paste the username into that dialog. Do this privately. The dialog does not write the name into the sheet or into the repo. It lowercases and trims the name, then shows only the SHA-256 hex.
 5. Copy that hex into exactly one Script property:
    - `ALLOWED_ADMIN_HASHES` — full rights: AI出題, GitHub upload/download and the Auto-sync checkbox, 管理員模式 (edit, import, export), and mock tests.
-   - `ALLOWED_AI_HASHES` — AI出題 (filter, paste, modes, models, and 測試) and mock tests. No GitHub buttons, no Auto-sync, no 管理員模式.
+   - ALLOWED_AI_HASHES — AI出題 and mock tests; no GitHub; no admin edit.
+- ALLOWED_MOCK_HASHES — mock tests only; no AI出題; no GitHub; no admin edit.
+- ALLOWED_AI_HASHES (detail) — AI出題 (filter, paste, modes, models, and 測試) and mock tests. No GitHub buttons, no Auto-sync, no 管理員模式.
    - `ALLOWED_RESTRICTED_HASHES` — browse the site like a student or teacher. No AI出題, no GitHub buttons, no Auto-sync, and no mock-test questions. Everyone on this list has the same rights.
 6. Separate hashes in one property with commas, newlines, or spaces. If the same hash is in more than one list, the highest role wins: admin, then AI editor, then restricted.
 7. Delete `ALLOWED_USER_HASHES` and `ALLOWED_USERS` if they are still set.
@@ -86,7 +88,9 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 
 | Property | Required | Placeholder / default |
 | --- | --- | --- |
-| `POE_API_KEY` | yes | key from the upstream API key page |
+| `POE_API_KEY` | admin-only fallback | Shared upstream key for the **admin** role only (`resolvePoeApiKey_` gates on `lookupRights_(username).admin`, which matches `githubSync` / `ALLOWED_ADMIN_HASHES`). Prefer non-empty `poeApiKey` from the modal for any AI user; else if admin and this property is set, use it; else return `missing_api_key` (AI editors and other non-admin users never receive this fallback). Never log or store the body key. |
+**Shared Poe key gate:** `resolvePoeApiKey_` does not compare a plaintext username. It allows Script property `POE_API_KEY` only when `lookupRights_(username).admin === true` (same membership as `githubSync`). In production that admin hash list is the single shared-key operator; every other AI user must send `poeApiKey` from the browser.
+
 | `ALLOWED_ADMIN_HASHES` | for full rights | SHA-256 hex list from the menu above. Example placeholder subject: `user_a`. |
 | `ALLOWED_AI_HASHES` | for AI出題 without GitHub | SHA-256 hex list. Same menu. No GitHub sync and no admin edit. |
 | `ALLOWED_RESTRICTED_HASHES` | for browse without mocks | SHA-256 hex list. Same menu. No AI出題, no GitHub, no mock tests. |
@@ -104,8 +108,8 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 | `GITHUB_OWNER` | for Git sync | GitHub user or organization that owns the private data repository |
 | `GITHUB_REPO` | for Git sync | private repository name |
 | `GITHUB_BRANCH` | no | `main` when this property is empty |
-| `GITHUB_DATA_PATH` | for Git sync | path inside each user's folder, such as `data/questions.json`. Stored as `users/<username>/data/questions.json`. |
-| `GITHUB_AI_BACKUP_DIR` | for Git sync | directory inside each user's folder, such as `ai-backups`. Stored as `users/<username>/ai-backups/`. |
+| `GITHUB_DATA_PATH` | for Git sync | path under the shared prefix, such as `data/database.json`. Stored as `shared/data/database.json` (joined with `GITHUB_SHARED_PREFIX`). Username is not in this path. |
+| `GITHUB_AI_BACKUP_DIR` | for Git sync | directory inside each user's folder, such as `ai-backups`. Stored as `users/<username>/ai-backups/`. Personal AI出題 history only. |
 | `GITHUB_SHARED_PREFIX` | no | `shared` when this property is empty. Shared diagrams, JSON, and papers live under this prefix. Do not set it to `users` or a path under `users`. |
 
 Usernames are trimmed and lowercased before the hash check. The site already stores the signed-in name that way.
@@ -156,12 +160,18 @@ Create a **fine-grained** personal access token:
 
 Then set `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_DATA_PATH`, and `GITHUB_AI_BACKUP_DIR`. Set `GITHUB_BRANCH` if it is not `main`.
 
-Each user with `githubSync` gets their own folder. The script builds the path. The browser does not send it, and the page never contains the owner or repository name.
+### Shared question bank vs personal AI backups
 
-- Question uploads and downloads use `users/<username>/` plus `GITHUB_DATA_PATH`. With the example path above, that is `users/<username>/data/questions.json`.
-- Model-reply files use `users/<username>/` plus `GITHUB_AI_BACKUP_DIR`, then a timestamped file name. With the example directory above, that is `users/<username>/ai-backups/<timestamp>-….json`.
+The script builds every GitHub path. The browser does not send paths, and the page never contains the owner or repository name.
 
-`<username>` is the signed-in name after trimming and lowercasing. A space in that name is written as a hyphen. The name has to be one path segment. A slash, a backslash, or `..` is rejected, and that user's upload or download returns an error. An AI backup is skipped in that case; the generation or test reply is still returned. An older shared file at `GITHUB_DATA_PATH` is not read and is not moved.
+| What | Where | Who |
+| --- | --- | --- |
+| **Shared question bank** (Upload / Download / Auto-sync) | `<GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>` — default `shared/data/database.json` when `GITHUB_DATA_PATH` is `data/database.json` | Every `githubSync` user reads and writes the **same** file. Username is required for auth only and must **not** appear in the bank path. Paths under `users/` are rejected. |
+| **Personal AI出題 history** (model-reply backups) | `users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json` | Per signed-in user only. Unchanged. |
+
+Recommended Script property: `GITHUB_DATA_PATH` = `data/database.json` (not under `users/`). If the property value already starts with the shared prefix (for example `shared/data/database.json`), the script does not double-prefix.
+
+`<username>` for AI backups is the signed-in name after trimming and lowercasing. A space in that name is written as a hyphen. The name has to be one path segment. A slash, a backslash, or `..` is rejected; an AI backup is skipped in that case, but the generation or test reply is still returned.
 
 The private repository needs at least one commit on that branch (a README created with the repository is enough). The script never creates the repository.
 
@@ -181,7 +191,7 @@ Expected layout inside the private repository:
 - `shared/papers/past-papers/` — past-paper packs
 - `shared/build/` — classification JSON used by the import scripts
 
-`users/<username>/` is unchanged and is not readable through these actions.
+`users/<username>/` holds personal AI出題 backups only and is not readable through these shared-asset actions. Question-bank sync writes the shared bank under `shared/data/…`, not under `users/`.
 
 `fetchSharedAsset` returns `{ "ok": true, "path", "encoding", "mediaType", "bytes", "content" }`. Text files (`.json`, `.js`, `.jsonl`, `.txt`, `.md`) use `encoding: "utf8"`. Images and other allowed files use `encoding: "base64"`. The path in the response is the client-relative path, not a GitHub URL. Files larger than 9 MB return `payload_too_large`. The question bank and the images are under that cap. Some past-paper PDFs are larger; `listSharedData` still lists them, and they are read from the private checkout by the import scripts rather than streamed through the web app.
 
@@ -204,7 +214,16 @@ A successful `generateQuestions` or `testModel` call still returns the reply to 
 - appends a row to `GenerationBackup` (column list under GenerationBackup below)
 - writes the reply JSON under `users/<username>/<GITHUB_AI_BACKUP_DIR>/`, in a new timestamped file, when the GitHub properties are set
 
-`generateQuestions` files record `source` as `filter` or `paste`. The sheet cell is clipped. The GitHub file keeps the reply (up to one million characters). Backup failure does not fail the generation or the test.
+`generateQuestions` files record `source` / `referenceSource` as `filter` or `paste`, plus `modeId`, `modeName`, and a clipped `instruction` (max 4000 characters) when the generate handler has them. Older files may omit those fields. The sheet cell is clipped. The GitHub file keeps the reply (up to one million characters). Backup failure does not fail the generation or the test.
+
+### Cross-device AI history (`listAiBackups` / `getAiBackup`)
+
+AI editors (`ai: true`) can reload their own personal backups into the AI出題 modal on another computer. These actions do **not** require `githubSync`.
+
+- `listAiBackups` — `{ "action": "listAiBackups", "username" }` → `{ "ok": true, "backups": [ … ] }`. Lists only that user's `users/<username>/<GITHUB_AI_BACKUP_DIR>/` folder, newest first, up to 30 `generateQuestions` files, each with `name`, `action`, `model`, `createdAt`, counts, `source` / `referenceSource`, `modeId`, `modeName`, `instruction`, and `content`. If GitHub backup is not configured, or the folder is missing/empty, the response is a soft empty list `{ "ok": true, "backups": [] }` (not an error).
+- `getAiBackup` — `{ "action": "getAiBackup", "username", "name": "<basename>.json" }` → `{ "ok": true, "backup": { … } }`. Reads one file from that same user folder only. `name` must be a single `.json` basename (no `/`, `..`, or other paths).
+
+Neither response includes the token, owner, repository name, or another user's folder. Shared bank upload/download rules are unchanged.
 
 Protect `GenerationBackup` the same way as `UsageLog`.
 
@@ -246,7 +265,7 @@ The user message starts with the 出題指示, then the reference questions (ste
 
 The modal can send the current filter or questions the user pasted. The request field `source` is `filter` or `paste`. Anything else is stored as `filter`. UsageLog metadata, the `GenerationBackup` sheet, and the private GitHub reply file record that value. The pasted text itself is not written to the usage log.
 
-The modal has four 出題模式. Choosing one fills 出題指示 with that mode’s prompt. The user can still edit the textarea. **回復預設** restores the prompt of the mode that is currently selected. The last edit, mode, and model are kept in that browser’s `localStorage`. The request fields are `instruction`, `modeId`, and `model`.
+The modal has four 出題模式. Choosing one fills 出題指示 with that mode’s prompt. The user can still edit the textarea. **回復預設** restores the prompt of the mode that is currently selected. The last edit, mode, and model are kept in that browser’s `localStorage`. The request fields are `instruction`, `modeId`, `model`, and optional `poeApiKey` (per-browser key; required for non-admin AI users; never written to UsageLog, GenerationBackup, or GitHub backups). Non-admin clients block **測試** / **出題** early when the local key is empty, and focus the key field on `missing_api_key`.
 
 The mode prompts live in `POE_GENERATION_MODES` in `js/poeGenerateModal.js`. The server does not store those prompts. It records `modeId` only when it is one of `style-continue`, `vary-examples`, `add-novelty`, or `different-types`.
 
