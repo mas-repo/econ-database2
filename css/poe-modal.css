@@ -897,12 +897,24 @@ body.poe-result-enlarged {
     padding: 4px 0 8px;
 }
 
+.poe-settings-models-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* .poe-field { display:flex } otherwise beats the UA [hidden] rule. */
+.poe-settings-models-panel[hidden] {
+    display: none !important;
+}
+
 .poe-settings-model-row .poe-field {
     width: 100%;
 }
 
 .poe-settings-model-row select,
-#poe-settings-model-custom,
+#poe-settings-model-custom-poe,
+#poe-settings-model-custom-openrouter,
 #poe-settings-api-key {
     display: block;
     width: 100%;
@@ -922,7 +934,8 @@ body.poe-result-enlarged {
     letter-spacing: 0.04em;
 }
 
-#poe-settings-model-custom:disabled,
+#poe-settings-model-custom-poe:disabled,
+#poe-settings-model-custom-openrouter:disabled,
 #poe-settings-api-key:disabled,
 .poe-settings-model-row select:disabled {
     background: #f3f6f9;
