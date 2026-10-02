@@ -1,12 +1,13 @@
 // poeGenerateModal.js
 // Modal for generating new questions from the current filters.
 // The browser only talks to the Apps Script web app in config.js.
-// The allowlist stays in Apps Script properties. Script property POE_API_KEY is
-// an admin-only shared fallback (server gates on admin/githubSync). Every other
-// AI user must store their own Poe key in localStorage and send it as `poeApiKey`
-// (never written to backups or logs).
-// Modes, the edited 出題指示, and the chosen model are stored in localStorage.
-// The request sends `instruction`, `modeId`, `model`, and optional `poeApiKey`.
+// Providers: Poe | OpenRouter. Script property POE_API_KEY is an admin-only
+// shared fallback for Poe; optional OPENROUTER_API_KEY is the same for OpenRouter.
+// Every other AI user must store their own key in localStorage and send it as
+// `poeApiKey` or `openRouterApiKey` (never written to backups or logs).
+// Provider, keys, models, modes, and the edited 出題指示 live in localStorage.
+// API key / model / provider live in a separate settings modal (API／模型設定).
+// Requests send `provider`, `model`, `instruction`, `modeId`, and the matching key.
 
 (function () {
     // Mode prompts live in this one object. style-continue must stay identical
@@ -37,18 +38,34 @@
     var POE_INSTRUCTION = POE_GENERATION_MODES[0].prompt;
     var POE_DEFAULT_MODEL = 'Claude-Sonnet-5.5';
     var POE_MODELS = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash'];
+    var OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o-mini';
+    var OPENROUTER_MODELS = [
+        'openai/gpt-4o-mini',
+        'openai/gpt-4o',
+        'google/gemini-2.0-flash-001',
+        'anthropic/claude-sonnet-4',
+        'google/gemini-2.0-flash-exp:free',
+        'openai/gpt-oss-20b:free',
+        'nvidia/nemotron-3-ultra-550b-a55b:free'
+    ];
+    var PROVIDER_POE = 'poe';
+    var PROVIDER_OPENROUTER = 'openrouter';
     var INSTRUCTION_MAX = 4000;
     var INSTRUCTION_KEY = 'econ_ai_instruction_v1';
     var MODE_KEY = 'econ_ai_mode_v1';
-    var MODEL_KEY = 'econ_ai_model_v1';
-    var API_KEY_KEY = 'econ_poe_api_key_v1';
+    var PROVIDER_KEY = 'econ_ai_provider_v1';
+    var MODEL_KEY_POE = 'econ_ai_model_poe_v1';
+    var MODEL_KEY_OPENROUTER = 'econ_ai_model_openrouter_v1';
+    var MODEL_KEY_LEGACY = 'econ_ai_model_v1';
+    var API_KEY_POE = 'econ_poe_api_key_v1';
+    var API_KEY_OPENROUTER = 'econ_openrouter_api_key_v1';
     var CLIENT_SEND_CAP = 60;
     var LOCAL_KEY = 'econ_poe_generations_v1';
     var HISTORY_LIMIT = 30;
     var ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
         proxy_not_configured: '出題服務尚未完成設定。',
-        missing_api_key: '尚未設定 Poe API Key。請在上方輸入你的金鑰後按「儲存」。',
+        missing_api_key: '尚未設定 API Key。請按「API／模型設定」輸入金鑰後儲存。',
         no_reference_questions: '沒有可送出的參考題目。請先篩選出含題幹的題目，或改為貼上題目。',
         empty_paste: '請先貼上至少一題題目。',
         missing_references: '找不到當時的參考題。請再選擇來源後出題。',
@@ -63,6 +80,7 @@
 
     var poeUi = {
         overlay: null,
+        settingsOverlay: null,
         busy: false,
         control: null,
         timer: null,
@@ -93,11 +111,63 @@
         return mode || POE_GENERATION_MODES[0];
     }
 
+    function normalizeProvider(value) {
+        return String(value || '').trim().toLowerCase() === PROVIDER_OPENROUTER
+            ? PROVIDER_OPENROUTER
+            : PROVIDER_POE;
+    }
+
+    function providerLabel(provider) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER ? 'OpenRouter' : 'Poe';
+    }
+
+    function currentProvider() {
+        var checked = document.querySelector('input[name="poe-settings-provider"]:checked');
+        if (checked) return normalizeProvider(checked.value);
+        return readStoredProvider();
+    }
+
+    function modelsForProvider(provider) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER ? OPENROUTER_MODELS : POE_MODELS;
+    }
+
+    function defaultModelForProvider(provider) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER
+            ? OPENROUTER_DEFAULT_MODEL
+            : POE_DEFAULT_MODEL;
+    }
+
+    function isKnownModel(provider, model) {
+        var list = modelsForProvider(provider);
+        return list.indexOf(model) !== -1;
+    }
+
+    function sanitizeOpenRouterModelId(value) {
+        var text = String(value == null ? '' : value).trim();
+        if (!text || text.length > 120) return '';
+        if (!/^[A-Za-z0-9][A-Za-z0-9._\-\/:]*$/.test(text)) return '';
+        if (text.indexOf('..') !== -1) return '';
+        return text;
+    }
+
     function currentModel() {
-        var select = document.getElementById('poe-model');
-        var value = select ? String(select.value || '').trim() : '';
-        if (POE_MODELS.indexOf(value) !== -1) return value;
-        return POE_DEFAULT_MODEL;
+        var provider = currentProvider();
+        if (provider === PROVIDER_OPENROUTER) {
+            var custom = document.getElementById('poe-settings-model-custom');
+            var customValue = custom ? sanitizeOpenRouterModelId(custom.value) : '';
+            if (customValue) return customValue;
+        }
+        var select = document.getElementById('poe-settings-model');
+        if (select) {
+            var value = String(select.value || '').trim();
+            if (provider === PROVIDER_OPENROUTER) {
+                var sanitized = sanitizeOpenRouterModelId(value);
+                if (sanitized) return sanitized;
+            } else if (POE_MODELS.indexOf(value) !== -1) {
+                return value;
+            }
+        }
+        return readStoredModel(provider);
     }
 
     function sanitizeClientInstruction(value) {
@@ -158,27 +228,84 @@
         } catch (error) {}
     }
 
-    function readStoredModel() {
-        try {
-            var id = localStorage.getItem(MODEL_KEY);
-            if (POE_MODELS.indexOf(id) !== -1) return id;
-        } catch (error) {}
-        return POE_DEFAULT_MODEL;
+    function modelStorageKey(provider) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER
+            ? MODEL_KEY_OPENROUTER
+            : MODEL_KEY_POE;
     }
 
-    function writeStoredModel(id) {
+    function apiStorageKey(provider) {
+        return normalizeProvider(provider) === PROVIDER_OPENROUTER
+            ? API_KEY_OPENROUTER
+            : API_KEY_POE;
+    }
+
+    function readStoredProvider() {
         try {
-            if (POE_MODELS.indexOf(id) === -1 || id === POE_DEFAULT_MODEL) {
-                localStorage.removeItem(MODEL_KEY);
+            return normalizeProvider(localStorage.getItem(PROVIDER_KEY));
+        } catch (error) {
+            return PROVIDER_POE;
+        }
+    }
+
+    function writeStoredProvider(provider) {
+        try {
+            provider = normalizeProvider(provider);
+            if (provider === PROVIDER_POE) {
+                localStorage.removeItem(PROVIDER_KEY);
                 return;
             }
-            localStorage.setItem(MODEL_KEY, id);
+            localStorage.setItem(PROVIDER_KEY, provider);
         } catch (error) {}
     }
 
-    function readStoredApiKey() {
+    function readStoredModel(provider) {
+        provider = normalizeProvider(provider == null ? readStoredProvider() : provider);
         try {
-            var raw = localStorage.getItem(API_KEY_KEY);
+            var id = localStorage.getItem(modelStorageKey(provider));
+            if (provider === PROVIDER_OPENROUTER) {
+                var sanitized = sanitizeOpenRouterModelId(id);
+                if (sanitized) return sanitized;
+            } else if (POE_MODELS.indexOf(id) !== -1) {
+                return id;
+            } else if (provider === PROVIDER_POE) {
+                // Migrate legacy single-model key once.
+                var legacy = localStorage.getItem(MODEL_KEY_LEGACY);
+                if (POE_MODELS.indexOf(legacy) !== -1) {
+                    writeStoredModel(legacy, PROVIDER_POE);
+                    try { localStorage.removeItem(MODEL_KEY_LEGACY); } catch (error) {}
+                    return legacy;
+                }
+            }
+        } catch (error) {}
+        return defaultModelForProvider(provider);
+    }
+
+    function writeStoredModel(id, provider) {
+        provider = normalizeProvider(provider == null ? currentProvider() : provider);
+        try {
+            var key = modelStorageKey(provider);
+            if (provider === PROVIDER_OPENROUTER) {
+                id = sanitizeOpenRouterModelId(id);
+                if (!id || id === OPENROUTER_DEFAULT_MODEL) {
+                    localStorage.removeItem(key);
+                    return;
+                }
+                localStorage.setItem(key, id);
+                return;
+            }
+            if (POE_MODELS.indexOf(id) === -1 || id === POE_DEFAULT_MODEL) {
+                localStorage.removeItem(key);
+                return;
+            }
+            localStorage.setItem(key, id);
+        } catch (error) {}
+    }
+
+    function readStoredApiKey(provider) {
+        provider = normalizeProvider(provider == null ? readStoredProvider() : provider);
+        try {
+            var raw = localStorage.getItem(apiStorageKey(provider));
             if (raw == null) return '';
             return String(raw).trim();
         } catch (error) {
@@ -186,37 +313,48 @@
         }
     }
 
-    function writeStoredApiKey(value) {
+    function writeStoredApiKey(value, provider) {
+        provider = normalizeProvider(provider == null ? currentProvider() : provider);
         try {
             var text = String(value == null ? '' : value).trim();
+            var key = apiStorageKey(provider);
             if (!text) {
-                localStorage.removeItem(API_KEY_KEY);
+                localStorage.removeItem(key);
                 return;
             }
-            localStorage.setItem(API_KEY_KEY, text);
+            localStorage.setItem(key, text);
         } catch (error) {
             // Quota or private mode.
         }
     }
 
-    function clearStoredApiKey() {
+    function clearStoredApiKey(provider) {
+        provider = normalizeProvider(provider == null ? currentProvider() : provider);
         try {
-            localStorage.removeItem(API_KEY_KEY);
+            localStorage.removeItem(apiStorageKey(provider));
         } catch (error) {}
     }
 
-    function apiKeyForRequest() {
-        return readStoredApiKey();
+    function apiKeyForRequest(provider) {
+        return readStoredApiKey(provider == null ? currentProvider() : provider);
     }
 
-    function withOptionalApiKey(payload) {
-        var key = apiKeyForRequest();
-        if (key) payload.poeApiKey = key;
+    function withProviderAndApiKey(payload) {
+        var provider = normalizeProvider(payload && payload.provider != null
+            ? payload.provider
+            : currentProvider());
+        payload.provider = provider;
+        var key = apiKeyForRequest(provider);
+        if (key) {
+            if (provider === PROVIDER_OPENROUTER) payload.openRouterApiKey = key;
+            else payload.poeApiKey = key;
+        }
         return payload;
     }
 
-    // Admin (githubSync) may omit a browser key and use the server shared
-    // POE_API_KEY. Everyone else must enter a personal key before test/generate.
+    // Admin may omit a browser key and use the server shared property for that
+    // provider (POE_API_KEY or optional OPENROUTER_API_KEY). Everyone else must
+    // enter a personal key before test/generate.
     function mayUseSharedServerKey() {
         var rights = (typeof currentAccessRights === 'function')
             ? currentAccessRights()
@@ -224,74 +362,197 @@
         return !!(rights && rights.admin === true);
     }
 
+    function missingApiKeyMessage(provider) {
+        return '尚未設定 ' + providerLabel(provider) + ' API Key。請按「API／模型設定」輸入金鑰後儲存。';
+    }
+
     function ensureApiKeyReady() {
-        if (apiKeyForRequest()) return true;
+        var provider = currentProvider();
+        if (apiKeyForRequest(provider)) return true;
         if (mayUseSharedServerKey()) return true;
         showError('missing_api_key');
-        setStatus(ERROR_TEXT.missing_api_key);
-        var input = apiKeyField();
-        if (input) {
-            try { input.focus(); } catch (error) {}
-        }
+        setStatus(missingApiKeyMessage(provider));
+        openSettingsModal(true);
         return false;
     }
 
     function focusApiKeyFieldIfMissing(code) {
         if (code !== 'missing_api_key') return;
-        var input = apiKeyField();
-        if (input) {
-            try { input.focus(); } catch (error) {}
-        }
+        openSettingsModal(true);
     }
 
     function apiKeyField() {
-        return document.getElementById('poe-api-key-input');
+        return document.getElementById('poe-settings-api-key');
     }
 
     function apiKeyHint() {
-        return document.getElementById('poe-api-key-hint');
+        return document.getElementById('poe-settings-api-key-hint');
+    }
+
+    function settingsStatus() {
+        return document.getElementById('poe-settings-status');
+    }
+
+    function setSettingsStatus(message) {
+        var node = settingsStatus();
+        if (node) node.textContent = message || '';
+    }
+
+    function refreshProviderSummary() {
+        var node = document.getElementById('poe-provider-summary');
+        if (!node) return;
+        var provider = readStoredProvider();
+        var model = readStoredModel(provider);
+        var hasKey = !!readStoredApiKey(provider);
+        var bits = [providerLabel(provider), '模型：' + model];
+        bits.push(hasKey ? '已設金鑰' : (mayUseSharedServerKey() ? '可用伺服器金鑰' : '尚未設金鑰'));
+        node.textContent = bits.join(' · ');
     }
 
     function refreshApiKeyUi() {
+        var provider = currentProvider();
         var input = apiKeyField();
         var hint = apiKeyHint();
-        var stored = readStoredApiKey();
+        var label = document.getElementById('poe-settings-api-key-label');
+        var stored = readStoredApiKey(provider);
+        if (label) label.textContent = providerLabel(provider) + ' API Key（個人）';
         if (input && document.activeElement !== input) {
             input.value = stored ? stored : '';
-            input.placeholder = stored ? '••••••••（已儲存在此瀏覽器）' : '貼上你的 Poe API Key';
+            input.placeholder = stored
+                ? '••••••••（已儲存在此瀏覽器）'
+                : ('貼上你的 ' + providerLabel(provider) + ' API Key');
         }
         if (hint) {
             if (stored) {
-                hint.textContent = '已在此瀏覽器儲存金鑰。出題與測試時會一併送出；伺服器不會把它寫入紀錄或備份。';
+                hint.textContent = '已在此瀏覽器儲存 ' + providerLabel(provider) + ' 金鑰。出題與測試時會一併送出；伺服器不會把它寫入紀錄或備份。';
                 hint.classList.remove('is-warn');
             } else {
                 hint.textContent = '尚未儲存個人金鑰。請先輸入並按「儲存」後再測試或出題（非管理員必須使用個人金鑰）。金鑰只存在此瀏覽器的 localStorage，不會提交到 Git。';
                 hint.classList.add('is-warn');
             }
         }
+        refreshProviderSummary();
+    }
+
+    function fillSettingsModelOptions(provider) {
+        var modelSelect = document.getElementById('poe-settings-model');
+        if (!modelSelect) return;
+        provider = normalizeProvider(provider);
+        var list = modelsForProvider(provider);
+        var selected = readStoredModel(provider);
+        modelSelect.textContent = '';
+        var seen = false;
+        list.forEach(function (model) {
+            var option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            modelSelect.appendChild(option);
+            if (model === selected) seen = true;
+        });
+        if (provider === PROVIDER_OPENROUTER && selected && !seen) {
+            var customOption = document.createElement('option');
+            customOption.value = selected;
+            customOption.textContent = selected + '（自訂）';
+            modelSelect.appendChild(customOption);
+        }
+        modelSelect.value = selected;
+        var custom = document.getElementById('poe-settings-model-custom');
+        var customWrap = document.getElementById('poe-settings-model-custom-wrap');
+        if (customWrap) customWrap.hidden = provider !== PROVIDER_OPENROUTER;
+        if (custom && document.activeElement !== custom) {
+            custom.value = (provider === PROVIDER_OPENROUTER && selected && list.indexOf(selected) === -1)
+                ? selected
+                : '';
+        }
+    }
+
+    function loadSettingsForm() {
+        ensureSettingsModal();
+        var provider = readStoredProvider();
+        var radios = document.querySelectorAll('input[name="poe-settings-provider"]');
+        radios.forEach(function (input) {
+            input.checked = normalizeProvider(input.value) === provider;
+        });
+        fillSettingsModelOptions(provider);
+        refreshApiKeyUi();
+        setSettingsStatus('');
+    }
+
+    function onSettingsProviderChange() {
+        if (poeUi.busy) return;
+        var provider = currentProvider();
+        writeStoredProvider(provider);
+        fillSettingsModelOptions(provider);
+        refreshApiKeyUi();
+        setSettingsStatus('已切換至 ' + providerLabel(provider) + '。金鑰與模型各自獨立儲存。');
+    }
+
+    function onSettingsModelChange() {
+        if (poeUi.busy) return;
+        var provider = currentProvider();
+        var select = document.getElementById('poe-settings-model');
+        var custom = document.getElementById('poe-settings-model-custom');
+        if (provider === PROVIDER_OPENROUTER && custom) custom.value = '';
+        var model = select ? String(select.value || '').trim() : '';
+        writeStoredModel(model, provider);
+        refreshProviderSummary();
+    }
+
+    function onSettingsCustomModelInput() {
+        if (poeUi.busy) return;
+        var provider = currentProvider();
+        if (provider !== PROVIDER_OPENROUTER) return;
+        var custom = document.getElementById('poe-settings-model-custom');
+        var value = custom ? sanitizeOpenRouterModelId(custom.value) : '';
+        if (!value) return;
+        writeStoredModel(value, provider);
+        fillSettingsModelOptions(provider);
+        if (custom) custom.value = value;
+        refreshProviderSummary();
     }
 
     function saveApiKeyFromInput() {
         if (poeUi.busy) return;
+        var provider = currentProvider();
         var input = apiKeyField();
         var value = input ? String(input.value || '').trim() : '';
         if (!value) {
-            setStatus('請先貼上 Poe API Key，或按「清除」移除已儲存的金鑰。');
+            setSettingsStatus('請先貼上 ' + providerLabel(provider) + ' API Key，或按「清除」移除已儲存的金鑰。');
             return;
         }
-        writeStoredApiKey(value);
+        writeStoredApiKey(value, provider);
+        writeStoredProvider(provider);
+        writeStoredModel(currentModel(), provider);
         if (input) input.value = value;
         refreshApiKeyUi();
-        setStatus('已儲存 Poe API Key 到此瀏覽器。');
+        setSettingsStatus('已儲存 ' + providerLabel(provider) + ' API Key 到此瀏覽器。');
+        setStatus('已更新 API／模型設定。');
     }
 
     function clearApiKeyFromUi() {
         if (poeUi.busy) return;
-        clearStoredApiKey();
+        var provider = currentProvider();
+        clearStoredApiKey(provider);
         var input = apiKeyField();
         if (input) input.value = '';
         refreshApiKeyUi();
-        setStatus('已清除此瀏覽器上的 Poe API Key。');
+        setSettingsStatus('已清除此瀏覽器上的 ' + providerLabel(provider) + ' API Key。');
+        setStatus('已清除 ' + providerLabel(provider) + ' API Key。');
+    }
+
+    function saveSettingsFromUi() {
+        if (poeUi.busy) return;
+        var provider = currentProvider();
+        writeStoredProvider(provider);
+        var input = apiKeyField();
+        var typed = input ? String(input.value || '').trim() : '';
+        if (typed) writeStoredApiKey(typed, provider);
+        var model = currentModel();
+        writeStoredModel(model, provider);
+        fillSettingsModelOptions(provider);
+        refreshApiKeyUi();
+        setSettingsStatus('已儲存供應商、模型' + (typed ? '與金鑰' : '') + '。');
+        setStatus('已更新 API／模型設定（' + providerLabel(provider) + ' · ' + model + '）。');
     }
 
 
@@ -302,7 +563,6 @@
 
     function fillComposerOptions() {
         var modeSelect = document.getElementById('poe-mode');
-        var modelSelect = document.getElementById('poe-model');
         if (modeSelect && !modeSelect.options.length) {
             POE_GENERATION_MODES.forEach(function (mode) {
                 var option = document.createElement('option');
@@ -311,23 +571,14 @@
                 modeSelect.appendChild(option);
             });
         }
-        if (modelSelect && !modelSelect.options.length) {
-            POE_MODELS.forEach(function (model) {
-                var option = document.createElement('option');
-                option.value = model;
-                option.textContent = model;
-                modelSelect.appendChild(option);
-            });
-        }
     }
 
     function loadComposer() {
         fillComposerOptions();
         var modeSelect = document.getElementById('poe-mode');
-        var modelSelect = document.getElementById('poe-model');
         var mode = modeById(readStoredModeId()) || POE_GENERATION_MODES[0];
         if (modeSelect) modeSelect.value = mode.id;
-        if (modelSelect) modelSelect.value = readStoredModel();
+        refreshProviderSummary();
         var area = instructionField();
         if (!area) return;
         var stored = readStoredInstruction();
@@ -360,7 +611,7 @@
 
     function onModelChange() {
         if (poeUi.busy) return;
-        writeStoredModel(currentModel());
+        writeStoredModel(currentModel(), currentProvider());
     }
 
     function proxyUrl() {
@@ -1007,6 +1258,130 @@
         }).catch(function () {});
     }
 
+
+    function isSettingsModalOpen() {
+        return !!(poeUi.settingsOverlay && !poeUi.settingsOverlay.hidden);
+    }
+
+    function syncSettingsBusyState() {
+        if (!poeUi.settingsOverlay) return;
+        var busy = !!poeUi.busy;
+        ['poe-settings-api-key', 'poe-settings-model', 'poe-settings-model-custom',
+         'poe-settings-save', 'poe-settings-api-save', 'poe-settings-api-clear',
+         'poe-settings-close', 'poe-settings-done'].forEach(function (id) {
+            var node = document.getElementById(id);
+            if (node) node.disabled = busy;
+        });
+        poeUi.settingsOverlay.querySelectorAll('input[name="poe-settings-provider"]').forEach(function (input) {
+            input.disabled = busy;
+        });
+    }
+
+    function ensureSettingsModal() {
+        if (poeUi.settingsOverlay) return;
+        var overlay = document.createElement('div');
+        overlay.id = 'poe-settings-overlay';
+        overlay.className = 'poe-overlay poe-settings-overlay';
+        overlay.hidden = true;
+        overlay.innerHTML = ''
+            + '<div class="poe-dialog poe-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="poe-settings-title">'
+            + '  <header class="poe-header">'
+            + '    <div>'
+            + '      <h2 id="poe-settings-title">API／模型設定</h2>'
+            + '      <p class="poe-subtitle">選擇供應商、儲存個人 API Key，並指定出題／測試用的模型。設定只存在此瀏覽器，不會提交到 Git 或寫入伺服器備份。</p>'
+            + '    </div>'
+            + '    <button type="button" class="poe-close" id="poe-settings-close" aria-label="關閉設定">×</button>'
+            + '  </header>'
+            + '  <div class="poe-settings-body">'
+            + '    <fieldset class="poe-settings-provider" role="radiogroup" aria-label="供應商">'
+            + '      <legend>供應商</legend>'
+            + '      <label class="poe-source-option"><input type="radio" name="poe-settings-provider" value="poe" checked> Poe</label>'
+            + '      <label class="poe-source-option"><input type="radio" name="poe-settings-provider" value="openrouter"> OpenRouter</label>'
+            + '    </fieldset>'
+            + '    <div class="poe-api-key poe-settings-api-key" id="poe-settings-api-wrap">'
+            + '      <label class="poe-field" for="poe-settings-api-key"><span id="poe-settings-api-key-label">Poe API Key（個人）</span>'
+            + '        <input type="password" id="poe-settings-api-key" autocomplete="off" spellcheck="false" maxlength="200" aria-describedby="poe-settings-api-key-hint" placeholder="貼上你的 API Key">'
+            + '      </label>'
+            + '      <div class="poe-api-key-actions">'
+            + '        <button type="button" class="btn btn-outline-primary" id="poe-settings-api-save">儲存金鑰</button>'
+            + '        <button type="button" class="poe-text-btn" id="poe-settings-api-clear">清除金鑰</button>'
+            + '      </div>'
+            + '      <p class="poe-api-key-hint" id="poe-settings-api-key-hint"></p>'
+            + '    </div>'
+            + '    <div class="poe-settings-model-row">'
+            + '      <label class="poe-field" for="poe-settings-model">模型'
+            + '        <select id="poe-settings-model" aria-label="模型"></select>'
+            + '      </label>'
+            + '      <div class="poe-field" id="poe-settings-model-custom-wrap" hidden>'
+            + '        <label for="poe-settings-model-custom">OpenRouter 自訂模型 id（選填）</label>'
+            + '        <input type="text" id="poe-settings-model-custom" autocomplete="off" spellcheck="false" maxlength="120" placeholder="例如 anthropic/claude-3.5-sonnet" aria-label="OpenRouter 自訂模型 id">'
+            + '      </div>'
+            + '    </div>'
+            + '    <p class="poe-settings-status" id="poe-settings-status" aria-live="polite"></p>'
+            + '  </div>'
+            + '  <footer class="poe-footer poe-settings-footer">'
+            + '    <div class="poe-footer-actions">'
+            + '      <button type="button" class="btn btn-primary" id="poe-settings-save">儲存設定</button>'
+            + '      <button type="button" class="btn btn-secondary" id="poe-settings-done">完成</button>'
+            + '    </div>'
+            + '  </footer>'
+            + '</div>';
+        document.body.appendChild(overlay);
+        poeUi.settingsOverlay = overlay;
+
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeSettingsModal();
+        });
+        overlay.querySelector('#poe-settings-close').addEventListener('click', closeSettingsModal);
+        overlay.querySelector('#poe-settings-done').addEventListener('click', closeSettingsModal);
+        overlay.querySelector('#poe-settings-save').addEventListener('click', saveSettingsFromUi);
+        overlay.querySelector('#poe-settings-api-save').addEventListener('click', saveApiKeyFromInput);
+        overlay.querySelector('#poe-settings-api-clear').addEventListener('click', clearApiKeyFromUi);
+        overlay.querySelectorAll('input[name="poe-settings-provider"]').forEach(function (input) {
+            input.addEventListener('change', onSettingsProviderChange);
+        });
+        overlay.querySelector('#poe-settings-model').addEventListener('change', onSettingsModelChange);
+        overlay.querySelector('#poe-settings-model-custom').addEventListener('change', onSettingsCustomModelInput);
+        overlay.querySelector('#poe-settings-api-key').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                saveApiKeyFromInput();
+            }
+        });
+        overlay.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSettingsModal();
+            }
+        });
+    }
+
+    function openSettingsModal(focusKey) {
+        ensureModal();
+        ensureSettingsModal();
+        loadSettingsForm();
+        syncSettingsBusyState();
+        poeUi.settingsOverlay.hidden = false;
+        document.body.classList.add('poe-settings-open');
+        var target = focusKey
+            ? document.getElementById('poe-settings-api-key')
+            : document.getElementById('poe-settings-close');
+        if (target) {
+            try { target.focus(); } catch (error) {}
+        }
+    }
+
+    function closeSettingsModal() {
+        if (!isSettingsModalOpen()) return;
+        refreshProviderSummary();
+        poeUi.settingsOverlay.hidden = true;
+        document.body.classList.remove('poe-settings-open');
+        var openBtn = document.getElementById('poe-settings-open');
+        if (openBtn && isPoeGenerateModalOpen()) {
+            try { openBtn.focus(); } catch (error) {}
+        }
+    }
+
     function ensureModal() {
         if (poeUi.overlay) return;
         var overlay = document.createElement('div');
@@ -1018,7 +1393,7 @@
             + '  <header class="poe-header">'
             + '    <div>'
             + '      <h2 id="poe-generate-title">AI出題</h2>'
-            + '      <p class="poe-subtitle">可以參考目前篩選，或貼上自己的題目。選擇出題模式與模型，可再改出題指示，然後按出題。測試只檢查所選模型能否回應，不會用題目出題。</p>'
+            + '      <p class="poe-subtitle">可以參考目前篩選，或貼上自己的題目。選擇出題模式，可再改出題指示，然後按出題。供應商、API Key 與模型請在「API／模型設定」調整。測試只檢查所選模型能否回應，不會用題目出題。</p>'
             + '    </div>'
             + '    <button type="button" class="poe-close" aria-label="關閉">×</button>'
             + '  </header>'
@@ -1044,20 +1419,9 @@
             + '        <label class="poe-field">出題模式'
             + '          <select id="poe-mode" aria-label="出題模式"></select>'
             + '        </label>'
-            + '        <label class="poe-field">模型'
-            + '          <select id="poe-model" aria-label="模型"></select>'
-            + '        </label>'
+            + '        <button type="button" class="btn btn-outline-primary" id="poe-settings-open">API／模型設定</button>'
             + '        <button type="button" class="btn btn-outline-primary" id="poe-test">測試</button>'
-            + '      </div>'
-            + '      <div class="poe-api-key" id="poe-api-key-wrap">'
-            + '        <label class="poe-field" for="poe-api-key-input">Poe API Key（個人）'
-            + '          <input type="password" id="poe-api-key-input" autocomplete="off" spellcheck="false" maxlength="200" aria-describedby="poe-api-key-hint" placeholder="貼上你的 Poe API Key">'
-            + '        </label>'
-            + '        <div class="poe-api-key-actions">'
-            + '          <button type="button" class="btn btn-outline-primary" id="poe-api-key-save">儲存</button>'
-            + '          <button type="button" class="poe-text-btn" id="poe-api-key-clear">清除</button>'
-            + '        </div>'
-            + '        <p class="poe-api-key-hint" id="poe-api-key-hint"></p>'
+            + '        <p class="poe-provider-summary" id="poe-provider-summary" aria-live="polite"></p>'
             + '      </div>'
             + '      <div id="poe-test-banner" class="poe-test-banner" hidden role="status" aria-live="polite"></div>'
             + '      <details class="poe-instruction" open>'
@@ -1101,18 +1465,10 @@
         overlay.querySelector('#poe-again').addEventListener('click', regenerateActive);
         overlay.querySelector('#poe-test').addEventListener('click', testSelectedModel);
         overlay.querySelector('#poe-mode').addEventListener('change', onModeChange);
-        overlay.querySelector('#poe-model').addEventListener('change', onModelChange);
+        overlay.querySelector('#poe-settings-open').addEventListener('click', function () { openSettingsModal(false); });
         overlay.querySelector('#poe-instruction-reset').addEventListener('click', resetInstruction);
         overlay.querySelector('#poe-instruction-input').addEventListener('input', function (event) {
             writeStoredInstruction(event.target.value);
-        });
-        overlay.querySelector('#poe-api-key-save').addEventListener('click', saveApiKeyFromInput);
-        overlay.querySelector('#poe-api-key-clear').addEventListener('click', clearApiKeyFromUi);
-        overlay.querySelector('#poe-api-key-input').addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                saveApiKeyFromInput();
-            }
         });
         overlay.querySelector('#poe-enlarge').addEventListener('click', enlargeResult);
         overlay.querySelector('#poe-copy').addEventListener('click', copyActive);
@@ -1123,6 +1479,11 @@
 
     function onDialogKeydown(event) {
         if (!isPoeGenerateModalOpen()) return;
+        if (event.key === 'Escape' && isSettingsModalOpen()) {
+            event.preventDefault();
+            closeSettingsModal();
+            return;
+        }
         if (event.key === 'Escape' && poeUi.resultExpanded) {
             event.preventDefault();
             closeEnlargeOverlay();
@@ -1156,6 +1517,7 @@
     function closePoeGenerateModal() {
         if (!isPoeGenerateModalOpen()) return;
         if (poeUi.busy) cancelGeneration(true);
+        closeSettingsModal();
         closeEnlargeOverlay();
         poeUi.overlay.hidden = true;
         document.body.classList.remove('poe-modal-open');
@@ -1181,7 +1543,7 @@
         }
         ensureModal();
         loadComposer();
-        refreshApiKeyUi();
+        refreshProviderSummary();
         clearTestBanner();
         var pasteWrap = document.getElementById('poe-paste-wrap');
         if (pasteWrap) pasteWrap.hidden = currentSource() !== 'paste';
@@ -1323,20 +1685,19 @@
         box.setAttribute('role', 'alert');
         var title = document.createElement('p');
         title.className = 'poe-error-title';
-        title.textContent = (code === 'missing_api_key') ? '需要 Poe API Key' : '未能完成出題';
+        title.textContent = (code === 'missing_api_key') ? '需要 API Key' : '未能完成出題';
         var message = document.createElement('p');
-        message.textContent = ERROR_TEXT[code] || ERROR_TEXT.server_error;
+        message.textContent = (code === 'missing_api_key')
+            ? missingApiKeyMessage(currentProvider())
+            : (ERROR_TEXT[code] || ERROR_TEXT.server_error);
         box.appendChild(title);
         box.appendChild(message);
         if (code === 'missing_api_key') {
             var tip = document.createElement('p');
             tip.className = 'poe-note';
-            tip.textContent = '在上方「Poe API Key（個人）」貼上金鑰後按「儲存」，再試一次。每位使用者可用自己的金鑰，不必共用伺服器上的設定。';
+            tip.textContent = '按「API／模型設定」選擇供應商（Poe 或 OpenRouter），貼上對應金鑰後按「儲存」，再試一次。每位使用者可用自己的金鑰，不必共用伺服器上的設定。';
             box.appendChild(tip);
-            var input = apiKeyField();
-            if (input) {
-                try { input.focus(); } catch (error) {}
-            }
+            openSettingsModal(true);
         }
         stage.appendChild(box);
     }
@@ -1604,7 +1965,7 @@
         var instruction = instructionField();
         var reset = document.getElementById('poe-instruction-reset');
         var mode = document.getElementById('poe-mode');
-        var model = document.getElementById('poe-model');
+        var settingsOpen = document.getElementById('poe-settings-open');
         var test = document.getElementById('poe-test');
         var pasteMode = currentSource() === 'paste';
         var canRegenerate = false;
@@ -1631,14 +1992,9 @@
             });
         }
         if (mode) mode.disabled = !!poeUi.busy;
-        if (model) model.disabled = !!poeUi.busy;
+        if (settingsOpen) settingsOpen.disabled = !!poeUi.busy;
         if (test) test.disabled = !!poeUi.busy;
-        var apiInput = apiKeyField();
-        var apiSave = document.getElementById('poe-api-key-save');
-        var apiClear = document.getElementById('poe-api-key-clear');
-        if (apiInput) apiInput.disabled = !!poeUi.busy;
-        if (apiSave) apiSave.disabled = !!poeUi.busy;
-        if (apiClear) apiClear.disabled = !!poeUi.busy;
+        syncSettingsBusyState();
         setEnlargeButtonVisible(!poeUi.busy && !!(poeUi.activeRecord && poeUi.activeRecord.content));
         var dialog = poeUi.overlay && poeUi.overlay.querySelector('.poe-dialog');
         if (dialog) dialog.setAttribute('aria-busy', poeUi.busy ? 'true' : 'false');
@@ -1738,7 +2094,8 @@
         var model = currentModel();
         writeStoredInstruction(instruction);
         writeStoredMode(mode.id);
-        writeStoredModel(model);
+        writeStoredModel(model, currentProvider());
+        writeStoredProvider(currentProvider());
         poeUi.busy = true;
         poeUi.busyAction = 'generate';
         poeUi.control = { cancelled: false, handle: null };
@@ -1750,7 +2107,7 @@
             ? '正在送出前 ' + sending.length + ' / ' + filteredCount + ' 題參考。'
             : '正在送出 ' + sending.length + ' 題參考。');
         try {
-            var data = await proxyRequest(withOptionalApiKey({
+            var data = await proxyRequest(withProviderAndApiKey({
                 action: 'generateQuestions',
                 username: currentUsername(),
                 filteredCount: filteredCount,
@@ -1870,15 +2227,16 @@
             return;
         }
         var model = currentModel();
-        writeStoredModel(model);
+        writeStoredModel(model, currentProvider());
+        writeStoredProvider(currentProvider());
         poeUi.busy = true;
         poeUi.busyAction = 'test';
         poeUi.control = { cancelled: false, handle: null };
         syncActionButtons();
-        showTestBanner('pending', '正在測試模型「' + model + '」。這不會根據篩選出題。');
+        showTestBanner('pending', '正在以 ' + providerLabel(currentProvider()) + ' 測試模型「' + model + '」。這不會根據篩選出題。');
         setStatus('正在測試模型…');
         try {
-            var data = await proxyRequest(withOptionalApiKey({
+            var data = await proxyRequest(withProviderAndApiKey({
                 action: 'testModel',
                 username: currentUsername(),
                 model: model
