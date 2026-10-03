@@ -258,6 +258,7 @@ function handleGenerate_(body) {
   var model = resolveModel_(body.model, provider);
   var modeId = resolveModeId_(body.modeId);
   var instructionMeta = instructionMeta_(body.instruction);
+  var referenceIds = referenceIdsForBackup_(body, packed, source);
   var started = Date.now();
   try {
     var completion = requestCompletion_(apiKey, model, buildPrompt_(packed.questions, filteredCount, packed.truncated, instructionMeta.text, source), POE_SYSTEM_PROMPT_, provider);
@@ -275,7 +276,8 @@ function handleGenerate_(body) {
         source: source,
         modeId: modeId,
         modeName: modeName_(modeId),
-        instruction: instructionMeta.text
+        instruction: instructionMeta.text,
+        referenceIds: referenceIds
       }) === true;
     } catch (backupErr) {
       safeLog_(backupErr);
@@ -316,6 +318,25 @@ function handleGenerate_(body) {
       success: true,
       metadata: generateMeta
     }, true);
+    var backupMeta = {
+      requestedModel: model,
+      provider: provider,
+      durationMs: durationMs,
+      promptTokens: completion.promptTokens,
+      completionTokens: completion.completionTokens,
+      instructionChars: instructionMeta.chars,
+      instructionProvidedChars: instructionMeta.providedChars,
+      customInstruction: instructionMeta.custom,
+      referencesTruncated: packed.truncated,
+      source: source,
+      gitBackup: gitBackup,
+      referenceIds: referenceIds
+    };
+    // A long id list must not replace the whole metadata cell.
+    if (JSON.stringify(backupMeta).length > 2000) {
+      delete backupMeta.referenceIds;
+      backupMeta.referenceIdsOmitted = true;
+    }
     result.backedUp = writeBackup_({
       username: username,
       action: 'generateQuestions',
@@ -326,19 +347,7 @@ function handleGenerate_(body) {
       filteredCount: filteredCount,
       sentCount: result.sentCount,
       content: completion.content,
-      metadata: {
-        requestedModel: model,
-        provider: provider,
-        durationMs: durationMs,
-        promptTokens: completion.promptTokens,
-        completionTokens: completion.completionTokens,
-        instructionChars: instructionMeta.chars,
-        instructionProvidedChars: instructionMeta.providedChars,
-        customInstruction: instructionMeta.custom,
-        referencesTruncated: packed.truncated,
-        source: source,
-        gitBackup: gitBackup
-      }
+      metadata: backupMeta
     });
     return result;
   } catch (err) {
@@ -1407,7 +1416,8 @@ function parseAiBackupJson_(text, name) {
     modeId: modeId,
     modeName: modeId ? modeName_(modeId) : clip_(parsed.modeName, 80),
     instruction: clipChars_(String(parsed.instruction || ''), POE_INSTRUCTION_MAX_),
-    content: clipChars_(String(parsed.content || ''), GITHUB_REPLY_MAX_CHARS_)
+    content: clipChars_(String(parsed.content || ''), GITHUB_REPLY_MAX_CHARS_),
+    referenceIds: action === 'generateQuestions' ? sanitizeReferenceIds_(parsed.referenceIds) : []
   };
 }
 
@@ -1495,6 +1505,48 @@ function handleGetAiBackup_(body) {
   }
 }
 
+function sanitizeReferenceIds_(raw) {
+  var ids = [];
+  var seen = {};
+  var list = Array.isArray(raw) ? raw : [];
+  for (var i = 0; i < list.length && ids.length < 80; i++) {
+    var id = clip_(list[i], 80);
+    if (!id || seen[id]) continue;
+    if (/[\u0000-\u001F]/.test(id)) continue;
+    seen[id] = true;
+    ids.push(id);
+  }
+  return ids;
+}
+
+// Ids of questions actually sent as references. Paste runs store none.
+// Explicit ids are kept only when they also appear on the sent questions.
+function referenceIdsForBackup_(body, packed, source) {
+  if (referenceSource_(source) === 'paste') return [];
+  var fromSent = [];
+  var rawQuestions = Array.isArray(body && body.questions) ? body.questions : [];
+  for (var i = 0; i < rawQuestions.length; i++) {
+    var item = rawQuestions[i];
+    if (!item || typeof item !== 'object') continue;
+    if (!clip_(item.question, 6000)) continue;
+    fromSent.push(item.id);
+  }
+  var sentIds = sanitizeReferenceIds_(fromSent);
+  if (!sentIds.length && packed && Array.isArray(packed.questions)) {
+    for (var p = 0; p < packed.questions.length; p++) fromSent.push(packed.questions[p].id);
+    sentIds = sanitizeReferenceIds_(fromSent);
+  }
+  var explicit = sanitizeReferenceIds_(body && body.referenceIds);
+  if (!explicit.length) return sentIds;
+  var allowed = {};
+  for (var j = 0; j < sentIds.length; j++) allowed[sentIds[j]] = true;
+  var kept = [];
+  for (var k = 0; k < explicit.length; k++) {
+    if (allowed[explicit[k]]) kept.push(explicit[k]);
+  }
+  return kept.length ? kept : sentIds;
+}
+
 function writeGitAiBackup_(info) {
   var cfg = githubConfig_();
   if (!githubBackupReady_(cfg)) return false;
@@ -1527,6 +1579,9 @@ function writeGitAiBackup_(info) {
       : '',
     content: reply
   };
+  if (action === 'generateQuestions') {
+    payload.referenceIds = sanitizeReferenceIds_(info.referenceIds);
+  }
   if (action !== 'generateQuestions') {
     payload.modeId = '';
     payload.modeName = '';
@@ -2282,6 +2337,39 @@ function selfTestGitPaths() {
   }), '20260101-000000-000-generateQuestions-abcd1234.json');
   if (!parsedSingle || parsedSingle.referenceSource !== 'single' || parsedSingle.content !== 'ok') {
     throw new Error('ai_backup_single');
+  }
+  if (sanitizeReferenceIds_([' 2026-P1-01 ', '', '2026-P1-01', '2026-P2-03']).join('|') !== '2026-P1-01|2026-P2-03') {
+    throw new Error('ref_ids');
+  }
+  var filterIds = referenceIdsForBackup_({
+    questions: [{ id: '2026-P1-01', question: '題幹' }, { id: '', question: '沒有編號' }],
+    referenceIds: ['2026-P1-01', 'not-sent']
+  }, null, 'filter');
+  if (filterIds.join('|') !== '2026-P1-01') throw new Error('ref_ids_filter');
+  var singleIds = referenceIdsForBackup_({
+    questions: [{ id: '2026-P1-01', question: '題幹' }]
+  }, null, 'single');
+  if (singleIds.join('|') !== '2026-P1-01') throw new Error('ref_ids_single');
+  if (referenceIdsForBackup_({
+    questions: [{ id: 'fake', question: '貼上' }],
+    referenceIds: ['fake']
+  }, null, 'paste').length !== 0) throw new Error('ref_ids_paste');
+  var parsedIds = parseAiBackupJson_(JSON.stringify({
+    action: 'generateQuestions',
+    source: 'filter',
+    referenceIds: ['2026-P1-01', '2026-P1-01', ''],
+    content: 'ok'
+  }), '20260101-000000-000-generateQuestions-abcd1234.json');
+  if (!parsedIds || !parsedIds.referenceIds || parsedIds.referenceIds.join('|') !== '2026-P1-01') {
+    throw new Error('ai_backup_ref_ids');
+  }
+  var parsedOld = parseAiBackupJson_(JSON.stringify({
+    action: 'generateQuestions',
+    source: 'filter',
+    content: 'ok'
+  }), '20260101-000000-000-generateQuestions-abcd1234.json');
+  if (!parsedOld || !parsedOld.referenceIds || parsedOld.referenceIds.length !== 0) {
+    throw new Error('ai_backup_ref_ids_missing');
   }
   var leaked = gitOk_({
     sha: 'nope',
