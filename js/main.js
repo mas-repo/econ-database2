@@ -349,6 +349,15 @@ function setupEventListeners() {
                 return;
             }
             
+            const aiGenerateBtn = target.closest('[data-action="ai-generate"]');
+            if (aiGenerateBtn) {
+                const id = aiGenerateBtn.getAttribute('data-id');
+                if (typeof openPoeGenerateModalForQuestion === 'function') {
+                    openPoeGenerateModalForQuestion(id, aiGenerateBtn);
+                }
+                return;
+            }
+
             const originalBtn = target.closest('[data-action="original"]');
             if (originalBtn) {
                 openOriginalImages(originalBtn.getAttribute('data-images') || '');

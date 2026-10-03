@@ -1,5 +1,5 @@
 // poeGenerateModal.js
-// Modal for generating new questions from the current filters.
+// Modal for generating new questions from the current filters, or from one displayed question.
 // The browser only talks to the Apps Script web app in config.js.
 // Providers: Poe | OpenRouter. Script property POE_API_KEY is an admin-only
 // shared fallback for Poe; optional OPENROUTER_API_KEY is the same for OpenRouter.
@@ -95,7 +95,10 @@
         storeMode: null,
         busyAction: '',
         resultExpanded: false,
-        enlargeOverlay: null
+        enlargeOverlay: null,
+        pinnedQuestion: null,
+        pendingTrigger: null,
+        defaultSubtitle: ''
     };
 
     function modeById(id) {
@@ -713,14 +716,20 @@
         }
     }
 
+    function setAiGenerateAllowed(allowed) {
+        document.body.classList.toggle('poe-ai-allowed', !!allowed);
+    }
+
     function hideGenerateButton() {
         var button = document.getElementById('poe-generate-btn');
         if (button) button.hidden = true;
+        setAiGenerateAllowed(false);
     }
 
     function showGenerateButton() {
         var button = document.getElementById('poe-generate-btn');
         if (button) button.hidden = false;
+        setAiGenerateAllowed(true);
     }
 
     async function refreshPoeGenerateAccess() {
@@ -767,6 +776,27 @@
         return letter || written || '';
     }
 
+    function bankQuestionFrom(question) {
+        var stem = String(question.plainText || question.questionTextChi || question.questionTextEng || '').trim();
+        var copy = {
+            id: question.id || '',
+            examination: question.examination || '',
+            year: question.year == null ? '' : question.year,
+            questionType: question.questionType || '',
+            concepts: Array.isArray(question.concepts) ? question.concepts.slice() : [],
+            plainText: stem,
+            questionTextChi: question.questionTextChi || '',
+            answerMC: question.answerMC,
+            answerChi: question.answerChi,
+            answerEng: question.answerEng
+        };
+        if (!explanationText(copy)) {
+            var eng = copy.answerEng && copy.answerEng !== '-' ? String(copy.answerEng).trim() : '';
+            if (eng) copy.answerChi = eng;
+        }
+        return copy;
+    }
+
     function toReference(question) {
         var concepts = Array.isArray(question.concepts)
             ? question.concepts.map(function (item) { return String(item || '').trim(); }).filter(Boolean).join('、')
@@ -805,6 +835,16 @@
         });
     }
 
+    async function questionById(id) {
+        var wanted = String(id || '');
+        if (!wanted || !window.storage || typeof window.storage.getQuestions !== 'function') return null;
+        var questions = await window.storage.getQuestions({ triState: {} });
+        for (var i = 0; i < questions.length; i++) {
+            if (questions[i] && String(questions[i].id) === wanted) return questions[i];
+        }
+        return null;
+    }
+
     async function questionsByIds(ids) {
         if (!window.storage || typeof window.storage.getQuestions !== 'function') return [];
         var questions = await window.storage.getQuestions({ triState: {} });
@@ -818,6 +858,7 @@
     }
 
     function currentSource() {
+        if (poeUi.pinnedQuestion) return 'single';
         var selected = document.querySelector('input[name="poe-reference-source"]:checked');
         return selected && selected.value === 'paste' ? 'paste' : 'filter';
     }
@@ -1100,7 +1141,7 @@
         var name = String(backup.name || '').replace(/^.*\//, '');
         var content = String(backup.content == null ? '' : backup.content);
         var source = backup.referenceSource || backup.source || 'filter';
-        source = source === 'paste' ? 'paste' : 'filter';
+        source = source === 'paste' ? 'paste' : (source === 'single' ? 'single' : 'filter');
         var createdAt = remoteBackupCreatedAt(backup, name);
         var id = name
             ? ('remote:' + name)
@@ -1120,6 +1161,7 @@
             referenceSource: source,
             referenceIds: [],
             pastedReferences: [],
+            singleQuestion: null,
             filterSummary: '',
             durationMs: Number(backup.durationMs) || 0,
             remoteName: name,
@@ -1452,6 +1494,17 @@
             + '        <label class="poe-source-option"><input type="radio" name="poe-reference-source" value="filter" checked> 使用目前篩選</label>'
             + '        <label class="poe-source-option"><input type="radio" name="poe-reference-source" value="paste"> 自行貼上題目</label>'
             + '      </div>'
+            + '      <div class="poe-single" id="poe-single-wrap" hidden>'
+            + '        <p class="poe-single-lead" id="poe-single-lead"></p>'
+            + '        <div class="poe-single-block">'
+            + '          <div class="poe-single-label">題幹</div>'
+            + '          <pre class="poe-single-text" id="poe-single-stem"></pre>'
+            + '        </div>'
+            + '        <div class="poe-single-block">'
+            + '          <div class="poe-single-label">答案</div>'
+            + '          <pre class="poe-single-text" id="poe-single-answer"></pre>'
+            + '        </div>'
+            + '      </div>'
             + '      <div class="poe-paste" id="poe-paste-wrap" hidden>'
             + '        <label for="poe-paste-input">貼上題目</label>'
             + '        <textarea id="poe-paste-input" rows="8" maxlength="100000" aria-label="貼上題目" placeholder="可貼上一題或多題。用空行分隔，或以 1. 2. 3. 編號。若有解釋，在題幹後另起一行寫「解釋：」。"></textarea>'
@@ -1568,6 +1621,31 @@
 
     async function openPoeGenerateModal() {
         if (poeUi.opening || isPoeGenerateModalOpen()) return;
+        poeUi.pinnedQuestion = null;
+        poeUi.pendingTrigger = document.getElementById('poe-generate-btn');
+        await runPoeGenerateOpen();
+    }
+
+    async function openPoeGenerateModalForQuestion(id, trigger) {
+        if (poeUi.opening || isPoeGenerateModalOpen()) return;
+        var question = await questionById(id);
+        if (poeUi.opening || isPoeGenerateModalOpen()) return;
+        if (!question) {
+            window.alert('找不到這一題，未能出題。');
+            return;
+        }
+        var bank = bankQuestionFrom(question);
+        if (!bank.plainText) {
+            window.alert('這一題沒有可送出的題幹。');
+            return;
+        }
+        poeUi.pinnedQuestion = bank;
+        poeUi.pendingTrigger = trigger || null;
+        await runPoeGenerateOpen();
+    }
+
+    async function runPoeGenerateOpen() {
+        if (poeUi.opening || isPoeGenerateModalOpen()) return;
         poeUi.opening = true;
         try {
             await openPoeGenerateModalBody();
@@ -1580,16 +1658,16 @@
         var allowed = await poeCheckAccess();
         if (!allowed) {
             hideGenerateButton();
+            poeUi.pinnedQuestion = null;
             return;
         }
         ensureModal();
         loadComposer();
         refreshProviderSummary();
         clearTestBanner();
-        var pasteWrap = document.getElementById('poe-paste-wrap');
-        if (pasteWrap) pasteWrap.hidden = currentSource() !== 'paste';
         poeUi.pasteCount = pasteQuestions().length;
-        poeUi.trigger = document.getElementById('poe-generate-btn');
+        poeUi.trigger = poeUi.pendingTrigger || document.getElementById('poe-generate-btn');
+        syncPinnedChrome();
         poeUi.overlay.hidden = false;
         document.body.classList.add('poe-modal-open');
         setStatus('');
@@ -1608,6 +1686,13 @@
         renderHistory();
         // Cross-device history: merge GitHub AI backups without blocking the modal.
         syncRemoteHistoryIntoUi(historyUser);
+        if (poeUi.pinnedQuestion) {
+            poeUi.counting = false;
+            updateMeta(1, false);
+            if (!poeUi.activeRecord) showIdle(1, false);
+            syncActionButtons();
+            return;
+        }
         var usable = [];
         try {
             usable = await loadFilteredQuestions();
@@ -1626,9 +1711,45 @@
         refreshSourceMeta(counting);
     }
 
+    function syncPinnedChrome() {
+        var subtitle = poeUi.overlay && poeUi.overlay.querySelector('.poe-subtitle');
+        if (subtitle && !poeUi.defaultSubtitle) poeUi.defaultSubtitle = subtitle.textContent;
+        if (subtitle) {
+            subtitle.textContent = poeUi.pinnedQuestion
+                ? '這次只根據你按下按鈕的那一題（題幹與答案）出題，不會用目前篩選的其他題。出題模式與「API／模型設定」與篩選出題相同。'
+                : (poeUi.defaultSubtitle || subtitle.textContent);
+        }
+        var sourceBox = poeUi.overlay && poeUi.overlay.querySelector('.poe-source');
+        var single = document.getElementById('poe-single-wrap');
+        var pasteWrap = document.getElementById('poe-paste-wrap');
+        var pinned = !!poeUi.pinnedQuestion;
+        if (sourceBox) sourceBox.hidden = pinned;
+        if (single) single.hidden = !pinned;
+        if (pasteWrap) pasteWrap.hidden = pinned || currentSource() !== 'paste';
+        var stem = document.getElementById('poe-single-stem');
+        var answer = document.getElementById('poe-single-answer');
+        var leadEl = document.getElementById('poe-single-lead');
+        if (!pinned) return;
+        if (stem) stem.textContent = poeUi.pinnedQuestion.plainText || '';
+        if (answer) answer.textContent = explanationText(poeUi.pinnedQuestion) || '（沒有答案）';
+        if (leadEl) {
+            var pinnedId = poeUi.pinnedQuestion.id || '';
+            leadEl.textContent = pinnedId
+                ? ('將只根據題目 ' + pinnedId + ' 的題幹與答案出題，不會用目前篩選的其他題。')
+                : '將只根據這一題的題幹與答案出題，不會用目前篩選的其他題。';
+        }
+    }
+
     function refreshSourceMeta(counting) {
         var meta = document.getElementById('poe-meta');
         if (!meta) return;
+        if (currentSource() === 'single') {
+            var pinnedId = poeUi.pinnedQuestion && poeUi.pinnedQuestion.id ? poeUi.pinnedQuestion.id : '';
+            meta.textContent = pinnedId
+                ? ('將只根據題目 ' + pinnedId + ' 的題幹與答案出題，不會用目前篩選的其他題。')
+                : '將只根據這一題的題幹與答案出題，不會用目前篩選的其他題。';
+            return;
+        }
         if (currentSource() === 'paste') {
             meta.textContent = leadForPaste(poeUi.pasteCount);
             return;
@@ -1637,6 +1758,13 @@
     }
 
     function onSourceChange() {
+        if (poeUi.pinnedQuestion) {
+            syncPinnedChrome();
+            refreshSourceMeta(false);
+            if (!poeUi.activeRecord && !poeUi.busy) showIdle(1, false);
+            syncActionButtons();
+            return;
+        }
         var wrap = document.getElementById('poe-paste-wrap');
         var paste = currentSource() === 'paste';
         if (wrap) wrap.hidden = !paste;
@@ -1668,14 +1796,18 @@
         stage.textContent = '';
         var lead = document.createElement('p');
         lead.className = 'poe-lead';
-        if (currentSource() === 'paste') {
+        if (currentSource() === 'single') {
+            lead.textContent = '按「根據這一題出題」後，伺服器會只附上這一題的題幹與答案，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
+        } else if (currentSource() === 'paste') {
             lead.textContent = '按「根據貼上內容出題」後，伺服器會附上貼上的題目，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
         } else {
             lead.textContent = '按「根據目前篩選出題」後，伺服器會附上參考題，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
         }
         stage.appendChild(lead);
         var noteText = '';
-        if (currentSource() === 'paste') {
+        if (currentSource() === 'single') {
+            noteText = '';
+        } else if (currentSource() === 'paste') {
             noteText = leadForPaste(poeUi.pasteCount);
         } else if (counting || !count) {
             noteText = counting ? '正在計算目前篩選的題數…' : leadForCount(0);
@@ -1921,6 +2053,7 @@
             meta.className = 'poe-history-meta';
             var metaBits = [];
             if (record.referenceSource === 'paste') metaBits.push('貼上');
+            if (record.referenceSource === 'single') metaBits.push('單題');
             if (record.modeName) metaBits.push(record.modeName);
             metaBits.push((record.sentCount || 0) + ' 題參考');
             meta.textContent = metaBits.join(' · ');
@@ -2008,16 +2141,20 @@
         var mode = document.getElementById('poe-mode');
         var settingsOpen = document.getElementById('poe-settings-open');
         var test = document.getElementById('poe-test');
-        var pasteMode = currentSource() === 'paste';
+        var sourceNow = currentSource();
+        var pasteMode = sourceNow === 'paste';
+        var singleMode = sourceNow === 'single';
         var canRegenerate = false;
-        if (poeUi.activeRecord && poeUi.activeRecord.referenceSource === 'paste') {
+        if (poeUi.activeRecord && poeUi.activeRecord.referenceSource === 'single') {
+            canRegenerate = !!poeUi.activeRecord.singleQuestion;
+        } else if (poeUi.activeRecord && poeUi.activeRecord.referenceSource === 'paste') {
             canRegenerate = !!(poeUi.activeRecord.pastedReferences && poeUi.activeRecord.pastedReferences.length);
         } else {
             canRegenerate = !!(poeUi.activeRecord && poeUi.activeRecord.referenceIds && poeUi.activeRecord.referenceIds.length);
         }
         if (start) {
-            start.textContent = pasteMode ? '根據貼上內容出題' : '根據目前篩選出題';
-            var blocked = pasteMode ? poeUi.pasteCount === 0 : (poeUi.counting || poeUi.filteredCount === 0);
+            start.textContent = singleMode ? '根據這一題出題' : (pasteMode ? '根據貼上內容出題' : '根據目前篩選出題');
+            var blocked = singleMode ? !poeUi.pinnedQuestion : (pasteMode ? poeUi.pasteCount === 0 : (poeUi.counting || poeUi.filteredCount === 0));
             start.disabled = poeUi.busy || blocked;
         }
         if (again) again.disabled = poeUi.busy || !canRegenerate;
@@ -2068,6 +2205,16 @@
     }
 
     async function generateFromCurrentSource() {
+        if (currentSource() === 'single') {
+            if (!poeUi.pinnedQuestion || !poeUi.pinnedQuestion.plainText) {
+                showError('no_reference_questions');
+                syncActionButtons();
+                return;
+            }
+            var singleId = poeUi.pinnedQuestion.id ? ('單題 ' + poeUi.pinnedQuestion.id) : '單題';
+            await runGeneration([poeUi.pinnedQuestion], singleId, 'single');
+            return;
+        }
         if (currentSource() === 'paste') {
             var parsed = pasteQuestions();
             poeUi.pasteCount = parsed.length;
@@ -2098,6 +2245,10 @@
     async function regenerateActive() {
         var active = poeUi.activeRecord;
         if (!active) return;
+        if (active.referenceSource === 'single' && active.singleQuestion) {
+            await runGeneration([active.singleQuestion], active.filterSummary || '單題', 'single');
+            return;
+        }
         if (active.referenceSource === 'paste' && active.pastedReferences && active.pastedReferences.length) {
             var pastedBank = active.pastedReferences.map(function (item) {
                 return { plainText: item.question, answerChi: item.explanation || '' };
@@ -2117,7 +2268,7 @@
 
     async function runGeneration(bankQuestions, summary, source) {
         if (poeUi.busy) return;
-        source = source === 'paste' ? 'paste' : 'filter';
+        source = source === 'paste' ? 'paste' : (source === 'single' ? 'single' : 'filter');
         var references = bankQuestions.map(toReference).filter(function (item) { return item.question; });
         if (!references.length) {
             showError('no_reference_questions');
@@ -2180,6 +2331,7 @@
                 filteredCount: data.filteredCount || filteredCount,
                 truncated: !!data.truncated || filteredCount > sending.length,
                 referenceSource: source,
+                singleQuestion: source === 'single' ? (bankQuestions[0] || null) : null,
                 referenceIds: source === 'paste' ? [] : sending.map(function (item) { return item.id; }).filter(Boolean),
                 pastedReferences: source === 'paste' ? sending.map(function (item) {
                     return { question: item.question, explanation: item.explanation || '' };
@@ -2369,6 +2521,7 @@
     }
 
     window.openPoeGenerateModal = openPoeGenerateModal;
+    window.openPoeGenerateModalForQuestion = openPoeGenerateModalForQuestion;
     window.closePoeGenerateModal = closePoeGenerateModal;
     window.isPoeGenerateModalOpen = isPoeGenerateModalOpen;
     window.initPoeGenerateFeature = initPoeGenerateFeature;

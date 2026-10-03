@@ -423,12 +423,13 @@ async function renderQuestions() {
                 
             </div>
             
-            ${isAdminMode ? `
-                <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <div class="question-card-actions${isAdminMode ? '' : ' only-ai'}" style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-outline-primary question-ai-generate" data-action="ai-generate" data-id="${escapeHTML(q.id)}" title="根據這一題的題幹與答案出題">AI出題</button>
+                ${isAdminMode ? `
                     <button class="btn btn-warning" data-action="edit" data-id="${escapeHTML(q.id)}">編輯</button>
                     <button class="btn btn-danger" data-action="delete" data-id="${escapeHTML(q.id)}">刪除</button>
-                </div>
-            ` : ''}
+                ` : ''}
+            </div>
         </div>
     `;
     }).join('');
