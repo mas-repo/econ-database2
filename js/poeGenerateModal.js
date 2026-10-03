@@ -98,7 +98,9 @@
         enlargeOverlay: null,
         pinnedQuestion: null,
         pendingTrigger: null,
-        defaultSubtitle: ''
+        defaultSubtitle: '',
+        historyQuery: '',
+        activeTab: 'compose'
     };
 
     function modeById(id) {
@@ -1159,7 +1161,7 @@
             filteredCount: Number(backup.filteredCount) || Number(backup.sentCount) || 0,
             truncated: false,
             referenceSource: source,
-            referenceIds: [],
+            referenceIds: normalizeReferenceIds(backup.referenceIds),
             pastedReferences: [],
             singleQuestion: null,
             filterSummary: '',
@@ -1191,6 +1193,9 @@
                 if (!existing.model && next.model) existing.model = next.model;
                 if (!existing.remoteName && next.remoteName) existing.remoteName = next.remoteName;
                 if (existing.lean && next.content) existing.lean = false;
+                if ((!existing.referenceIds || !existing.referenceIds.length) && next.referenceIds && next.referenceIds.length) {
+                    existing.referenceIds = next.referenceIds.slice();
+                }
                 return existing;
             }
             if (!existing.content && next.content) return next;
@@ -1264,6 +1269,9 @@
             if (!record.sentCount && filled.sentCount) record.sentCount = filled.sentCount;
             if (!record.filteredCount && filled.filteredCount) record.filteredCount = filled.filteredCount;
             if (!record.durationMs && filled.durationMs) record.durationMs = filled.durationMs;
+            if ((!record.referenceIds || !record.referenceIds.length) && filled.referenceIds && filled.referenceIds.length) {
+                record.referenceIds = filled.referenceIds.slice();
+            }
             record.lean = false;
             try { await saveGeneration(record); } catch (error) {}
         } catch (error) {
@@ -1480,15 +1488,12 @@
             + '    </div>'
             + '    <button type="button" class="poe-close" aria-label="關閉">×</button>'
             + '  </header>'
+            + '  <div class="poe-tabs" role="tablist" aria-label="AI出題分頁">'
+            + '    <button type="button" class="poe-tab is-active" id="poe-tab-compose" role="tab" aria-selected="true" aria-controls="poe-panel-compose">出題</button>'
+            + '    <button type="button" class="poe-tab" id="poe-tab-history" role="tab" aria-selected="false" aria-controls="poe-panel-history" tabindex="-1">過往紀錄</button>'
+            + '  </div>'
             + '  <div class="poe-body">'
-            + '    <aside class="poe-history" aria-label="過往生成">'
-            + '      <div class="poe-history-head">'
-            + '        <h3>過往紀錄</h3>'
-            + '        <button type="button" class="poe-text-btn" id="poe-history-clear">清除</button>'
-            + '      </div>'
-            + '      <div id="poe-history-list"></div>'
-            + '    </aside>'
-            + '    <section class="poe-main">'
+            + '    <section class="poe-main poe-tab-panel" id="poe-panel-compose" role="tabpanel" aria-labelledby="poe-tab-compose">'
             + '      <div class="poe-meta" id="poe-meta"></div>'
             + '      <div class="poe-source" role="radiogroup" aria-label="參考題來源">'
             + '        <label class="poe-source-option"><input type="radio" name="poe-reference-source" value="filter" checked> 使用目前篩選</label>'
@@ -1532,6 +1537,16 @@
             + '      </div>'
             + '      <div class="poe-stage" id="poe-stage" tabindex="0"></div>'
             + '    </section>'
+            + '    <aside class="poe-history poe-tab-panel" id="poe-panel-history" role="tabpanel" aria-labelledby="poe-tab-history" aria-label="過往生成" hidden>'
+            + '      <div class="poe-history-head">'
+            + '        <h3>過往紀錄</h3>'
+            + '        <button type="button" class="poe-text-btn" id="poe-history-clear">清除</button>'
+            + '      </div>'
+            + '      <label class="poe-history-search" for="poe-history-search">搜尋參考題編號'
+            + '        <input type="search" id="poe-history-search" autocomplete="off" spellcheck="false" placeholder="例如 2026-P1-01" aria-label="搜尋參考題編號">'
+            + '      </label>'
+            + '      <div id="poe-history-list"></div>'
+            + '    </aside>'
             + '  </div>'
             + '  <footer class="poe-footer">'
             + '    <p class="poe-footer-status" id="poe-status" aria-live="polite"></p>'
@@ -1568,6 +1583,9 @@
         overlay.querySelector('#poe-copy').addEventListener('click', copyActive);
         overlay.querySelector('#poe-cancel').addEventListener('click', function () { cancelGeneration(false); });
         overlay.querySelector('#poe-history-clear').addEventListener('click', clearHistory);
+        overlay.querySelector('#poe-tab-compose').addEventListener('click', function () { showPoeTab('compose'); });
+        overlay.querySelector('#poe-tab-history').addEventListener('click', function () { showPoeTab('history'); });
+        overlay.querySelector('#poe-history-search').addEventListener('input', onHistorySearchInput);
         overlay.addEventListener('keydown', onDialogKeydown);
     }
 
@@ -1683,6 +1701,7 @@
         } catch (error) {
             poeUi.records = [];
         }
+        showPoeTab('compose');
         renderHistory();
         // Cross-device history: merge GitHub AI backups without blocking the modal.
         syncRemoteHistoryIntoUi(historyUser);
@@ -2019,6 +2038,60 @@
         return sliced;
     }
 
+    function normalizeReferenceIds(value) {
+        if (!Array.isArray(value)) return [];
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < value.length && out.length < 80; i++) {
+            var id = String(value[i] == null ? '' : value[i]).trim();
+            if (!id || id.length > 80 || seen[id]) continue;
+            seen[id] = true;
+            out.push(id);
+        }
+        return out;
+    }
+
+    function showPoeTab(name) {
+        var historyOn = name === 'history';
+        var compose = document.getElementById('poe-panel-compose');
+        var history = document.getElementById('poe-panel-history');
+        var tabCompose = document.getElementById('poe-tab-compose');
+        var tabHistory = document.getElementById('poe-tab-history');
+        if (compose) compose.hidden = historyOn;
+        if (history) history.hidden = !historyOn;
+        if (tabCompose) {
+            tabCompose.classList.toggle('is-active', !historyOn);
+            tabCompose.setAttribute('aria-selected', historyOn ? 'false' : 'true');
+            tabCompose.tabIndex = historyOn ? -1 : 0;
+        }
+        if (tabHistory) {
+            tabHistory.classList.toggle('is-active', historyOn);
+            tabHistory.setAttribute('aria-selected', historyOn ? 'true' : 'false');
+            tabHistory.tabIndex = historyOn ? 0 : -1;
+        }
+        poeUi.activeTab = historyOn ? 'history' : 'compose';
+    }
+
+    function onHistorySearchInput(event) {
+        poeUi.historyQuery = String(event && event.target ? event.target.value : '');
+        renderHistory();
+    }
+
+    function historyQueryText() {
+        var input = document.getElementById('poe-history-search');
+        var raw = input ? String(input.value || '') : String(poeUi.historyQuery || '');
+        return raw.trim() ? raw.trim() : '';
+    }
+
+    function recordMatchesHistoryQuery(record, query) {
+        if (!query) return true;
+        var ids = record && Array.isArray(record.referenceIds) ? record.referenceIds : [];
+        for (var i = 0; i < ids.length; i++) {
+            if (String(ids[i]).indexOf(query) !== -1) return true;
+        }
+        return false;
+    }
+
     function previewText(content) {
         var line = String(content || '').split('\n').map(function (item) { return item.trim(); }).filter(Boolean)[0] || '（沒有內容）';
         line = line.replace(/^#{1,6}\s+/, '');
@@ -2036,7 +2109,18 @@
             list.appendChild(empty);
             return;
         }
-        poeUi.records.forEach(function (record) {
+        var query = historyQueryText();
+        var records = poeUi.records.filter(function (record) {
+            return recordMatchesHistoryQuery(record, query);
+        });
+        if (!records.length) {
+            var none = document.createElement('p');
+            none.className = 'poe-history-empty';
+            none.textContent = '沒有符合這個編號的紀錄。';
+            list.appendChild(none);
+            return;
+        }
+        records.forEach(function (record) {
             var row = document.createElement('div');
             row.className = 'poe-history-item' + (poeUi.activeRecord && poeUi.activeRecord.id === record.id ? ' is-active' : '');
             var open = document.createElement('button');
@@ -2075,6 +2159,7 @@
 
     async function selectRecord(record) {
         if (poeUi.busy || !record) return;
+        showPoeTab('compose');
         poeUi.activeRecord = record;
         renderHistory();
         syncActionButtons();
@@ -2268,6 +2353,7 @@
 
     async function runGeneration(bankQuestions, summary, source) {
         if (poeUi.busy) return;
+        showPoeTab('compose');
         source = source === 'paste' ? 'paste' : (source === 'single' ? 'single' : 'filter');
         var references = bankQuestions.map(toReference).filter(function (item) { return item.question; });
         if (!references.length) {
@@ -2307,7 +2393,8 @@
                 instruction: instruction,
                 source: source,
                 modeId: mode.id,
-                model: model
+                model: model,
+                referenceIds: source === 'paste' ? [] : normalizeReferenceIds(sending.map(function (item) { return item.id; }))
             }), 240000, poeUi.control);
             if (!isPoeGenerateModalOpen()) return;
             if (!data || data.ok !== true || !data.content) {
@@ -2332,7 +2419,7 @@
                 truncated: !!data.truncated || filteredCount > sending.length,
                 referenceSource: source,
                 singleQuestion: source === 'single' ? (bankQuestions[0] || null) : null,
-                referenceIds: source === 'paste' ? [] : sending.map(function (item) { return item.id; }).filter(Boolean),
+                referenceIds: source === 'paste' ? [] : normalizeReferenceIds(sending.map(function (item) { return item.id; })),
                 pastedReferences: source === 'paste' ? sending.map(function (item) {
                     return { question: item.question, explanation: item.explanation || '' };
                 }) : [],
@@ -2415,6 +2502,7 @@
 
     async function testSelectedModel() {
         if (poeUi.busy) return;
+        showPoeTab('compose');
         if (!ensureApiKeyReady()) {
             syncActionButtons();
             return;
