@@ -1,10 +1,11 @@
-﻿/**
+/**
  * Poe question-generation proxy and private GitHub sync for econ-database.
  *
- * The public site never sees the Poe API key, the GitHub token, the GitHub
+ * The public site never receives the server Poe API key, the GitHub token, the GitHub
  * account, or the private repository name, and it never sees who is allowed
  * to use these features. All of that lives only in Script properties:
- *   POE_API_KEY
+ *   POE_API_KEY                (shared Poe fallback for admin only; see resolveApiKey_)
+ *   OPENROUTER_API_KEY         (optional shared OpenRouter fallback for admin only)
  *   ALLOWED_ADMIN_HASHES       (SHA-256 hex; full rights)
  *   ALLOWED_AI_HASHES          (SHA-256 hex; AI出題 and mock tests, no GitHub)
  *   ALLOWED_RESTRICTED_HASHES  (SHA-256 hex; browse without mock tests, AI, or GitHub)
@@ -12,17 +13,21 @@
  *   GITHUB_OWNER
  *   GITHUB_REPO
  *   GITHUB_BRANCH        (optional; main when empty)
- *   GITHUB_DATA_PATH     (inside each user's folder; shape data/questions.json)
+ *   GITHUB_DATA_PATH     (under shared prefix; shape data/database.json → shared/data/database.json)
  *   GITHUB_AI_BACKUP_DIR (inside each user's folder; shape ai-backups)
  *   GITHUB_SHARED_PREFIX (optional; shared when empty)
  *
- * Question uploads and model-reply files are stored per user:
- *   users/<username>/<GITHUB_DATA_PATH>
+ * Question-bank upload/download is shared for every githubSync user:
+ *   <GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>
+ *   e.g. shared/data/database.json
+ * Username is required for auth only and must not appear in the bank path.
+ * Bank paths under users/ are rejected.
+ * Model-reply (AI出題) backups stay personal:
  *   users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json
  * <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
  * The browser does not choose that path and never sees the owner or repository.
  *
- * Shared diagrams, the question bank, and paper packs are a separate tree.
+ * Shared diagrams, the question bank, and paper packs live under the same prefix.
  * GITHUB_SHARED_PREFIX defaults to shared. The site asks for a relative path
  * such as data/database.json, diagrams/…, originals/…, or papers/….
  * The script reads <prefix>/<relative path> and will not read users/.
@@ -38,8 +43,8 @@
  *   This script still refuses Poe and GitHub calls unless the username is allowed.
  * - Do not put the key, the token, the owner, the repository name, or the
  *   real allowlist in the sheet, this repo, or the page.
- * - urlFetchWhitelist in appsscript.json limits outbound calls to api.poe.com
- *   and api.github.com. The browser never calls either host with a secret.
+ * - urlFetchWhitelist in appsscript.json limits outbound calls to api.poe.com,
+ *   openrouter.ai, and api.github.com. The browser never calls those hosts with a secret.
  * - UsageLog is created on first write. Protect that tab so casual editors
  *   cannot wipe the audit trail. The deploying account can still append.
  * - GenerationBackup is a separate tab. Successful generateQuestions and
@@ -64,9 +69,14 @@
  */
 
 var POE_CHAT_URL_ = 'https://api.poe.com/v1/chat/completions';
+var OPENROUTER_CHAT_URL_ = 'https://openrouter.ai/api/v1/chat/completions';
 var POE_DEFAULT_MODEL_ = 'Claude-Sonnet-5.5';
-// Client model strings outside this list are ignored. Keep in sync with
-// POE_MODELS in js/poeGenerateModal.js.
+var OPENROUTER_DEFAULT_MODEL_ = 'openai/gpt-4o-mini';
+var OPENROUTER_MODEL_MAX_ = 120;
+var POE_MODEL_MAX_ = 120;
+// Dropdown presets for Poe (keep in sync with POE_MODELS in js/poeGenerateModal.js).
+// Clients may also send a sanitized free-text Poe bot id (isAllowedPoeModelId_).
+// OpenRouter accepts free-text ids (validated by isAllowedOpenRouterModel_).
 var POE_ALLOWED_MODELS_ = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash'];
 // Ids and display names only. Prompts stay in POE_GENERATION_MODES on the client
 // and arrive as `instruction`. Keep ids and names in sync with that object.
@@ -114,6 +124,8 @@ function handlePost_(e) {
   if (action === 'syncDataDownload') return handleGitDownload_(body);
   if (action === 'fetchSharedAsset') return handleFetchShared_(body);
   if (action === 'listSharedData') return handleListShared_(body);
+  if (action === 'listAiBackups') return handleListAiBackups_(body);
+  if (action === 'getAiBackup') return handleGetAiBackup_(body);
   if (action === 'testModel') return handleTest_(body);
   return { ok: false, error: 'bad_request' };
 }
@@ -138,8 +150,48 @@ function handleLogin_(body) {
   return { ok: true };
 }
 
+// paste: pasted questions. single: one displayed question (stem + answer). Anything else is filter.
 function referenceSource_(value) {
-  return String(value || '') === 'paste' ? 'paste' : 'filter';
+  var text = String(value || '');
+  if (text === 'paste' || text === 'single') return text;
+  return 'filter';
+}
+
+
+function resolveProvider_(body) {
+  var value = String(body && body.provider || '').trim().toLowerCase();
+  return value === 'openrouter' ? 'openrouter' : 'poe';
+}
+
+function resolvePoeApiKey_(body, username) {
+  // Prefer a non-empty per-request key from the browser. Never log or store it.
+  var fromBody = String(body && body.poeApiKey || '').trim();
+  if (fromBody) return fromBody;
+  // Shared Script property POE_API_KEY is admin-only. Production admin
+  // (ALLOWED_ADMIN_HASHES) maps to a single operator; AI editors and other
+  // roles must send their own poeApiKey. Gate on admin (same users as
+  // githubSync), not a plaintext username, so hashes stay out of git.
+  var rights = lookupRights_(username);
+  if (rights && rights.admin === true) {
+    return String(props_().getProperty('POE_API_KEY') || '').trim();
+  }
+  return '';
+}
+
+function resolveOpenRouterApiKey_(body, username) {
+  var fromBody = String(body && body.openRouterApiKey || '').trim();
+  if (fromBody) return fromBody;
+  var rights = lookupRights_(username);
+  if (rights && rights.admin === true) {
+    return String(props_().getProperty('OPENROUTER_API_KEY') || '').trim();
+  }
+  return '';
+}
+
+function resolveApiKey_(body, username, provider) {
+  provider = provider === 'openrouter' ? 'openrouter' : 'poe';
+  if (provider === 'openrouter') return resolveOpenRouterApiKey_(body, username);
+  return resolvePoeApiKey_(body, username);
 }
 
 function handleGenerate_(body) {
@@ -157,15 +209,16 @@ function handleGenerate_(body) {
     return { ok: false, error: 'feature_unavailable' };
   }
 
-  var apiKey = String(props_().getProperty('POE_API_KEY') || '').trim();
+  var provider = resolveProvider_(body);
+  var apiKey = resolveApiKey_(body, username, provider);
   if (!apiKey) {
     writeLog_({
       username: username,
       action: 'generateQuestions',
       success: false,
-      metadata: { error: 'proxy_not_configured', source: source }
+      metadata: { error: 'missing_api_key', source: source, provider: provider }
     }, true);
-    return { ok: false, error: 'proxy_not_configured' };
+    return { ok: false, error: 'missing_api_key' };
   }
 
   try {
@@ -202,12 +255,12 @@ function handleGenerate_(body) {
     return { ok: false, error: 'rate_limited' };
   }
 
-  var model = resolveModel_(body.model);
+  var model = resolveModel_(body.model, provider);
   var modeId = resolveModeId_(body.modeId);
   var instructionMeta = instructionMeta_(body.instruction);
   var started = Date.now();
   try {
-    var completion = requestCompletion_(apiKey, model, buildPrompt_(packed.questions, filteredCount, packed.truncated, instructionMeta.text), POE_SYSTEM_PROMPT_);
+    var completion = requestCompletion_(apiKey, model, buildPrompt_(packed.questions, filteredCount, packed.truncated, instructionMeta.text, source), POE_SYSTEM_PROMPT_, provider);
     var durationMs = Date.now() - started;
     var gitBackup = false;
     try {
@@ -219,7 +272,10 @@ function handleGenerate_(body) {
         sentCount: packed.questions.length,
         filteredCount: filteredCount,
         durationMs: durationMs,
-        source: source
+        source: source,
+        modeId: modeId,
+        modeName: modeName_(modeId),
+        instruction: instructionMeta.text
       }) === true;
     } catch (backupErr) {
       safeLog_(backupErr);
@@ -239,6 +295,7 @@ function handleGenerate_(body) {
     var generateMeta = {
       model: result.model,
       requestedModel: model,
+      provider: provider,
       modeId: modeId,
       modeName: modeName_(modeId),
       sentCount: result.sentCount,
@@ -271,6 +328,7 @@ function handleGenerate_(body) {
       content: completion.content,
       metadata: {
         requestedModel: model,
+        provider: provider,
         durationMs: durationMs,
         promptTokens: completion.promptTokens,
         completionTokens: completion.completionTokens,
@@ -294,6 +352,7 @@ function handleGenerate_(body) {
       metadata: {
         error: code,
         model: model,
+        provider: provider,
         modeId: modeId,
         sentCount: packed.questions.length,
         durationMs: Date.now() - started,
@@ -321,15 +380,16 @@ function handleTest_(body) {
     return { ok: false, error: 'feature_unavailable' };
   }
 
-  var apiKey = String(props_().getProperty('POE_API_KEY') || '').trim();
+  var provider = resolveProvider_(body);
+  var apiKey = resolveApiKey_(body, username, provider);
   if (!apiKey) {
     writeLog_({
       username: username,
       action: 'testModel',
       success: false,
-      metadata: { error: 'proxy_not_configured' }
+      metadata: { error: 'missing_api_key', provider: provider }
     }, true);
-    return { ok: false, error: 'proxy_not_configured' };
+    return { ok: false, error: 'missing_api_key' };
   }
 
   try {
@@ -345,10 +405,10 @@ function handleTest_(body) {
     return { ok: false, error: 'rate_limited' };
   }
 
-  var model = resolveModel_(body.model);
+  var model = resolveModel_(body.model, provider);
   var started = Date.now();
   try {
-    var completion = requestCompletion_(apiKey, model, POE_TEST_USER_PROMPT_, POE_TEST_SYSTEM_PROMPT_);
+    var completion = requestCompletion_(apiKey, model, POE_TEST_USER_PROMPT_, POE_TEST_SYSTEM_PROMPT_, provider);
     var durationMs = Date.now() - started;
     var passed = testReplyOk_(completion.content);
     var gitBackup = false;
@@ -376,6 +436,7 @@ function handleTest_(body) {
     var testMeta = {
       model: result.model,
       requestedModel: model,
+      provider: provider,
       passed: passed,
       durationMs: durationMs,
       promptTokens: completion.promptTokens,
@@ -421,6 +482,7 @@ function handleTest_(body) {
       metadata: {
         error: code,
         model: model,
+        provider: provider,
         durationMs: Date.now() - started
       }
     }, true);
@@ -428,13 +490,14 @@ function handleTest_(body) {
   }
 }
 
-function buildPrompt_(questions, filteredCount, truncated, instruction) {
+function buildPrompt_(questions, filteredCount, truncated, instruction, source) {
   var lines = [instruction || POE_INSTRUCTION_, ''];
-  if (truncated || questions.length < filteredCount) {
+  var single = referenceSource_(source) === 'single';
+  if (!single && (truncated || questions.length < filteredCount)) {
     lines.push('（篩選結果共有 ' + filteredCount + ' 題，以下只附上 ' + questions.length + ' 題作為風格、用字與句式的參考。）');
     lines.push('');
   }
-  lines.push('以下為參考題目。請撰寫全新題目，不要逐句抄寫參考題。');
+  lines.push(single ? '以下只附上使用者指定的一題，包含題幹與答案（解釋）。請只根據這一題撰寫全新題目，不要假設還有其他篩選題，也不要逐句抄寫。' : '以下為參考題目。請撰寫全新題目，不要逐句抄寫參考題。');
   lines.push('');
   questions.forEach(function (q, index) {
     lines.push('【參考 ' + (index + 1) + '】');
@@ -452,7 +515,8 @@ function buildPrompt_(questions, filteredCount, truncated, instruction) {
   return lines.join('\n');
 }
 
-function requestCompletion_(apiKey, model, userPrompt, systemPrompt) {
+function requestCompletion_(apiKey, model, userPrompt, systemPrompt, provider) {
+  provider = provider === 'openrouter' ? 'openrouter' : 'poe';
   var payload = {
     model: model,
     messages: [
@@ -465,10 +529,17 @@ function requestCompletion_(apiKey, model, userPrompt, systemPrompt) {
   if (maxTokens != null && maxTokens > 0) payload.max_tokens = Math.round(maxTokens);
   if (temperature != null) payload.temperature = temperature;
 
-  var response = UrlFetchApp.fetch(POE_CHAT_URL_, {
+  var url = provider === 'openrouter' ? OPENROUTER_CHAT_URL_ : POE_CHAT_URL_;
+  var headers = { Authorization: 'Bearer ' + apiKey };
+  if (provider === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://github.com/';
+    headers['X-Title'] = 'econ-database AI';
+  }
+
+  var response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + apiKey },
+    headers: headers,
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
@@ -561,15 +632,18 @@ function hashInList_(digest, list) {
   return false;
 }
 
-// Highest match wins: admin, then AI editor, then restricted.
+// Highest match wins: admin, then AI editor, then mock-only, then restricted.
 // A value that is not 64 hex characters never matches, so a plaintext
 // username in a property does not grant a role.
-function rightsFromLists_(digest, adminHashes, aiHashes, restrictedHashes) {
+function rightsFromLists_(digest, adminHashes, aiHashes, mockHashes, restrictedHashes) {
   if (hashInList_(digest, adminHashes)) {
     return { known: true, admin: true, ai: true, githubSync: true, mockTests: true };
   }
   if (hashInList_(digest, aiHashes)) {
     return { known: true, admin: false, ai: true, githubSync: false, mockTests: true };
+  }
+  if (hashInList_(digest, mockHashes)) {
+    return { known: true, admin: false, ai: false, githubSync: false, mockTests: true };
   }
   if (hashInList_(digest, restrictedHashes)) {
     return { known: true, admin: false, ai: false, githubSync: false, mockTests: false };
@@ -579,12 +653,13 @@ function rightsFromLists_(digest, adminHashes, aiHashes, restrictedHashes) {
 
 function lookupRights_(username) {
   var name = normalizeUsername_(username);
-  if (!name) return rightsFromLists_('', [], [], []);
+  if (!name) return rightsFromLists_('', [], [], [], []);
   var stored = props_();
   return rightsFromLists_(
     sha256Hex_(name),
     stored.getProperty('ALLOWED_ADMIN_HASHES'),
     stored.getProperty('ALLOWED_AI_HASHES'),
+    stored.getProperty('ALLOWED_MOCK_HASHES'),
     stored.getProperty('ALLOWED_RESTRICTED_HASHES')
   );
 }
@@ -835,7 +910,7 @@ function fitSheetText_(value, max) {
   return { text: sliced, truncated: true };
 }
 
-function isAllowedModel_(value) {
+function isPresetPoeModel_(value) {
   var name = String(value || '').trim();
   for (var i = 0; i < POE_ALLOWED_MODELS_.length; i++) {
     if (POE_ALLOWED_MODELS_[i] === name) return true;
@@ -843,14 +918,44 @@ function isAllowedModel_(value) {
   return false;
 }
 
-// Allowlisted client model wins. A missing model may use POE_MODEL when that
-// property is itself allowlisted. Any other string falls back to the default.
-function resolveModel_(requested) {
+function isAllowedPoeModelId_(value) {
+  var name = String(value || '').trim();
+  if (!name || name.length > POE_MODEL_MAX_) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._\-]*$/.test(name)) return false;
+  if (name.indexOf('..') !== -1) return false;
+  return true;
+}
+
+// Keep old name for property / empty fallbacks that used the allowlist helper.
+function isAllowedModel_(value) {
+  return isPresetPoeModel_(value) || isAllowedPoeModelId_(value);
+}
+
+function isAllowedOpenRouterModel_(value) {
+  var name = String(value || '').trim();
+  if (!name || name.length > OPENROUTER_MODEL_MAX_) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._\-\/:]*$/.test(name)) return false;
+  if (name.indexOf('..') !== -1) return false;
+  return true;
+}
+
+// Poe / OpenRouter: validated free-text id (presets preferred in the UI).
+// A missing model may use POE_MODEL / OPENROUTER_MODEL when valid.
+function resolveModel_(requested, provider) {
+  provider = provider === 'openrouter' ? 'openrouter' : 'poe';
   var value = String(requested == null ? '' : requested).trim();
-  if (isAllowedModel_(value)) return value;
+  if (provider === 'openrouter') {
+    if (isAllowedOpenRouterModel_(value)) return value;
+    if (!value) {
+      var fromOr = String(props_().getProperty('OPENROUTER_MODEL') || '').trim();
+      if (isAllowedOpenRouterModel_(fromOr)) return fromOr;
+    }
+    return OPENROUTER_DEFAULT_MODEL_;
+  }
+  if (isAllowedPoeModelId_(value)) return value;
   if (!value) {
     var fromProperty = String(props_().getProperty('POE_MODEL') || '').trim();
-    if (isAllowedModel_(fromProperty)) return fromProperty;
+    if (isAllowedPoeModelId_(fromProperty)) return fromProperty;
   }
   return POE_DEFAULT_MODEL_;
 }
@@ -937,22 +1042,22 @@ function promptUsernameHash() {
 
 function selfTestRoleRights() {
   var sample = sha256Hex_('sample_user');
-  var adminRights = rightsFromLists_(sample, [sample], [], []);
+  var adminRights = rightsFromLists_(sample, [sample], [], [], []);
   if (!adminRights.known || !adminRights.admin || !adminRights.ai || !adminRights.githubSync || !adminRights.mockTests) {
     throw new Error('role_admin');
   }
-  var aiRights = rightsFromLists_(sample, [], [sample], []);
+  var aiRights = rightsFromLists_(sample, [], [sample], [], []);
   if (!aiRights.known || aiRights.admin || !aiRights.ai || aiRights.githubSync || !aiRights.mockTests) {
     throw new Error('role_ai');
   }
-  var restrictedRights = rightsFromLists_(sample, [], [], [sample]);
+  var restrictedRights = rightsFromLists_(sample, [], [], [], [sample]);
   if (!restrictedRights.known || restrictedRights.admin || restrictedRights.ai || restrictedRights.githubSync || restrictedRights.mockTests) {
     throw new Error('role_restricted');
   }
-  var none = rightsFromLists_(sample, [], [], []);
+  var none = rightsFromLists_(sample, [], [], [], []);
   if (none.known || none.ai || none.githubSync || none.mockTests) throw new Error('role_none');
-  if (rightsFromLists_(sample, ['sample_user'], [], []).known) throw new Error('role_plaintext_ignored');
-  if (rightsFromLists_(sample, [sample], [sample], [sample]).admin !== true) throw new Error('role_admin_wins');
+  if (rightsFromLists_(sample, ['sample_user'], [], [], []).known) throw new Error('role_plaintext_ignored');
+  if (rightsFromLists_(sample, [sample], [sample], [sample], [sample]).admin !== true) throw new Error('role_admin_wins');
   var payload = rightsResponse_(aiRights);
   var encoded = JSON.stringify(payload);
   if (payload.ok !== true || payload.ai !== true || payload.githubSync !== false || payload.mockTests !== true || payload.admin !== false || payload.allowed !== false) {
@@ -1015,13 +1120,27 @@ function selfTestPromptShape() {
   if (referenceSource_('filter') !== 'filter') throw new Error('source_filter');
   if (referenceSource_('other') !== 'filter') throw new Error('source_other');
   if (referenceSource_(null) !== 'filter') throw new Error('source_empty');
-  if (resolveModel_('GPT-6.1-Sol') !== 'GPT-6.1-Sol') throw new Error('model_allow');
-  if (resolveModel_('  Gemini-3.8-Flash ') !== 'Gemini-3.8-Flash') throw new Error('model_trim');
-  if (resolveModel_('Claude-Sonnet-4.6') !== POE_DEFAULT_MODEL_) throw new Error('model_reject');
-  var emptyModel = resolveModel_('');
+  if (referenceSource_('single') !== 'single') throw new Error('source_single');
+  var singleBuilt = buildPrompt_(sample.questions, 1, false, sanitizeInstruction_(''), 'single');
+  if (singleBuilt.indexOf('測試題幹') === -1 || singleBuilt.indexOf('測試解釋') === -1) throw new Error('single_missing_qa');
+  if (singleBuilt.indexOf('只附上使用者指定的一題') === -1) throw new Error('single_prompt_frame');
+  if (resolveModel_('GPT-6.1-Sol', 'poe') !== 'GPT-6.1-Sol') throw new Error('model_allow');
+  if (resolveModel_('  Gemini-3.8-Flash ', 'poe') !== 'Gemini-3.8-Flash') throw new Error('model_trim');
+  if (resolveModel_('Claude-Sonnet-4.6', 'poe') !== 'Claude-Sonnet-4.6') throw new Error('model_custom_allow');
+  if (resolveModel_('bad model!!', 'poe') !== POE_DEFAULT_MODEL_) throw new Error('model_reject');
+  var emptyModel = resolveModel_('', 'poe');
   var propertyModel = String(props_().getProperty('POE_MODEL') || '').trim();
   var expectedEmpty = isAllowedModel_(propertyModel) ? propertyModel : POE_DEFAULT_MODEL_;
   if (emptyModel !== expectedEmpty) throw new Error('model_empty_fallback');
+  if (resolveProvider_({ provider: 'openrouter' }) !== 'openrouter') throw new Error('provider_openrouter');
+  if (resolveProvider_({ provider: 'poe' }) !== 'poe') throw new Error('provider_poe');
+  if (resolveProvider_({}) !== 'poe') throw new Error('provider_default');
+  if (resolveModel_('openai/gpt-4o-mini', 'openrouter') !== 'openai/gpt-4o-mini') throw new Error('or_model_allow');
+  if (resolveModel_('bad model!!', 'openrouter') !== OPENROUTER_DEFAULT_MODEL_) throw new Error('or_model_reject');
+  var orEmpty = resolveModel_('', 'openrouter');
+  var orProp = String(props_().getProperty('OPENROUTER_MODEL') || '').trim();
+  var orExpected = isAllowedOpenRouterModel_(orProp) ? orProp : OPENROUTER_DEFAULT_MODEL_;
+  if (orEmpty !== orExpected) throw new Error('or_model_empty_fallback');
   if (resolveModeId_('add-novelty') !== 'add-novelty') throw new Error('mode_allow');
   if (resolveModeId_('nope') !== '') throw new Error('mode_reject');
   if (modeName_('vary-examples') !== '改例子／數字') throw new Error('mode_name');
@@ -1048,6 +1167,8 @@ var GITHUB_REPLY_MAX_CHARS_ = 1000000;
 var SHARED_FETCH_MAX_BYTES_ = 9000000;
 var SHARED_LIST_MAX_ = 8000;
 var SHARED_READS_PER_MINUTE_ = 120;
+// Newest personal AI出題 backups returned by listAiBackups (matches client HISTORY_LIMIT).
+var AI_BACKUP_LIST_MAX_ = 30;
 
 function handleGitUpload_(body) {
   var username = normalizeUsername_(body.username);
@@ -1062,7 +1183,7 @@ function handleGitUpload_(body) {
   }
   var bytes = utf8Length_(text);
   if (bytes > GITHUB_DATA_MAX_BYTES_) return gitClientError_('payload_too_large');
-  var dataPath = githubUserDataPath_(cfg, username);
+  var dataPath = githubSharedBankPath_(cfg);
   if (!dataPath) return gitClientError_('github_error');
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
   var lock = LockService.getScriptLock();
@@ -1097,7 +1218,7 @@ function handleGitUpload_(body) {
       username: username,
       action: 'syncDataUpload',
       success: false,
-      metadata: { error: code }
+      metadata: { error: code , detail: clip_(err && err.message, 120) }
     }, true);
     return gitClientError_(code);
   }
@@ -1108,7 +1229,7 @@ function handleGitDownload_(body) {
   if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
   var cfg = githubConfig_();
   if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
-  var dataPath = githubUserDataPath_(cfg, username);
+  var dataPath = githubSharedBankPath_(cfg);
   if (!dataPath) return gitClientError_('github_error');
   try {
     var read = githubReadText_(cfg, dataPath);
@@ -1245,6 +1366,135 @@ function handleListShared_(body) {
   }
 }
 
+function aiBackupFileNameOk_(name) {
+  var file = String(name || '');
+  if (!file || file.indexOf('/') !== -1 || file.indexOf('\\') !== -1) return false;
+  if (file.indexOf('..') !== -1 || file === '.' || file === '..') return false;
+  if (!/\.json$/i.test(file)) return false;
+  return githubPathOk_(file);
+}
+
+function aiBackupEmptyOk_() {
+  return { ok: true, backups: [] };
+}
+
+function parseAiBackupJson_(text, name) {
+  var parsed = null;
+  try {
+    parsed = JSON.parse(String(text || ''));
+  } catch (err) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  var action = backupFileAction_(parsed.action);
+  var refSource = '';
+  if (action === 'generateQuestions') {
+    refSource = referenceSource_(parsed.referenceSource || parsed.source);
+  }
+  var modeId = action === 'generateQuestions' ? resolveModeId_(parsed.modeId) : '';
+  var createdAt = String(parsed.createdAt || '').trim();
+  if (createdAt.length > 40) createdAt = createdAt.slice(0, 40);
+  return {
+    name: String(name || ''),
+    action: action,
+    model: clip_(parsed.model, 120),
+    createdAt: createdAt,
+    sentCount: numberOrNull_(parsed.sentCount),
+    filteredCount: numberOrNull_(parsed.filteredCount),
+    durationMs: numberOrNull_(parsed.durationMs),
+    source: refSource,
+    referenceSource: refSource,
+    modeId: modeId,
+    modeName: modeId ? modeName_(modeId) : clip_(parsed.modeName, 80),
+    instruction: clipChars_(String(parsed.instruction || ''), POE_INSTRUCTION_MAX_),
+    content: clipChars_(String(parsed.content || ''), GITHUB_REPLY_MAX_CHARS_)
+  };
+}
+
+function resolveUserAiBackupPath_(cfg, username, name) {
+  if (!aiBackupFileNameOk_(name)) return '';
+  var dir = githubUserBackupDir_(cfg, username);
+  if (!dir) return '';
+  return joinGithubPath_(dir, name);
+}
+
+function listAiBackupFileNames_(cfg, backupDir) {
+  var listed = githubListTree_(cfg, backupDir, false);
+  var names = [];
+  for (var i = 0; i < listed.entries.length; i++) {
+    var item = listed.entries[i];
+    if (!item || String(item.type || '') !== 'blob') continue;
+    var name = String(item.path || '');
+    if (!aiBackupFileNameOk_(name)) continue;
+    // Prefer generateQuestions filenames so testModel pings do not fill the cap.
+    if (name.indexOf('-generateQuestions-') === -1) continue;
+    // Tree entries for a non-recursive dir list are basenames.
+    names.push(name);
+  }
+  names.sort(function (a, b) {
+    if (a === b) return 0;
+    return a < b ? 1 : -1;
+  });
+  return names;
+}
+
+function handleListAiBackups_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) return gitClientError_('feature_unavailable');
+  if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
+  var cfg = githubConfig_();
+  if (!githubBackupReady_(cfg)) return aiBackupEmptyOk_();
+  var backupDir = githubUserBackupDir_(cfg, username);
+  if (!backupDir) return aiBackupEmptyOk_();
+  try {
+    var names = listAiBackupFileNames_(cfg, backupDir);
+    var backups = [];
+    for (var i = 0; i < names.length && backups.length < AI_BACKUP_LIST_MAX_; i++) {
+      var name = names[i];
+      var full = resolveUserAiBackupPath_(cfg, username, name);
+      if (!full) continue;
+      var read;
+      try {
+        read = githubReadText_(cfg, full);
+      } catch (readErr) {
+        if (readErr && readErr.code === 'github_not_found') continue;
+        safeLog_(readErr);
+        continue;
+      }
+      var item = parseAiBackupJson_(read && read.text, name);
+      if (!item) continue;
+      // History sync is for AI出題 replies, not model pings.
+      if (item.action !== 'generateQuestions') continue;
+      backups.push(item);
+    }
+    return { ok: true, backups: backups };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') return aiBackupEmptyOk_();
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+}
+
+function handleGetAiBackup_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) return gitClientError_('feature_unavailable');
+  if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
+  var cfg = githubConfig_();
+  if (!githubBackupReady_(cfg)) return gitClientError_('github_not_found');
+  var name = String(body.name || body.file || '').trim();
+  var full = resolveUserAiBackupPath_(cfg, username, name);
+  if (!full) return gitClientError_('bad_request');
+  try {
+    var read = githubReadText_(cfg, full);
+    var item = parseAiBackupJson_(read && read.text, name);
+    if (!item) return gitClientError_('github_error');
+    return { ok: true, backup: item };
+  } catch (err) {
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+}
+
 function writeGitAiBackup_(info) {
   var cfg = githubConfig_();
   if (!githubBackupReady_(cfg)) return false;
@@ -1258,7 +1508,9 @@ function writeGitAiBackup_(info) {
   var path = joinGithubPath_(backupDir, stamp + '-' + action + '-' + nonce + '.json');
   if (!path) return false;
   var reply = clipChars_(String(info.content || ''), GITHUB_REPLY_MAX_CHARS_);
-  var text = JSON.stringify({
+  var refSource = action === 'generateQuestions' ? referenceSource_(info.source) : '';
+  var modeId = action === 'generateQuestions' ? resolveModeId_(info.modeId) : '';
+  var payload = {
     action: action,
     username: String(info.username || ''),
     model: String(info.model || ''),
@@ -1266,9 +1518,21 @@ function writeGitAiBackup_(info) {
     sentCount: numberOrNull_(info.sentCount),
     filteredCount: numberOrNull_(info.filteredCount),
     durationMs: numberOrNull_(info.durationMs),
-    source: action === 'generateQuestions' ? referenceSource_(info.source) : '',
+    source: refSource,
+    referenceSource: refSource,
+    modeId: modeId,
+    modeName: modeId ? modeName_(modeId) : String(info.modeName || ''),
+    instruction: action === 'generateQuestions'
+      ? clipChars_(String(info.instruction || ''), POE_INSTRUCTION_MAX_)
+      : '',
     content: reply
-  });
+  };
+  if (action !== 'generateQuestions') {
+    payload.modeId = '';
+    payload.modeName = '';
+    payload.instruction = '';
+  }
+  var text = JSON.stringify(payload);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return false;
   try {
@@ -1296,7 +1560,7 @@ function githubConfig_() {
 }
 
 function githubDataReady_(cfg) {
-  return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo) && githubBranchOk_(cfg.branch) && githubPathOk_(cfg.dataPath));
+  return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo) && githubBranchOk_(cfg.branch) && githubSharedBankPath_(cfg));
 }
 
 function githubBackupReady_(cfg) {
@@ -1584,11 +1848,25 @@ function githubUserSegment_(username) {
   return segment;
 }
 
-function githubUserDataPath_(cfg, username) {
-  var segment = githubUserSegment_(username);
+// Shared question-bank path for syncDataUpload / syncDataDownload.
+// Joins GITHUB_SHARED_PREFIX (default shared) with GITHUB_DATA_PATH.
+// If dataPath already starts with the shared prefix, do not double-prefix.
+// Rejects any bank path under users/. Username is never part of this path.
+function githubSharedBankPath_(cfg) {
+  var prefix = githubSharedPrefix_(cfg);
+  if (!prefix) return '';
   var rel = String(cfg && cfg.dataPath || '').replace(/^\/+|\/+$/g, '');
-  if (!segment || !githubPathOk_(rel)) return '';
-  return joinGithubPath_('users/' + segment, rel);
+  if (!rel || !githubPathOk_(rel)) return '';
+  if (rel === 'users' || rel.indexOf('users/') === 0) return '';
+  var full;
+  if (rel === prefix || rel.indexOf(prefix + '/') === 0) {
+    full = rel;
+  } else {
+    full = joinGithubPath_(prefix, rel);
+  }
+  if (!full) return '';
+  if (full === 'users' || full.indexOf('users/') === 0) return '';
+  return full;
 }
 
 function githubUserBackupDir_(cfg, username) {
@@ -1745,8 +2023,8 @@ function githubWriteViaContents_(cfg, path, text, message) {
 function githubWriteViaGitData_(cfg, path, text, message) {
   var head = githubHead_(cfg);
   var blob = githubFetch_(cfg, 'post', githubRepoPrefix_(cfg) + '/git/blobs', {
-    content: encodeGithubBase64_(text),
-    encoding: 'base64'
+    content: String(text),
+    encoding: 'utf-8'
   });
   if (blob.status < 200 || blob.status >= 300 || !blob.body || !blob.body.sha) throw gitFail_('github_error');
   var tree = githubFetch_(cfg, 'post', githubRepoPrefix_(cfg) + '/git/trees', {
@@ -1821,7 +2099,8 @@ function githubRefApi_(cfg) {
   var branch = String(cfg.branch || 'main').split('/').map(function (part) {
     return encodeURIComponent(part);
   }).join('/');
-  return githubRepoPrefix_(cfg) + '/git/ref/heads/' + branch;
+  // GitHub update-ref requires /git/refs/… (plural). GET accepts it too.
+  return githubRepoPrefix_(cfg) + '/git/refs/heads/' + branch;
 }
 
 function githubContentsApi_(cfg, path) {
@@ -1959,20 +2238,51 @@ function selfTestGitPaths() {
   if (githubUserSegment_('a/b')) throw new Error('user_segment_slash');
   if (githubUserSegment_('../x')) throw new Error('user_segment_dotdot');
   if (githubUserSegment_('bad name.json') !== 'bad-name.json') throw new Error('user_segment_space_file');
-  if (githubUserDataPath_({ dataPath: 'data/questions.json' }, 'Example') !== 'users/example/data/questions.json') {
-    throw new Error('user_data_path');
+  if (githubSharedBankPath_({ dataPath: 'data/database.json', sharedPrefix: '' }) !== 'shared/data/database.json') {
+    throw new Error('shared_bank_path');
   }
-  if (githubUserDataPath_({ dataPath: '../questions.json' }, 'example')) throw new Error('user_data_escape');
+  if (githubSharedBankPath_({ dataPath: 'data/database.json', sharedPrefix: 'shared' }) !== 'shared/data/database.json') {
+    throw new Error('shared_bank_explicit');
+  }
+  if (githubSharedBankPath_({ dataPath: 'shared/data/database.json', sharedPrefix: 'shared' }) !== 'shared/data/database.json') {
+    throw new Error('shared_bank_no_double');
+  }
+  if (githubSharedBankPath_({ dataPath: 'users/example/data/questions.json', sharedPrefix: 'shared' })) {
+    throw new Error('shared_bank_rejects_users');
+  }
+  if (githubSharedBankPath_({ dataPath: '../questions.json', sharedPrefix: 'shared' })) throw new Error('shared_bank_escape');
+  if (githubSharedBankPath_({ dataPath: 'data/database.json', sharedPrefix: 'users' })) throw new Error('shared_bank_bad_prefix');
   if (githubUserBackupDir_({ backupDir: 'ai-backups' }, 'Example') !== 'users/example/ai-backups') {
     throw new Error('user_backup_dir');
   }
   if (joinGithubPath_(githubUserBackupDir_({ backupDir: 'ai-backups' }, 'example'), '20260101-000000-000-generateQuestions-abcd1234.json') !== 'users/example/ai-backups/20260101-000000-000-generateQuestions-abcd1234.json') {
     throw new Error('user_backup_file');
   }
-  if (githubUserDataPath_({ dataPath: 'data/questions.json' }, 'a/b')) throw new Error('user_data_slash');
   if (backupFileAction_('generateQuestions') !== 'generateQuestions') throw new Error('backup_generate');
   if (backupFileAction_('testModel') !== 'testModel') throw new Error('backup_test_model');
   if (backupFileAction_('login') !== 'reply') throw new Error('backup_other');
+  if (!aiBackupFileNameOk_('20260101-000000-000-generateQuestions-abcd1234.json')) throw new Error('ai_backup_name_ok');
+  if (aiBackupFileNameOk_('../x.json')) throw new Error('ai_backup_name_dotdot');
+  if (aiBackupFileNameOk_('dir/x.json')) throw new Error('ai_backup_name_slash');
+  if (aiBackupFileNameOk_('note.txt')) throw new Error('ai_backup_name_ext');
+  var parsedBackup = parseAiBackupJson_(JSON.stringify({
+    action: 'generateQuestions',
+    model: 'Claude-Sonnet-5.5',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    source: 'paste',
+    content: '題目'
+  }), '20260101-000000-000-generateQuestions-abcd1234.json');
+  if (!parsedBackup || parsedBackup.referenceSource !== 'paste' || parsedBackup.content !== '題目') {
+    throw new Error('ai_backup_parse');
+  }
+  var parsedSingle = parseAiBackupJson_(JSON.stringify({
+    action: 'generateQuestions',
+    source: 'single',
+    content: 'ok'
+  }), '20260101-000000-000-generateQuestions-abcd1234.json');
+  if (!parsedSingle || parsedSingle.referenceSource !== 'single' || parsedSingle.content !== 'ok') {
+    throw new Error('ai_backup_single');
+  }
   var leaked = gitOk_({
     sha: 'nope',
     path: '../x',
@@ -2158,13 +2468,19 @@ function safeLog_(err) {
   var msg = String(err && err.stack || err && err.message || err || '');
   var secrets = [
     props_().getProperty('POE_API_KEY'),
+    props_().getProperty('OPENROUTER_API_KEY'),
     props_().getProperty('GITHUB_TOKEN')
   ];
   secrets.forEach(function (secret) {
     var value = String(secret || '').trim();
     if (value && msg.indexOf(value) !== -1) msg = msg.split(value).join('[redacted]');
   });
+  // Never echo a client-supplied key either (may appear in rare UrlFetch failures).
   msg = msg.replace(/Bearer\s+[A-Za-z0-9._\-]+/g, 'Bearer [redacted]');
+  msg = msg.replace(/"poeApiKey"\s*:\s*"[^"]*"/g, '"poeApiKey":"[redacted]"');
+  msg = msg.replace(/poeApiKey[=:]\s*\S+/gi, 'poeApiKey=[redacted]');
+  msg = msg.replace(/"openRouterApiKey"\s*:\s*"[^"]*"/g, '"openRouterApiKey":"[redacted]"');
+  msg = msg.replace(/openRouterApiKey[=:]\s*\S+/gi, 'openRouterApiKey=[redacted]');
   msg = msg.replace(/https:\/\/api\.github\.com\/repos\/\S+/g, 'https://api.github.com/repos/[redacted]');
   console.error(msg.slice(0, 1000));
 }
