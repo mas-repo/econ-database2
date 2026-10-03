@@ -968,3 +968,53 @@ body.poe-settings-open {
         border-radius: 0;
     }
 }
+
+/* Per-question AI button follows the same access gate as #poe-generate-btn. */
+body:not(.poe-ai-allowed) .question-ai-generate {
+    display: none !important;
+}
+
+body:not(.poe-ai-allowed) .question-card-actions.only-ai {
+    display: none !important;
+}
+
+.poe-source[hidden],
+.poe-single[hidden] {
+    display: none !important;
+}
+
+.poe-single {
+    padding: 10px 18px 12px;
+}
+
+.poe-single-lead {
+    margin: 0 0 8px;
+    color: var(--primary-color);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.poe-single-block + .poe-single-block {
+    margin-top: 8px;
+}
+
+.poe-single-label {
+    margin-bottom: 4px;
+    color: var(--primary-color);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.poe-single-text {
+    margin: 0;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 10px 12px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: #f8fafc;
+    font: inherit;
+    line-height: 1.6;
+}
