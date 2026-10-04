@@ -1130,3 +1130,43 @@ body:not(.poe-ai-allowed) .question-card-actions.only-ai {
     font: inherit;
     line-height: 1.6;
 }
+
+.poe-usage-note {
+    margin: 0;
+    padding: 0 14px 10px;
+    color: var(--text-light);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.poe-history-owner {
+    color: var(--primary-color);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#poe-usage-list {
+    overflow: auto;
+    padding: 0 10px 12px;
+    flex: 1;
+    min-height: 120px;
+}
+
+.poe-usage-detail {
+    border-top: 1px solid var(--border-light);
+    margin: 0 10px 12px;
+    padding: 10px 4px 4px;
+    overflow: auto;
+    max-height: 42%;
+    min-height: 0;
+}
+
+.poe-usage-detail[hidden] {
+    display: none !important;
+}
+
+.poe-usage-detail-meta {
+    margin: 0 0 8px;
+    color: var(--text-light);
+    font-size: 12px;
+}
