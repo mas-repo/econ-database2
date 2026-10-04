@@ -200,7 +200,24 @@ function resolveApiKey_(body, username, provider) {
   return resolvePoeApiKey_(body, username);
 }
 
+
+// Web-app executions stop at 6 minutes. Do not start a lock the return cannot outlive.
+var GENERATE_EXECUTION_LIMIT_MS_ = 360000;
+
+function executionMsLeft_(invokedAt) {
+  return GENERATE_EXECUTION_LIMIT_MS_ - (Date.now() - invokedAt);
+}
+
+function requestId_(value) {
+  var id = String(value || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,40}$/.test(id)) return '';
+  return id;
+}
+
 function handleGenerate_(body) {
+  // Budget is the 6-minute web-app cap, measured from entry so a slow model
+  // call can still return after the reply is saved.
+  var invokedAt = Date.now();
   var username = normalizeUsername_(body.username);
   var source = referenceSource_(body && body.source);
   if (!username || !lookupRights_(username).ai) {
@@ -270,23 +287,29 @@ function handleGenerate_(body) {
     var completion = requestCompletion_(apiKey, model, buildPrompt_(packed.questions, filteredCount, packed.truncated, instructionMeta.text, source), POE_SYSTEM_PROMPT_, provider);
     var durationMs = Date.now() - started;
     var gitBackup = false;
-    try {
-      gitBackup = writeGitAiBackup_({
-        action: 'generateQuestions',
-        username: username,
-        model: completion.model || model,
-        content: completion.content,
-        sentCount: packed.questions.length,
-        filteredCount: filteredCount,
-        durationMs: durationMs,
-        source: source,
-        modeId: modeId,
-        modeName: modeName_(modeId),
-        instruction: instructionMeta.text,
-        referenceIds: referenceIds
-      }) === true;
-    } catch (backupErr) {
-      safeLog_(backupErr);
+    var requestId = requestId_(body && body.requestId);
+    // Leave time to answer. A backup written after the cap kills the return,
+    // and the browser then has to read that same personal backup back.
+    if (executionMsLeft_(invokedAt) > 45000) {
+      try {
+        gitBackup = writeGitAiBackup_({
+          action: 'generateQuestions',
+          username: username,
+          model: completion.model || model,
+          content: completion.content,
+          sentCount: packed.questions.length,
+          filteredCount: filteredCount,
+          durationMs: durationMs,
+          source: source,
+          modeId: modeId,
+          modeName: modeName_(modeId),
+          instruction: instructionMeta.text,
+          referenceIds: referenceIds,
+          requestId: requestId
+        }) === true;
+      } catch (backupErr) {
+        safeLog_(backupErr);
+      }
     }
     var result = {
       ok: true,
@@ -300,6 +323,7 @@ function handleGenerate_(body) {
       durationMs: durationMs,
       gitBackup: gitBackup
     };
+    if (executionMsLeft_(invokedAt) <= 25000) return result;
     var generateMeta = {
       model: result.model,
       requestedModel: model,
@@ -1435,6 +1459,7 @@ function parseAiBackupJson_(text, name) {
     modeId: modeId,
     modeName: modeId ? modeName_(modeId) : clip_(parsed.modeName, 80),
     instruction: clipChars_(String(parsed.instruction || ''), POE_INSTRUCTION_MAX_),
+    requestId: requestId_(parsed.requestId),
     content: clipChars_(String(parsed.content || ''), GITHUB_REPLY_MAX_CHARS_),
     referenceIds: action === 'generateQuestions' ? sanitizeReferenceIds_(parsed.referenceIds) : []
   };
@@ -1861,6 +1886,7 @@ function writeGitAiBackup_(info) {
   };
   if (action === 'generateQuestions') {
     payload.referenceIds = sanitizeReferenceIds_(info.referenceIds);
+    payload.requestId = requestId_(info.requestId);
   }
   if (action !== 'generateQuestions') {
     payload.modeId = '';
@@ -2651,6 +2677,17 @@ function selfTestGitPaths() {
   if (!parsedOld || !parsedOld.referenceIds || parsedOld.referenceIds.length !== 0) {
     throw new Error('ai_backup_ref_ids_missing');
   }
+  if (requestId_('abc12345') !== 'abc12345') throw new Error('request_id_ok');
+  if (requestId_('short') !== '') throw new Error('request_id_short');
+  if (requestId_('../nope') !== '') throw new Error('request_id_bad');
+  var parsedReq = parseAiBackupJson_(JSON.stringify({
+    action: 'generateQuestions',
+    source: 'filter',
+    content: 'ok',
+    requestId: 'abc12345xyz'
+  }), '20260101-000000-000-generateQuestions-abcd1234.json');
+  if (!parsedReq || parsedReq.requestId !== 'abc12345xyz') throw new Error('ai_backup_request_id');
+
   if (aiUsageRecordUsers_().join('|') !== 'ryan|user57') throw new Error('usage_users');
   if (!aiUsageOwnerAllowed_('Ryan') || !aiUsageOwnerAllowed_('user57')) throw new Error('usage_allow');
   if (aiUsageOwnerAllowed_('ken') || aiUsageOwnerAllowed_('woody') || aiUsageOwnerAllowed_('lydia')) throw new Error('usage_deny');
