@@ -1,10 +1,7 @@
-// Questions are loaded from a local JSON file instead of Google Sheets.
+// Questions are loaded from the private repository through Apps Script.
 // Dependencies: storage-sync.js (QuestionJsonSource)
 
 const CONFIG = {
-    // Local fallback only. The hosted site loads shared/data/database.json
-    // through the Apps Script proxy. Do not commit that file here.
-    QUESTIONS_JSON_URL: 'data/database.json',
     // Apps Script web app (/exec) from econ-database/apps-script/README.md.
     // Leave empty until that deployment exists. This URL is not a secret.
     // The Poe API key, the allowlist, and GitHub sync settings stay in
@@ -14,6 +11,6 @@ const CONFIG = {
 };
 
 window.addEventListener('DOMContentLoaded', () => {
-    window.questionJsonSource = new QuestionJsonSource(CONFIG.QUESTIONS_JSON_URL);
+    window.questionJsonSource = new QuestionJsonSource();
     console.log('✅ JSON question source initialized');
 });

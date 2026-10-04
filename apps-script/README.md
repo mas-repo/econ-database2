@@ -144,7 +144,7 @@ Only `githubSync` (the admin role) sees **自動同步**, **上傳到 GitHub**, 
 - **上傳到 GitHub** sends the current question bank to `syncDataUpload`.
 - **從 GitHub 載入** calls `syncDataDownload` and replaces the browser’s IndexedDB copy.
 - With **自動同步** on, opening the page tries to load the private copy. Saving, deleting, importing, or exporting a question uploads the current bank. Clearing the database does not upload by itself.
-- Reloading the page still starts from `data/database.json`, then replaces it when auto-sync can read the private file.
+- Reloading the page loads the question bank through the Apps Script proxy. If that read fails, the page stays without questions.
 
 Both actions require `githubSync` before any GitHub read or write. A refused call returns `feature_unavailable` and does not say whether GitHub is configured.
 

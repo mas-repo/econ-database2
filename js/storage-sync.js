@@ -1,10 +1,9 @@
-// Dependencies: storage-core.js, auth.js
-// Loads the question bank from a JSON document (bundled file or a file the user supplies).
-// Replaces the previous Google Sheets / Apps Script sync.
+// Dependencies: storage-core.js, auth.js, shared-assets.js (fetchSharedQuestionBank)
+// Loads the question bank from the private repository through Apps Script.
+// A user can still import a JSON file they choose. This site does not ship a bank.
 
 class QuestionJsonSource {
-    constructor(jsonUrl) {
-        this.jsonUrl = jsonUrl;
+    constructor() {
         this.lastSyncTime = null;
         this.availableFields = new Set();
     }
@@ -99,31 +98,17 @@ class QuestionJsonSource {
     }
 
     async fetchPayload() {
-        // The public site does not ship the question bank. Allowlisted users
-        // receive it from the private repository through Apps Script.
-        // A local data/database.json is only a developer fallback.
+        // The question bank comes only from the private repository through
+        // Apps Script. A failed proxy call leaves the page without questions.
         if (window.databaseReady) {
             const pending = window.databaseReady;
             window.databaseReady = null;
             return pending;
         }
-        let proxyError = null;
-        if (typeof fetchSharedQuestionBank === 'function') {
-            try {
-                return await fetchSharedQuestionBank();
-            } catch (error) {
-                proxyError = error;
-                console.warn('共用題庫讀取失敗，改試本機檔案');
-            }
+        if (typeof fetchSharedQuestionBank !== 'function') {
+            throw new Error('無法讀取題庫');
         }
-        try {
-            const response = await fetch(this.jsonUrl, { cache: 'no-cache' });
-            if (response.ok) return response.json();
-        } catch (error) {
-            // No local file. The proxy error below is the one to show.
-        }
-        if (proxyError) throw proxyError;
-        throw new Error('無法讀取題庫');
+        return fetchSharedQuestionBank();
     }
 
     async syncOnLoad() {

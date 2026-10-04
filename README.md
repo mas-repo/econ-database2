@@ -3,7 +3,7 @@
 ## Purpose / 用途
 
 First-bank JSON question database for HKDSE / related Economics past papers.
-The question bank is not in this folder. The hosted page loads `shared/data/database.json` from the private data repository through the Apps Script proxy (`fetchSharedAsset`). Diagrams and original crops use the same proxy. A file at `data/database.json` is only a local fallback and is gitignored.
+The question bank is not in this folder. The hosted page loads `shared/data/database.json` from the private data repository through the Apps Script proxy (`fetchSharedAsset`). Diagrams and original crops use the same proxy. If that load fails, the page stays without questions. This repo does not keep a copy to fall back on.
 
 Future agents editing mock papers or bulk fields: read this file first.
 Records with reviewedByAI equal to Y must not be overwritten by builders that fill other fields. stemPatterns fills are additive (merge / union), not a wipe-and-replace of reviewed rows.

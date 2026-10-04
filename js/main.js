@@ -59,7 +59,7 @@ async function init() {
         return; // Stop if storage fails
     }
     
-    // Load the bundled question JSON (replaces Google Sheets sync).
+    // Load the question bank from the private repository. A proxy failure leaves the list empty.
     if (window.questionJsonSource) {
         try {
             console.log('📥 開始從 JSON 載入資料...');
