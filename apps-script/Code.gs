@@ -28,6 +28,9 @@
  * The browser does not choose that path and never sees the owner or repository.
  * listAiUsageRecords is admin-only. It reads those same backup files for the
  * fixed folders in AI_USAGE_RECORD_USERS_ and ignores any other name in the request.
+ * listAiBackups and listAiUsageRecords each return one page of AI_BACKUP_LIST_MAX_
+ * generateQuestions files, newest first. Pass after / afterName to continue.
+ * The request still cannot choose other users.
  *
  * Shared diagrams, the question bank, and paper packs live under the same prefix.
  * GITHUB_SHARED_PREFIX defaults to shared. The site asks for a relative path
@@ -1163,6 +1166,7 @@ function selfTestPromptShape() {
   if (!testReplyOk_('正常')) throw new Error('test_reply_plain');
   if (!testReplyOk_(' 正常。 ')) throw new Error('test_reply_punct');
   if (testReplyOk_('未能連線')) throw new Error('test_reply_wrong');
+  selfTestAiBackupPaging_();
   console.log('selfTestPromptShape ok');
 }
 
@@ -1179,7 +1183,8 @@ var GITHUB_REPLY_MAX_CHARS_ = 1000000;
 var SHARED_FETCH_MAX_BYTES_ = 9000000;
 var SHARED_LIST_MAX_ = 8000;
 var SHARED_READS_PER_MINUTE_ = 120;
-// Newest personal AI出題 backups returned by listAiBackups (matches client HISTORY_LIMIT).
+// Page size for listAiBackups and listAiUsageRecords (matches client HISTORY_LIMIT).
+// Newest first. A request cannot raise this cap or name another user's folder.
 var AI_BACKUP_LIST_MAX_ = 30;
 
 // Personal AI backup folders an admin may read via listAiUsageRecords.
@@ -1392,7 +1397,13 @@ function aiBackupFileNameOk_(name) {
 }
 
 function aiBackupEmptyOk_() {
-  return { ok: true, backups: [] };
+  return {
+    ok: true,
+    backups: [],
+    pageSize: AI_BACKUP_LIST_MAX_,
+    hasMore: false,
+    nextAfter: ''
+  };
 }
 
 function parseAiBackupJson_(text, name) {
@@ -1456,14 +1467,78 @@ function listAiBackupFileNames_(cfg, backupDir) {
   return names;
 }
 
-function collectGenerateBackups_(cfg, username, limit) {
+
+function backupListStartIndex_(names, afterName) {
+  if (!afterName) return 0;
+  var i;
+  for (i = 0; i < names.length; i++) {
+    if (names[i] === afterName) return i + 1;
+  }
+  for (i = 0; i < names.length; i++) {
+    if (names[i] < afterName) return i;
+  }
+  return names.length;
+}
+
+function aiBackupAfterName_(raw) {
+  if (raw == null || raw === '') return '';
+  if (typeof raw !== 'string') return null;
+  var name = String(raw).trim();
+  if (!name) return '';
+  if (!aiBackupFileNameOk_(name)) return null;
+  return name;
+}
+
+function usageStartIndex_(rows, afterName, afterUser) {
+  if (!afterName) return 0;
+  var i;
+  for (i = 0; i < rows.length; i++) {
+    if (rows[i].name === afterName && rows[i].username === afterUser) return i + 1;
+  }
+  for (i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row.name !== afterName) {
+      if (row.name < afterName) return i;
+    } else if (String(row.username || '') > String(afterUser || '')) {
+      return i;
+    }
+  }
+  return rows.length;
+}
+
+function selfTestAiBackupPaging_() {
+  var names = ['m.json', 'c.json', 'a.json'];
+  if (backupListStartIndex_(names, '') !== 0) throw new Error('backup_cursor_blank');
+  if (backupListStartIndex_(names, 'm.json') !== 1) throw new Error('backup_cursor_first');
+  if (backupListStartIndex_(names, 'c.json') !== 2) throw new Error('backup_cursor_mid');
+  if (backupListStartIndex_(names, 'd.json') !== 1) throw new Error('backup_cursor_gap');
+  if (backupListStartIndex_(names, 'z.json') !== 0) throw new Error('backup_cursor_newer');
+  if (backupListStartIndex_(names, '0.json') !== 3) throw new Error('backup_cursor_older');
+  var rows = [
+    { name: 'b.json', username: 'ryan' },
+    { name: 'b.json', username: 'user57' },
+    { name: 'a.json', username: 'ryan' }
+  ];
+  if (usageStartIndex_(rows, '', '') !== 0) throw new Error('usage_cursor_blank');
+  if (usageStartIndex_(rows, 'b.json', 'ryan') !== 1) throw new Error('usage_cursor_ryan');
+  if (usageStartIndex_(rows, 'b.json', 'user57') !== 2) throw new Error('usage_cursor_user57');
+  if (usageStartIndex_(rows, 'b.json', 's') !== 1) throw new Error('usage_cursor_user_gap');
+  if (aiBackupAfterName_('') !== '') throw new Error('after_blank');
+  if (aiBackupAfterName_(null) !== '') throw new Error('after_null');
+  if (aiBackupAfterName_('../x.json') !== null) throw new Error('after_reject');
+  if (aiBackupAfterName_('20260101-000000-generateQuestions-ab.json') !== '20260101-000000-generateQuestions-ab.json') throw new Error('after_ok');
+}
+
+function collectGenerateBackups_(cfg, username, limit, afterName) {
   var backups = [];
   var backupDir = githubUserBackupDir_(cfg, username);
-  if (!backupDir) return backups;
+  if (!backupDir) return { backups: backups, hasMore: false, nextAfter: '' };
   var names = listAiBackupFileNames_(cfg, backupDir);
   var cap = positiveInt_(limit, AI_BACKUP_LIST_MAX_);
   if (cap > AI_BACKUP_LIST_MAX_) cap = AI_BACKUP_LIST_MAX_;
-  for (var i = 0; i < names.length && backups.length < cap; i++) {
+  var start = backupListStartIndex_(names, afterName || '');
+  var hasMore = false;
+  for (var i = start; i < names.length; i++) {
     var name = names[i];
     var full = resolveUserAiBackupPath_(cfg, username, name);
     if (!full) continue;
@@ -1477,10 +1552,17 @@ function collectGenerateBackups_(cfg, username, limit) {
     }
     var item = parseAiBackupJson_(read && read.text, name);
     if (!item || item.action !== 'generateQuestions') continue;
-    backups.push(item);
+    if (backups.length < cap) {
+      backups.push(item);
+    } else {
+      hasMore = true;
+      break;
+    }
   }
-  return backups;
+  var nextAfter = backups.length ? String(backups[backups.length - 1].name || '') : '';
+  return { backups: backups, hasMore: hasMore, nextAfter: nextAfter };
 }
+
 
 function handleListAiBackups_(body) {
   var username = normalizeUsername_(body.username);
@@ -1489,14 +1571,27 @@ function handleListAiBackups_(body) {
   var cfg = githubConfig_();
   if (!githubBackupReady_(cfg)) return aiBackupEmptyOk_();
   if (!githubUserBackupDir_(cfg, username)) return aiBackupEmptyOk_();
+  var afterRaw = '';
+  if (body && typeof body.after === 'string') afterRaw = body.after;
+  else if (body && typeof body.afterName === 'string') afterRaw = body.afterName;
+  var afterName = aiBackupAfterName_(afterRaw);
+  if (afterName == null) return gitClientError_('bad_request');
   try {
-    return { ok: true, backups: collectGenerateBackups_(cfg, username, AI_BACKUP_LIST_MAX_) };
+    var page = collectGenerateBackups_(cfg, username, AI_BACKUP_LIST_MAX_, afterName);
+    return {
+      ok: true,
+      backups: page.backups,
+      pageSize: AI_BACKUP_LIST_MAX_,
+      hasMore: page.hasMore === true,
+      nextAfter: page.nextAfter || ''
+    };
   } catch (err) {
     if (err && err.code === 'github_not_found') return aiBackupEmptyOk_();
     safeLog_(err);
     return gitClientError_(err && err.code ? err.code : 'github_error');
   }
 }
+
 
 function handleGetAiBackup_(body) {
   var username = normalizeUsername_(body.username);
@@ -1561,26 +1656,43 @@ function usageRecordFromBackup_(item, owner) {
   };
 }
 
-function handleListAiUsageRecords_(body) {
-  var username = normalizeUsername_(body.username);
-  var rights = username ? lookupRights_(username) : null;
-  if (!username || !rights || rights.admin !== true) return gitClientError_('feature_unavailable');
-  if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
-  var cfg = githubConfig_();
-  if (!githubBackupReady_(cfg)) return { ok: true, records: [] };
+function usageCursor_(body, requester) {
+  if (!body) return { name: '', username: '' };
+  var nameRaw = body.afterName;
+  var userRaw = body.afterUser;
+  if ((nameRaw == null || String(nameRaw).trim() === '') && body.after && typeof body.after === 'object' && !Array.isArray(body.after)) {
+    nameRaw = body.after.name;
+    userRaw = body.after.username;
+  }
+  var nameText = nameRaw == null ? '' : String(nameRaw).trim();
+  var userText = userRaw == null ? '' : String(userRaw).trim();
+  if (!nameText && !userText) return { name: '', username: '' };
+  if (typeof nameRaw !== 'string' || typeof userRaw !== 'string') {
+    if (!(body.after && typeof body.after === 'object' && !Array.isArray(body.after) && typeof body.after.name === 'string' && typeof body.after.username === 'string')) {
+      return null;
+    }
+  }
+  if (!nameText || !aiBackupFileNameOk_(nameText)) return null;
+  var user = normalizeUsername_(userText);
+  if (!user || !aiUsageOwnerAllowed_(user) || user === requester) return null;
+  return { name: nameText, username: user };
+}
+
+function listUsageFileRows_(cfg, requester) {
   var owners = aiUsageRecordUsers_();
-  var records = [];
+  var rows = [];
   var hardFail = 0;
   var attempted = 0;
   for (var u = 0; u < owners.length; u++) {
     var owner = owners[u];
-    if (!aiUsageOwnerAllowed_(owner) || owner === username) continue;
+    if (!aiUsageOwnerAllowed_(owner) || owner === requester) continue;
+    var backupDir = githubUserBackupDir_(cfg, owner);
+    if (!backupDir) continue;
     attempted++;
     try {
-      var items = collectGenerateBackups_(cfg, owner, AI_BACKUP_LIST_MAX_);
-      for (var i = 0; i < items.length; i++) {
-        var row = usageRecordFromBackup_(items[i], owner);
-        if (row) records.push(row);
+      var names = listAiBackupFileNames_(cfg, backupDir);
+      for (var n = 0; n < names.length; n++) {
+        rows.push({ username: owner, name: names[n] });
       }
     } catch (err) {
       if (err && err.code === 'github_not_found') continue;
@@ -1588,10 +1700,7 @@ function handleListAiUsageRecords_(body) {
       hardFail++;
     }
   }
-  if (!records.length && attempted > 0 && hardFail === attempted) {
-    return gitClientError_('github_error');
-  }
-  records.sort(function (a, b) {
+  rows.sort(function (a, b) {
     var an = String(a.name || '');
     var bn = String(b.name || '');
     if (an !== bn) return an < bn ? 1 : -1;
@@ -1600,8 +1709,81 @@ function handleListAiUsageRecords_(body) {
     if (au === bu) return 0;
     return au < bu ? -1 : 1;
   });
-  return { ok: true, records: records };
+  return { rows: rows, hardFail: hardFail, attempted: attempted };
 }
+
+function readUsageRecordAt_(cfg, row) {
+  if (!row || !aiUsageOwnerAllowed_(row.username)) return null;
+  var full = resolveUserAiBackupPath_(cfg, row.username, row.name);
+  if (!full) return null;
+  var read = githubReadText_(cfg, full);
+  var item = parseAiBackupJson_(read && read.text, row.name);
+  return usageRecordFromBackup_(item, row.username);
+}
+
+function usagePageOk_(records, hasMore, nextAfter) {
+  var safeAfter = null;
+  if (nextAfter && nextAfter.name && aiBackupFileNameOk_(nextAfter.name) && aiUsageOwnerAllowed_(nextAfter.username)) {
+    safeAfter = {
+      name: String(nextAfter.name),
+      username: normalizeUsername_(nextAfter.username)
+    };
+  }
+  return {
+    ok: true,
+    records: records || [],
+    pageSize: AI_BACKUP_LIST_MAX_,
+    hasMore: hasMore === true,
+    nextAfter: safeAfter
+  };
+}
+
+function handleListAiUsageRecords_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = username ? lookupRights_(username) : null;
+  if (!username || !rights || rights.admin !== true) return gitClientError_('feature_unavailable');
+  if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
+  var cursor = usageCursor_(body, username);
+  if (!cursor) return gitClientError_('bad_request');
+  var cfg = githubConfig_();
+  if (!githubBackupReady_(cfg)) return usagePageOk_([], false, null);
+  var listed;
+  try {
+    listed = listUsageFileRows_(cfg, username);
+  } catch (err) {
+    if (err && err.code === 'github_not_found') return usagePageOk_([], false, null);
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+  if (!listed.rows.length && listed.attempted > 0 && listed.hardFail === listed.attempted) {
+    return gitClientError_('github_error');
+  }
+  var start = usageStartIndex_(listed.rows, cursor.name, cursor.username);
+  var records = [];
+  var hasMore = false;
+  var cap = AI_BACKUP_LIST_MAX_;
+  for (var i = start; i < listed.rows.length; i++) {
+    var record = null;
+    try {
+      record = readUsageRecordAt_(cfg, listed.rows[i]);
+    } catch (readErr) {
+      if (readErr && readErr.code === 'github_not_found') continue;
+      safeLog_(readErr);
+      continue;
+    }
+    if (!record) continue;
+    if (records.length < cap) {
+      records.push(record);
+    } else {
+      hasMore = true;
+      break;
+    }
+  }
+  var last = records.length ? records[records.length - 1] : null;
+  var nextAfter = last ? { name: String(last.name || ''), username: String(last.username || '') } : null;
+  return usagePageOk_(records, hasMore, hasMore ? nextAfter : null);
+}
+
 
 function sanitizeReferenceIds_(raw) {
   var ids = [];
