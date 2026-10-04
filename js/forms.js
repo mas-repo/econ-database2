@@ -107,6 +107,13 @@ function setupFormHandler() {
             return;
         }
 
+        const invalidCurriculum = question.curriculumClassification.filter(item => !CURRICULUM_ITEMS.includes(item));
+        if (invalidCurriculum.length) {
+            alert('課程分類包含不在清單中的項目：' + invalidCurriculum.join('、'));
+            document.getElementById('curriculum-classification').focus();
+            return;
+        }
+
         // Check for duplicates (only when adding new questions)
         if (!window.editingId) {
             const isDuplicate = await checkDuplicate(question);
@@ -182,6 +189,7 @@ async function editQuestion(id) {
     document.getElementById('markers-report-eng').value = question.markersReportEng || '';
 
     document.getElementById('curriculum-classification').value = (question.curriculumClassification || []).join(', ');
+    if (typeof syncCurriculumFormChecks === 'function') syncCurriculumFormChecks();
     document.getElementById('chapter-classification').value = (question.AristochapterClassification || []).join(', ');
     document.getElementById('concepts').value = (question.concepts || []).join(', ');
     document.getElementById('patterns').value = (question.patterns || []).join(', ');

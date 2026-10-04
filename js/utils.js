@@ -152,10 +152,26 @@ function populateCurriculumFormOptions() {
     `).join('');
 }
 
-// Show/hide the curriculum checkbox panel in the Add/Edit form
+// Show/hide the curriculum checkbox panel in the Add/Edit form.
+// Opening the panel checks the items already written in the text field.
 function toggleCurriculumFormOptions() {
     const panel = document.getElementById('curriculum-form-options');
-    if (panel) panel.classList.toggle('hidden');
+    if (!panel) return;
+    const willShow = panel.classList.contains('hidden');
+    if (willShow) syncCurriculumFormChecks();
+    panel.classList.toggle('hidden');
+}
+
+// Check boxes that match the comma-separated curriculum field.
+function syncCurriculumFormChecks() {
+    const container = document.querySelector('#curriculum-form-options .options-list');
+    const input = document.getElementById('curriculum-classification');
+    if (!container || !input) return;
+
+    const selected = new Set(input.value.split(',').map(s => s.trim()).filter(Boolean));
+    container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = selected.has(cb.value);
+    });
 }
 
 // Write checked curriculum items into the comma-separated text input

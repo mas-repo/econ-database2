@@ -116,7 +116,7 @@ function renderFormTemplate() {
 
             <div class="form-grid">
                 <div class="form-group">
-                    <label for="curriculum-classification">課程分類 *</label>
+                    <label for="curriculum-classification">課程分類</label>
                     <input type="text" id="curriculum-classification" placeholder="選擇課程分類...">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCurriculumFormOptions()">📚 選擇課程分類</button>
                     <div id="curriculum-form-options" class="hidden" style="border: 1px solid var(--border-light); border-radius: 8px; padding: 10px; max-height: 200px; overflow-y: auto;">
