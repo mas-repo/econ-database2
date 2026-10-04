@@ -596,6 +596,7 @@
             Poe.poeUi.enlargeOverlay.hidden = true;
         }
         Poe.poeUi.resultExpanded = false;
+        Poe.poeUi.enlargeRecord = null;
         document.body.classList.remove('poe-result-enlarged');
     }
 
@@ -627,7 +628,10 @@
         overlay.querySelector('#poe-enlarge-restore').addEventListener('click', Poe.closeEnlargeOverlay);
         overlay.querySelector('#poe-enlarge-close').addEventListener('click', Poe.closeEnlargeOverlay);
         overlay.querySelector('#poe-enlarge-copy').addEventListener('click', function () {
-            if (Poe.poeUi.activeRecord && Poe.poeUi.activeRecord.content) Poe.copyActive();
+            var record = Poe.poeUi.enlargeRecord || Poe.poeUi.activeRecord;
+            if (record && record.content) {
+                Poe.copyTextWithFeedback(record.content, document.getElementById('poe-enlarge-copy'), '已複製');
+            }
         });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
@@ -639,12 +643,14 @@
         return overlay;
     }
 
-    Poe.enlargeResult = function enlargeResult() {
-        if (!Poe.poeUi.activeRecord || !Poe.poeUi.activeRecord.content) return;
+    Poe.enlargeResult = function enlargeResult(record) {
+        var target = record || Poe.poeUi.activeRecord;
+        if (!target || !target.content) return;
+        Poe.poeUi.enlargeRecord = target;
         var overlay = Poe.ensureEnlargeOverlay();
         var body = overlay.querySelector('#poe-enlarge-body');
         body.textContent = '';
-        var built = Poe.buildPaperView(Poe.poeUi.activeRecord, { enlarged: true });
+        var built = Poe.buildPaperView(target, { enlarged: true });
         body.appendChild(built.root);
         var count = overlay.querySelector('#poe-enlarge-count');
         if (count) {
@@ -761,25 +767,49 @@
         tab.addEventListener('click', function () { Poe.showPoeTab('usage'); });
         tabs.appendChild(tab);
 
-        var panel = document.createElement('aside');
-        panel.className = 'poe-history poe-tab-panel';
+        var panel = document.createElement('section');
+        panel.className = 'poe-usage-layout poe-tab-panel';
         panel.id = 'poe-panel-usage';
         panel.setAttribute('role', 'tabpanel');
         panel.setAttribute('aria-labelledby', 'poe-tab-usage');
         panel.setAttribute('aria-label', '使用紀錄');
         panel.hidden = true;
 
+        var resultPane = document.createElement('div');
+        resultPane.className = 'poe-usage-result-pane';
+        var stageBar = document.createElement('div');
+        stageBar.className = 'poe-stage-bar';
+        stageBar.innerHTML = ''
+            + '<div class="poe-stage-heading">'
+            + '  <span class="poe-stage-label" id="poe-usage-stage-label">出題結果</span>'
+            + '  <span class="poe-stage-count" id="poe-usage-stage-count" hidden></span>'
+            + '</div>'
+            + '<div class="poe-stage-actions">'
+            + '  <button type="button" class="poe-text-btn" id="poe-usage-enlarge" hidden>放大檢視</button>'
+            + '</div>';
+        resultPane.appendChild(stageBar);
+        var detail = document.createElement('div');
+        detail.id = 'poe-usage-detail';
+        detail.className = 'poe-usage-detail is-empty';
+        detail.setAttribute('tabindex', '0');
+        resultPane.appendChild(detail);
+        panel.appendChild(resultPane);
+
+        var sidebar = document.createElement('aside');
+        sidebar.className = 'poe-usage-sidebar';
+        sidebar.setAttribute('aria-label', '其他使用者的出題紀錄');
+
         var head = document.createElement('div');
         head.className = 'poe-history-head';
         var title = document.createElement('h3');
         title.textContent = '使用紀錄';
         head.appendChild(title);
-        panel.appendChild(head);
+        sidebar.appendChild(head);
 
         var note = document.createElement('p');
         note.className = 'poe-usage-note';
-        note.textContent = '以下是其他使用者的 AI 出題備份。只供管理員查看，不能在這裡刪除或再生成。';
-        panel.appendChild(note);
+        note.textContent = '以下是其他使用者的 AI 出題備份。只供管理員查看，不能在這裡刪除或再生成。點選一筆後，左側會顯示完整出題結果。';
+        sidebar.appendChild(note);
 
         var label = document.createElement('label');
         label.className = 'poe-history-search';
@@ -797,7 +827,7 @@
         usageSearchNote.className = 'poe-history-search-note';
         usageSearchNote.textContent = '只搜尋本頁。';
         label.appendChild(usageSearchNote);
-        panel.appendChild(label);
+        sidebar.appendChild(label);
 
         var usagePager = document.createElement('div');
         usagePager.className = 'poe-history-pager';
@@ -824,18 +854,22 @@
         usagePager.appendChild(usagePrev);
         usagePager.appendChild(usagePageLabel);
         usagePager.appendChild(usageNext);
-        panel.appendChild(usagePager);
+        sidebar.appendChild(usagePager);
 
         var list = document.createElement('div');
         list.id = 'poe-usage-list';
-        panel.appendChild(list);
-        var detail = document.createElement('div');
-        detail.id = 'poe-usage-detail';
-        detail.className = 'poe-usage-detail';
-        detail.hidden = true;
-        panel.appendChild(detail);
+        sidebar.appendChild(list);
+        panel.appendChild(sidebar);
+
         body.appendChild(panel);
         input.addEventListener('input', Poe.onUsageSearchInput);
+        var enlargeBtn = document.getElementById('poe-usage-enlarge');
+        if (enlargeBtn) {
+            enlargeBtn.addEventListener('click', function () {
+                Poe.enlargeUsageResult();
+            });
+        }
+        Poe.renderUsageDetail(null);
     }
 
     Poe.onUsageSearchInput = function onUsageSearchInput(event) {
@@ -936,18 +970,78 @@
     }
 
 
+    Poe.setUsageStageChrome = function setUsageStageChrome(options) {
+        options = options || {};
+        var label = document.getElementById('poe-usage-stage-label');
+        var count = document.getElementById('poe-usage-stage-count');
+        var enlarge = document.getElementById('poe-usage-enlarge');
+        var pane = document.querySelector('.poe-usage-result-pane');
+        if (label) label.textContent = options.label || '出題結果';
+        if (count) {
+            if (options.countText) {
+                count.hidden = false;
+                count.textContent = options.countText;
+            } else {
+                count.hidden = true;
+                count.textContent = '';
+            }
+        }
+        if (enlarge) enlarge.hidden = !options.enlarge;
+        if (pane) pane.classList.toggle('has-paper', !!options.hasPaper);
+    }
+
+    Poe.currentUsageRecord = function currentUsageRecord() {
+        if (!Poe.poeUi.usageActiveId) return null;
+        return (Poe.poeUi.usageRecords || []).filter(function (item) {
+            return item.id === Poe.poeUi.usageActiveId;
+        })[0] || null;
+    }
+
+    Poe.enlargeUsageResult = function enlargeUsageResult() {
+        var record = Poe.currentUsageRecord();
+        if (!record || !record.content) return;
+        Poe.enlargeResult(record);
+    }
+
     Poe.renderUsageDetail = function renderUsageDetail(record) {
         var box = document.getElementById('poe-usage-detail');
         if (!box) return;
         box.textContent = '';
-        if (!record) {
-            box.hidden = true;
+        box.hidden = false;
+        if (!record || !record.content) {
+            box.classList.add('is-empty');
+            box.classList.remove('has-paper');
+            var idle = document.createElement('div');
+            idle.className = 'poe-idle';
+            var lead = document.createElement('p');
+            lead.className = 'poe-lead';
+            lead.textContent = record
+                ? '這筆紀錄沒有可顯示的出題內容。'
+                : '在右側點選一筆使用紀錄後，這裡會以完整紙本版面顯示該次出題結果。';
+            idle.appendChild(lead);
+            if (!record) {
+                var note = document.createElement('p');
+                note.className = 'poe-note';
+                note.textContent = '左側保留足夠閱讀空間，方便對照題目卡片與請求摘要。';
+                idle.appendChild(note);
+            }
+            box.appendChild(idle);
+            Poe.setUsageStageChrome({ label: '出題結果', enlarge: false, hasPaper: false });
+            if (Poe.poeUi.resultExpanded) Poe.closeEnlargeOverlay();
             return;
         }
-        box.hidden = false;
+        box.classList.remove('is-empty');
+        box.classList.add('has-paper');
         var built = Poe.buildPaperView(record, { hideCopy: false });
         box.appendChild(built.root);
         box.scrollTop = 0;
+        Poe.setUsageStageChrome({
+            label: '出題結果',
+            countText: built.structured ? ('共 ' + built.questionCount + ' 題') : '整份回覆',
+            enlarge: true,
+            hasPaper: true
+        });
+        if (Poe.poeUi.resultExpanded) Poe.enlargeResult(record);
     }
 
     Poe.renderUsage = function renderUsage() {

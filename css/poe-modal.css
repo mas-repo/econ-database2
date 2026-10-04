@@ -927,6 +927,24 @@ body.poe-modal-open {
         border-left: 0;
     }
 
+    .poe-usage-layout {
+        flex-direction: column;
+    }
+
+    .poe-usage-result-pane {
+        flex: 1.6 1 0;
+        min-height: 0;
+        border-bottom: 1px solid var(--border-light);
+    }
+
+    .poe-usage-sidebar {
+        flex: 1 1 0;
+        width: auto;
+        max-width: none;
+        min-width: 0;
+        border-left: 0;
+    }
+
     .poe-footer {
         align-items: stretch;
         flex-direction: column;
@@ -1379,20 +1397,63 @@ body:not(.poe-ai-allowed) .question-card-actions.only-ai {
     font-weight: 700;
 }
 
+/* Usage tab: large paper pane + record list sidebar */
+.poe-usage-layout {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #fff;
+}
+
+.poe-usage-result-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    background: #fff;
+}
+
+.poe-usage-result-pane.has-paper .poe-usage-detail {
+    background: #eef3f8;
+}
+
+.poe-usage-sidebar {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 320px;
+    width: 320px;
+    max-width: 38%;
+    min-width: 240px;
+    min-height: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--border-light);
+    background: #f6f8fb;
+}
+
 #poe-usage-list {
     overflow: auto;
     padding: 0 10px 12px;
     flex: 1;
-    min-height: 120px;
+    min-height: 0;
 }
 
 .poe-usage-detail {
-    border-top: 1px solid var(--border-light);
-    margin: 0 10px 12px;
-    padding: 10px 4px 4px;
-    overflow: auto;
-    max-height: 42%;
+    flex: 1 1 auto;
     min-height: 0;
+    overflow: auto;
+    margin: 0;
+    padding: 16px 18px 28px;
+    border-top: 0;
+    max-height: none;
+    background: #f4f7fb;
+}
+
+.poe-usage-detail.is-empty {
+    background: #f4f7fb;
 }
 
 .poe-usage-detail[hidden] {
