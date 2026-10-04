@@ -84,22 +84,43 @@
         if (status) status.textContent = message || '';
     }
 
+    Poe.setStageChrome = function setStageChrome(options) {
+        options = options || {};
+        var label = document.getElementById('poe-stage-label');
+        var count = document.getElementById('poe-stage-count');
+        var pane = document.querySelector('.poe-result-pane');
+        if (label) label.textContent = options.label || '出題結果';
+        if (count) {
+            if (options.countText) {
+                count.hidden = false;
+                count.textContent = options.countText;
+            } else {
+                count.hidden = true;
+                count.textContent = '';
+            }
+        }
+        if (pane) pane.classList.toggle('has-paper', !!options.hasPaper);
+        Poe.setEnlargeButtonVisible(!!options.enlarge);
+    }
+
     Poe.showIdle = function showIdle(count, counting) {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         Poe.closeEnlargeOverlay();
-        Poe.setEnlargeButtonVisible(false);
+        Poe.setStageChrome({ label: '出題結果', enlarge: false, hasPaper: false });
         stage.textContent = '';
+        var idle = document.createElement('div');
+        idle.className = 'poe-idle';
         var lead = document.createElement('p');
         lead.className = 'poe-lead';
         if (Poe.currentSource() === 'single') {
-            lead.textContent = '按「根據這一題出題」後，伺服器會只附上這一題的題幹與答案，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
+            lead.textContent = '按「根據這一題出題」後，伺服器會只附上這一題的題幹與答案，並依右欄的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
         } else if (Poe.currentSource() === 'paste') {
-            lead.textContent = '按「根據貼上內容出題」後，伺服器會附上貼上的題目，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
+            lead.textContent = '按「根據貼上內容出題」後，伺服器會附上貼上的題目，並依右欄的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
         } else {
-            lead.textContent = '按「根據目前篩選出題」後，伺服器會附上參考題，並依上方的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
+            lead.textContent = '按「根據目前篩選出題」後，伺服器會附上參考題，並依右欄的出題模式與出題指示要求模型撰寫全新題目與解釋。結果會保存在這部瀏覽器。';
         }
-        stage.appendChild(lead);
+        idle.appendChild(lead);
         var noteText = '';
         if (Poe.currentSource() === 'single') {
             noteText = '';
@@ -112,15 +133,16 @@
             var empty = document.createElement('p');
             empty.className = 'poe-note';
             empty.textContent = noteText;
-            stage.appendChild(empty);
+            idle.appendChild(empty);
         }
+        stage.appendChild(idle);
     }
 
     Poe.showLoading = function showLoading() {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         Poe.closeEnlargeOverlay();
-        Poe.setEnlargeButtonVisible(false);
+        Poe.setStageChrome({ label: '正在出題', enlarge: false, hasPaper: false });
         stage.textContent = '';
         var wrap = document.createElement('div');
         wrap.className = 'poe-loading';
@@ -148,7 +170,7 @@
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         Poe.closeEnlargeOverlay();
-        Poe.setEnlargeButtonVisible(false);
+        Poe.setStageChrome({ label: '出題結果', enlarge: false, hasPaper: false });
         stage.textContent = '';
         var box = document.createElement('div');
         box.className = 'poe-error';
@@ -208,6 +230,367 @@
         if (btn) btn.hidden = !show;
     }
 
+    Poe.sourceLabelForRecord = function sourceLabelForRecord(record) {
+        var source = record && record.referenceSource;
+        if (source === 'single') return '單題';
+        if (source === 'paste') return '自行貼上';
+        return '目前篩選';
+    }
+
+    Poe.isQuestionStartLine = function isQuestionStartLine(line) {
+        var t = String(line || '').trim();
+        if (!t) return false;
+        if (/^#{1,4}\s+/.test(t) && /題|第\s*[0-9〇零一二三四五六七八九十百]+|[0-9]+/.test(t)) return true;
+        if (/^【?\s*(?:題目|第)\s*[0-9〇零一二三四五六七八九十百]+\s*題?/.test(t)) return true;
+        if (/^\*{0,2}題目\s*[0-9〇零一二三四五六七八九十百]+/.test(t)) return true;
+        if (/^(?:Q|Question)\s*[0-9]+/i.test(t)) return true;
+        return false;
+    }
+
+    Poe.isNumberedStartLine = function isNumberedStartLine(line) {
+        return /^(?:[1-9][0-9]{0,2})[\.、\)]\s+\S/.test(String(line || '').trim());
+    }
+
+    Poe.sectionKindFromLabel = function sectionKindFromLabel(label) {
+        if (/解釋|答案|評分/.test(String(label || ''))) return 'answer';
+        return 'novelty';
+    }
+
+    Poe.parseQuestionChunk = function parseQuestionChunk(chunk, index) {
+        var number = index + 1;
+        var lines = String(chunk || '').split('\n');
+        var title = '第 ' + number + ' 題';
+        var bodyStart = 0;
+        var first = (lines[0] || '').trim();
+        if (Poe.isQuestionStartLine(first) || /^#{1,4}\s+/.test(first)) {
+            title = first
+                .replace(/^#{1,4}\s+/, '')
+                .replace(/^\*{1,2}|\*{1,2}$/g, '')
+                .replace(/^【\s*|\s*】$/g, '')
+                .trim() || title;
+            bodyStart = 1;
+            while (bodyStart < lines.length && !String(lines[bodyStart]).trim()) bodyStart += 1;
+        }
+        var stemLines = [];
+        var answerLines = [];
+        var noveltyLines = [];
+        var bucket = 'stem';
+        var labelRe = /^(?:\*{0,2})(解釋|答案|參考答案|標準答案|評分重點|新意|創新之處|創新點|創新)(?:\*{0,2})\s*[:：]\s*(?:\*{0,2})(.*?)(?:\*{0,2})?$/;
+        lines.slice(bodyStart).forEach(function (line) {
+            var m = labelRe.exec(String(line).trim());
+            if (m) {
+                bucket = Poe.sectionKindFromLabel(m[1]);
+                var rem = String(m[2] || '').trim();
+                if (rem) {
+                    if (bucket === 'answer') answerLines.push(rem);
+                    else noveltyLines.push(rem);
+                }
+                return;
+            }
+            if (bucket === 'stem') stemLines.push(line);
+            else if (bucket === 'answer') answerLines.push(line);
+            else noveltyLines.push(line);
+        });
+        function join(arr) {
+            return arr.join('\n').replace(/^\n+|\n+$/g, '').trim();
+        }
+        var stem = join(stemLines);
+        var answer = join(answerLines);
+        var novelty = join(noveltyLines);
+        if (Poe.isNumberedStartLine(stem) && !Poe.isQuestionStartLine(first)) {
+            stem = stem.replace(/^(?:[1-9][0-9]{0,2})[\.、\)]\s+/, '');
+        }
+        if (!stem && !answer && !novelty) stem = String(chunk || '').trim();
+        return {
+            number: number,
+            title: title,
+            stem: stem,
+            answer: answer,
+            novelty: novelty,
+            raw: String(chunk || '')
+        };
+    }
+
+    Poe.splitGeneratedQuestions = function splitGeneratedQuestions(content) {
+        var text = String(content || '').replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '').trim();
+        if (!text) return [];
+        var lines = text.split('\n');
+        var starts = [];
+        for (var i = 0; i < lines.length; i++) {
+            if (Poe.isQuestionStartLine(lines[i])) starts.push(i);
+        }
+        if (starts.length < 2) {
+            starts = [];
+            for (var j = 0; j < lines.length; j++) {
+                if (Poe.isNumberedStartLine(lines[j])) starts.push(j);
+            }
+        }
+        var chunks = [];
+        if (starts.length >= 2) {
+            for (var k = 0; k < starts.length; k++) {
+                var from = starts[k];
+                var to = k + 1 < starts.length ? starts[k + 1] : lines.length;
+                var chunk = lines.slice(from, to).join('\n').trim();
+                if (chunk) chunks.push(chunk);
+            }
+        } else {
+            chunks = [text];
+        }
+        return chunks.map(Poe.parseQuestionChunk);
+    }
+
+    Poe.questionPlainText = function questionPlainText(question) {
+        if (!question) return '';
+        var parts = [];
+        if (question.title) parts.push(question.title);
+        if (question.stem) parts.push(question.stem);
+        if (question.answer) parts.push('解釋：\n' + question.answer);
+        if (question.novelty) parts.push('新意：\n' + question.novelty);
+        return parts.join('\n\n').trim();
+    }
+
+    Poe.copyTextWithFeedback = function copyTextWithFeedback(text, button, doneLabel) {
+        if (!text) return;
+        var original = button ? button.textContent : '';
+        Poe.copyWithFallback(text).then(function () {
+            if (button) {
+                button.textContent = doneLabel || '已複製';
+                setTimeout(function () {
+                    if (button.textContent === (doneLabel || '已複製')) button.textContent = original;
+                }, 1500);
+            }
+            Poe.setStatus('已複製到剪貼簿。');
+        }).catch(function () {
+            Poe.setStatus('複製失敗，請手動選取文字。');
+        });
+    }
+
+    Poe.appendMarkdownBlock = function appendMarkdownBlock(parent, text, className) {
+        var block = document.createElement('div');
+        block.className = className || 'poe-md-block';
+        if (text && String(text).trim()) Poe.renderStructured(block, text);
+        else {
+            var empty = document.createElement('p');
+            empty.className = 'poe-note';
+            empty.textContent = '（沒有內容）';
+            block.appendChild(empty);
+        }
+        parent.appendChild(block);
+        return block;
+    }
+
+    Poe.buildRequestSummary = function buildRequestSummary(record) {
+        var section = document.createElement('section');
+        section.className = 'poe-request-summary';
+        section.setAttribute('aria-label', '這次出題請求');
+
+        var chips = document.createElement('div');
+        chips.className = 'poe-request-chips';
+        function addChip(label, value) {
+            if (!value) return;
+            var chip = document.createElement('span');
+            chip.className = 'poe-request-chip';
+            chip.innerHTML = '<span class="poe-request-chip-label">' + Poe.escapeHtml(label) + '</span>'
+                + '<span class="poe-request-chip-value">' + Poe.escapeHtml(value) + '</span>';
+            chips.appendChild(chip);
+        }
+        addChip('模式', record.modeName || '');
+        addChip('模型', record.model || '');
+        if (record.owner) addChip('使用者', record.owner);
+        addChip('來源', Poe.sourceLabelForRecord(record));
+        if (record.sentCount || record.filteredCount) {
+            addChip('參考', (record.sentCount || 0) + ' / ' + (record.filteredCount || record.sentCount || 0) + ' 題');
+        }
+        if (record.createdAt) addChip('時間', Poe.formatTime(record.createdAt));
+        if (record.durationMs) addChip('用時', Math.max(1, Math.round(record.durationMs / 1000)) + ' 秒');
+        section.appendChild(chips);
+
+        var details = document.createElement('details');
+        details.className = 'poe-request-details';
+        var summary = document.createElement('summary');
+        summary.textContent = '對照這次請求';
+        details.appendChild(summary);
+
+        if (record.filterSummary) {
+            var filter = document.createElement('p');
+            filter.className = 'poe-request-line';
+            filter.innerHTML = '<strong>篩選摘要</strong> ' + Poe.escapeHtml(record.filterSummary);
+            details.appendChild(filter);
+        }
+
+        var instruction = String(record.instruction || '').trim();
+        if (instruction) {
+            var instrWrap = document.createElement('div');
+            instrWrap.className = 'poe-request-block';
+            var instrTitle = document.createElement('div');
+            instrTitle.className = 'poe-request-block-title';
+            instrTitle.textContent = '出題指示';
+            var instrBody = document.createElement('pre');
+            instrBody.className = 'poe-request-pre';
+            instrBody.textContent = instruction;
+            instrWrap.appendChild(instrTitle);
+            instrWrap.appendChild(instrBody);
+            details.appendChild(instrWrap);
+        }
+
+        var refs = Array.isArray(record.referenceIds) ? record.referenceIds.filter(Boolean) : [];
+        if (refs.length) {
+            var refWrap = document.createElement('div');
+            refWrap.className = 'poe-request-block';
+            var refTitle = document.createElement('div');
+            refTitle.className = 'poe-request-block-title';
+            refTitle.textContent = '參考題編號';
+            var refBody = document.createElement('p');
+            refBody.className = 'poe-request-refs';
+            refBody.textContent = refs.join('、');
+            refWrap.appendChild(refTitle);
+            refWrap.appendChild(refBody);
+            details.appendChild(refWrap);
+        } else if (record.referenceSource === 'paste' && Array.isArray(record.pastedReferences) && record.pastedReferences.length) {
+            var pasteWrap = document.createElement('div');
+            pasteWrap.className = 'poe-request-block';
+            var pasteTitle = document.createElement('div');
+            pasteTitle.className = 'poe-request-block-title';
+            pasteTitle.textContent = '貼上參考';
+            var pasteBody = document.createElement('p');
+            pasteBody.className = 'poe-request-refs';
+            pasteBody.textContent = '共 ' + record.pastedReferences.length + ' 題自行貼上的參考內容';
+            pasteWrap.appendChild(pasteTitle);
+            pasteWrap.appendChild(pasteBody);
+            details.appendChild(pasteWrap);
+        } else if (record.referenceSource === 'single' && record.singleQuestion && record.singleQuestion.id) {
+            var singleWrap = document.createElement('div');
+            singleWrap.className = 'poe-request-block';
+            var singleTitle = document.createElement('div');
+            singleTitle.className = 'poe-request-block-title';
+            singleTitle.textContent = '參考題編號';
+            var singleBody = document.createElement('p');
+            singleBody.className = 'poe-request-refs';
+            singleBody.textContent = record.singleQuestion.id;
+            singleWrap.appendChild(singleTitle);
+            singleWrap.appendChild(singleBody);
+            details.appendChild(singleWrap);
+        }
+
+        if (!details.querySelector('.poe-request-block') && !details.querySelector('.poe-request-line')) {
+            var none = document.createElement('p');
+            none.className = 'poe-note';
+            none.textContent = '這筆紀錄沒有保存完整的請求細節。';
+            details.appendChild(none);
+        }
+
+        section.appendChild(details);
+        return section;
+    }
+
+    Poe.buildQuestionCard = function buildQuestionCard(question, options) {
+        options = options || {};
+        var card = document.createElement('article');
+        card.className = 'poe-question-card' + (options.full ? ' is-full' : '');
+        card.setAttribute('aria-label', question.title || ('第 ' + question.number + ' 題'));
+
+        var head = document.createElement('header');
+        head.className = 'poe-question-head';
+        var badge = document.createElement('span');
+        badge.className = 'poe-question-badge';
+        badge.textContent = options.full ? '整份回覆' : (question.title || ('第 ' + question.number + ' 題'));
+        head.appendChild(badge);
+        if (!options.hideCopy) {
+            var copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'poe-text-btn poe-question-copy';
+            copyBtn.textContent = options.full ? '複製內容' : '複製此題';
+            copyBtn.addEventListener('click', function () {
+                Poe.copyTextWithFeedback(
+                    options.full ? String(options.fullText || question.raw || '') : Poe.questionPlainText(question),
+                    copyBtn,
+                    '已複製'
+                );
+            });
+            head.appendChild(copyBtn);
+        }
+        card.appendChild(head);
+
+        if (options.full) {
+            Poe.appendMarkdownBlock(card, options.fullText || question.raw || question.stem || '', 'poe-question-body');
+            return card;
+        }
+
+        var stem = document.createElement('div');
+        stem.className = 'poe-question-stem';
+        Poe.appendMarkdownBlock(stem, question.stem || '', 'poe-question-body');
+        card.appendChild(stem);
+
+        if (question.answer) {
+            var answer = document.createElement('section');
+            answer.className = 'poe-question-section is-answer';
+            var answerTitle = document.createElement('h4');
+            answerTitle.textContent = '解釋';
+            answer.appendChild(answerTitle);
+            Poe.appendMarkdownBlock(answer, question.answer, 'poe-question-body');
+            card.appendChild(answer);
+        }
+        if (question.novelty) {
+            var novelty = document.createElement('section');
+            novelty.className = 'poe-question-section is-novelty';
+            var noveltyTitle = document.createElement('h4');
+            noveltyTitle.textContent = '新意';
+            novelty.appendChild(noveltyTitle);
+            Poe.appendMarkdownBlock(novelty, question.novelty, 'poe-question-body');
+            card.appendChild(novelty);
+        }
+        return card;
+    }
+
+    Poe.buildPaperView = function buildPaperView(record, options) {
+        options = options || {};
+        var paper = document.createElement('div');
+        paper.className = 'poe-paper' + (options.enlarged ? ' is-enlarged' : '');
+
+        if (!options.hideRequest) paper.appendChild(Poe.buildRequestSummary(record || {}));
+
+        var content = String(record && record.content || '').trim();
+        var questions = Poe.splitGeneratedQuestions(content);
+        var structured = questions.length > 1
+            || (questions.length === 1 && !!(questions[0].answer || questions[0].novelty));
+
+        var listHead = document.createElement('div');
+        listHead.className = 'poe-paper-list-head';
+        var listTitle = document.createElement('h3');
+        listTitle.className = 'poe-paper-list-title';
+        if (!content) listTitle.textContent = '沒有可顯示的內容';
+        else if (structured) listTitle.textContent = '題目';
+        else listTitle.textContent = '模型回覆';
+        listHead.appendChild(listTitle);
+        paper.appendChild(listHead);
+
+        if (!content) {
+            var empty = document.createElement('p');
+            empty.className = 'poe-note';
+            empty.textContent = '（沒有內容）';
+            paper.appendChild(empty);
+            return { root: paper, questionCount: 0, structured: false };
+        }
+
+        if (structured) {
+            var list = document.createElement('div');
+            list.className = 'poe-question-list';
+            questions.forEach(function (question) {
+                list.appendChild(Poe.buildQuestionCard(question));
+            });
+            paper.appendChild(list);
+            return { root: paper, questionCount: questions.length, structured: true };
+        }
+
+        var fallback = questions[0] || { title: '整份回覆', stem: content, raw: content, number: 1 };
+        paper.appendChild(Poe.buildQuestionCard(fallback, {
+            full: true,
+            fullText: content,
+            hideCopy: !!options.hideCopy
+        }));
+        return { root: paper, questionCount: 1, structured: false };
+    }
+
     Poe.closeEnlargeOverlay = function closeEnlargeOverlay() {
         if (Poe.poeUi.enlargeOverlay) {
             Poe.poeUi.enlargeOverlay.hidden = true;
@@ -225,9 +608,12 @@
         overlay.innerHTML = ''
             + '<div class="poe-enlarge-dialog" role="dialog" aria-modal="true" aria-labelledby="poe-enlarge-title">'
             + '  <header class="poe-enlarge-header">'
-            + '    <h2 id="poe-enlarge-title">出題結果</h2>'
+            + '    <div class="poe-enlarge-heading">'
+            + '      <h2 id="poe-enlarge-title">出題結果</h2>'
+            + '      <span class="poe-stage-count" id="poe-enlarge-count" hidden></span>'
+            + '    </div>'
             + '    <div class="poe-enlarge-actions">'
-            + '      <button type="button" class="btn btn-outline-primary" id="poe-enlarge-copy">複製內容</button>'
+            + '      <button type="button" class="btn btn-outline-primary" id="poe-enlarge-copy">複製全部</button>'
             + '      <button type="button" class="btn btn-secondary" id="poe-enlarge-restore">還原</button>'
             + '      <button type="button" class="poe-close" id="poe-enlarge-close" aria-label="關閉放大檢視">×</button>'
             + '    </div>'
@@ -258,10 +644,20 @@
         var overlay = Poe.ensureEnlargeOverlay();
         var body = overlay.querySelector('#poe-enlarge-body');
         body.textContent = '';
-        var article = document.createElement('article');
-        article.className = 'poe-result poe-result-enlarged-view';
-        Poe.renderStructured(article, Poe.poeUi.activeRecord.content);
-        body.appendChild(article);
+        var built = Poe.buildPaperView(Poe.poeUi.activeRecord, { enlarged: true });
+        body.appendChild(built.root);
+        var count = overlay.querySelector('#poe-enlarge-count');
+        if (count) {
+            if (built.questionCount > 0) {
+                count.hidden = false;
+                count.textContent = built.structured
+                    ? ('共 ' + built.questionCount + ' 題')
+                    : '整份回覆';
+            } else {
+                count.hidden = true;
+                count.textContent = '';
+            }
+        }
         overlay.hidden = false;
         Poe.poeUi.resultExpanded = true;
         document.body.classList.add('poe-result-enlarged');
@@ -273,12 +669,17 @@
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         stage.textContent = '';
-        var article = document.createElement('article');
-        article.className = 'poe-result';
-        Poe.renderStructured(article, record.content);
-        stage.appendChild(article);
+        var built = Poe.buildPaperView(record || {});
+        stage.appendChild(built.root);
         stage.scrollTop = 0;
-        Poe.setEnlargeButtonVisible(!!(record && record.content));
+        Poe.setStageChrome({
+            label: '出題結果',
+            countText: !record || !record.content
+                ? ''
+                : (built.structured ? ('共 ' + built.questionCount + ' 題') : '整份回覆'),
+            enlarge: !!(record && record.content),
+            hasPaper: !!(record && record.content)
+        });
         if (Poe.poeUi.resultExpanded) Poe.enlargeResult();
     }
 
@@ -544,17 +945,8 @@
             return;
         }
         box.hidden = false;
-        var meta = document.createElement('p');
-        meta.className = 'poe-usage-detail-meta';
-        var bits = [record.owner || '', Poe.formatTime(record.createdAt)];
-        if (record.modeName) bits.push(record.modeName);
-        if (record.model) bits.push(record.model);
-        meta.textContent = bits.filter(Boolean).join(' \u00b7 ');
-        box.appendChild(meta);
-        var article = document.createElement('article');
-        article.className = 'poe-result';
-        Poe.renderStructured(article, record.content || '');
-        box.appendChild(article);
+        var built = Poe.buildPaperView(record, { hideCopy: false });
+        box.appendChild(built.root);
         box.scrollTop = 0;
     }
 

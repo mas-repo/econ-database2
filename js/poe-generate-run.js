@@ -500,7 +500,7 @@
     Poe.copyActive = function copyActive() {
         if (!Poe.poeUi.activeRecord || !Poe.poeUi.activeRecord.content) return;
         var button = document.getElementById('poe-copy');
-        var original = button ? button.textContent : '複製內容';
+        var original = button ? button.textContent : '複製全部';
         Poe.copyWithFallback(Poe.poeUi.activeRecord.content).then(function () {
             if (button) {
                 button.textContent = '✓';

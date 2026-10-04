@@ -462,25 +462,254 @@ body.poe-modal-open {
     background: #f8fbff;
 }
 
+.poe-stage-heading,
+.poe-enlarge-heading {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-width: 0;
+}
+
+.poe-stage-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .poe-stage-label {
     color: var(--primary-color);
     font-size: 15px;
     font-weight: 700;
 }
 
+.poe-stage-count {
+    color: var(--text-light);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .poe-stage {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 16px 20px 24px;
+    padding: 16px 18px 28px;
     font-size: 15.5px;
+    background: #f4f7fb;
+}
+
+.poe-result-pane.has-paper .poe-stage {
+    background: #eef3f8;
+}
+
+.poe-idle {
+    max-width: 54ch;
+    padding-top: 8px;
+}
+
+/* Generated paper: request context + question cards */
+.poe-paper {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 860px;
+}
+
+.poe-paper.is-enlarged {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.poe-request-summary {
+    border: 1px solid #d7e3ef;
+    border-radius: 12px;
     background: #fff;
+    overflow: hidden;
+}
+
+.poe-request-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px;
+}
+
+.poe-request-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    max-width: 100%;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #f3f7fb;
+    border: 1px solid #e1ebf4;
+    color: var(--primary-color);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.poe-request-chip-label {
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+.poe-request-chip-value {
+    font-weight: 700;
+    word-break: break-word;
+}
+
+.poe-request-details {
+    border-top: 1px solid #e7eef5;
+    padding: 0 14px 12px;
+    background: #fbfcfe;
+}
+
+.poe-request-details summary {
+    cursor: pointer;
+    padding: 10px 0 6px;
+    color: var(--primary-color);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.poe-request-line,
+.poe-request-refs {
+    margin: 0 0 8px;
+    color: var(--text-color);
+    font-size: 13px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+.poe-request-block {
+    margin-top: 8px;
+}
+
+.poe-request-block-title {
+    margin-bottom: 4px;
+    color: var(--text-light);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.poe-request-pre {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #e1ebf4;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text-color);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow: auto;
+}
+
+.poe-paper-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 2px;
+}
+
+.poe-paper-list-title {
+    margin: 0;
+    color: var(--primary-color);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.poe-question-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.poe-question-card {
+    border: 1px solid #d7e3ef;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+
+.poe-question-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #eef3f8;
+    background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.poe-question-badge {
+    min-width: 0;
+    color: var(--primary-color);
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.poe-question-copy {
+    flex: 0 0 auto;
+}
+
+.poe-question-stem,
+.poe-question-section {
+    padding: 12px 16px 14px;
+}
+
+.poe-question-section {
+    border-top: 1px solid #eef3f8;
+    background: #fbfcfe;
+}
+
+.poe-question-section.is-answer {
+    background: #f7fbf8;
+}
+
+.poe-question-section.is-novelty {
+    background: #f8f7fc;
+}
+
+.poe-question-section h4 {
+    margin: 0 0 8px;
+    color: var(--primary-color);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.poe-question-section.is-novelty h4 {
+    color: #5b4b8a;
+}
+
+.poe-question-body {
+    max-width: none;
+    line-height: 1.75;
+}
+
+.poe-question-body > :first-child {
+    margin-top: 0;
+}
+
+.poe-question-body > :last-child {
+    margin-bottom: 0;
+}
+
+.poe-question-card.is-full .poe-question-body {
+    padding: 14px 16px 18px;
 }
 
 
 .poe-lead,
 .poe-note,
 .poe-result p,
+.poe-question-body p,
 .poe-loading p,
 .poe-error p {
     margin: 0 0 12px;
@@ -588,14 +817,18 @@ body.poe-modal-open {
 
 .poe-result h3,
 .poe-result h4,
+.poe-question-body h3,
+.poe-question-body h4,
 .poe-md-h {
     margin: 18px 0 8px;
     color: var(--primary-color);
     line-height: 1.4;
 }
 
-.poe-result h3 { font-size: 18px; }
-.poe-result h4 { font-size: 16px; }
+.poe-result h3,
+.poe-question-body h3 { font-size: 18px; }
+.poe-result h4,
+.poe-question-body h4 { font-size: 16px; }
 
 .poe-result strong,
 .poe-md-h strong,
@@ -914,7 +1147,8 @@ ol.poe-md-list {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 20px 24px 32px;
+    padding: 18px 20px 32px;
+    background: #eef3f8;
 }
 
 .poe-result-enlarged-view {
