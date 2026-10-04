@@ -63,6 +63,9 @@
     var LOCAL_KEY = 'econ_poe_generations_v1';
     // One page of personal history and of admin usage. Matches AI_BACKUP_LIST_MAX_.
     var HISTORY_LIMIT = 30;
+    // Apps Script runs for up to 6 minutes and only then writes the backup.
+    // Aborting at 4 minutes threw away replies that were already saved.
+    var GENERATE_WAIT_MS = 375000;
     var ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
         proxy_not_configured: '出題服務尚未完成設定。',
@@ -1178,6 +1181,7 @@
             model: String(backup.model || ''),
             modeId: String(backup.modeId || ''),
             modeName: String(backup.modeName || ''),
+            requestId: String(backup.requestId || ''),
             instruction: String(backup.instruction || ''),
             sentCount: Number(backup.sentCount) || 0,
             filteredCount: Number(backup.filteredCount) || Number(backup.sentCount) || 0,
@@ -1257,14 +1261,14 @@
         return merged.slice(0, HISTORY_LIMIT);
     }
 
-    async function fetchRemoteBackupPage(username, afterName) {
+    async function fetchRemoteBackupPage(username, afterName, control, timeoutMs) {
         if (!username || !proxyUrl()) return { records: [], hasMore: false, nextAfter: '' };
         var payload = {
             action: 'listAiBackups',
             username: username
         };
         if (afterName) payload.after = afterName;
-        var data = await proxyRequest(payload, 90000, null);
+        var data = await proxyRequest(payload, timeoutMs || 90000, control || null);
         if (!data || data.ok !== true || !Array.isArray(data.backups)) {
             var failure = new Error('history');
             failure.code = data && data.error ? data.error : 'server_error';
@@ -1954,7 +1958,8 @@
         fill.className = 'poe-progress-bar';
         bar.appendChild(fill);
         var title = document.createElement('p');
-        title.textContent = '正在出題，請稍候。一次寫多題時，模型可能需要約一分鐘。';
+        title.id = 'poe-loading-title';
+        title.textContent = '正在出題，請稍候。一次寫多題時，模型可能需要數分鐘。';
         var elapsed = document.createElement('p');
         elapsed.id = 'poe-elapsed';
         elapsed.className = 'poe-elapsed';
@@ -2848,6 +2853,153 @@
         await runGeneration(questions, active.filterSummary || '沿用上一批參考題', 'filter');
     }
 
+
+    function newRequestId() {
+        var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        var out = '';
+        for (var i = 0; i < 16; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+        return out;
+    }
+
+    function knownGenerationKeys() {
+        var names = {};
+        var content = {};
+        (poeUi.records || []).forEach(function (row) {
+            if (!row) return;
+            if (row.remoteName) names[row.remoteName] = true;
+            var key = contentDedupeKey(row);
+            if (key) content[key] = true;
+        });
+        return { names: names, content: content };
+    }
+
+    function setLoadingTitle(text) {
+        var title = document.getElementById('poe-loading-title');
+        if (title) title.textContent = text;
+    }
+
+    function sleepMs(ms) {
+        return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+
+    function backupMatchesAttempt(item, attempt) {
+        if (!item || !attempt) return false;
+        if (item.username && item.username !== attempt.username) return false;
+        if (!item.modeId || item.modeId !== attempt.modeId) return false;
+        if (attempt.source && item.referenceSource && item.referenceSource !== attempt.source) return false;
+        var created = Number(item.createdAt) || 0;
+        if (!created) return false;
+        // Small clock skew only. Older rows are a previous run, not this one.
+        if (created < attempt.startedAt - 20000) return false;
+        if (created > Date.now() + 20000) return false;
+        if (attempt.knownNames && item.remoteName && attempt.knownNames[item.remoteName]) return false;
+        var key = contentDedupeKey(item);
+        if (attempt.knownContent && key && attempt.knownContent[key]) return false;
+        return true;
+    }
+
+    function pickRecoveredBackup(records, attempt) {
+        var byId = null;
+        var best = null;
+        for (var i = 0; i < records.length; i++) {
+            var row = records[i];
+            if (!row) continue;
+            if (row.username && row.username !== attempt.username) continue;
+            if (attempt.requestId && row.requestId && row.requestId === attempt.requestId) byId = row;
+            if (!backupMatchesAttempt(row, attempt)) continue;
+            if (!best || (Number(row.createdAt) || 0) > (Number(best.createdAt) || 0)) best = row;
+        }
+        if (byId && (byId.content || byId.remoteName)) return byId;
+        return best;
+    }
+
+    function recordFromRecoveredBackup(backup, attempt) {
+        return {
+            id: backup.id || (attempt.username + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 8)),
+            username: attempt.username,
+            createdAt: backup.createdAt || Date.now(),
+            content: String(backup.content || ''),
+            model: backup.model || attempt.model,
+            modeId: backup.modeId || attempt.modeId,
+            modeName: backup.modeName || attempt.modeName,
+            instruction: backup.instruction || attempt.instruction,
+            sentCount: backup.sentCount || attempt.sentCount,
+            filteredCount: backup.filteredCount || attempt.filteredCount,
+            truncated: !!attempt.truncated,
+            referenceSource: attempt.source,
+            singleQuestion: attempt.singleQuestion || null,
+            referenceIds: (backup.referenceIds && backup.referenceIds.length)
+                ? backup.referenceIds.slice()
+                : (attempt.referenceIds || []).slice(),
+            pastedReferences: attempt.pastedReferences || [],
+            filterSummary: attempt.summary || '',
+            durationMs: backup.durationMs || Math.max(0, Date.now() - attempt.startedAt),
+            remoteName: backup.remoteName || '',
+            lean: false
+        };
+    }
+
+    async function recoverSavedGeneration(attempt) {
+        var username = attempt && attempt.username;
+        if (!username || username !== currentUsername()) return null;
+        setLoadingTitle('尚未收到回覆。正在查看是否已儲存這次出題…');
+        setStatus('尚未收到回覆。正在查看是否已儲存這次出題…');
+        var pauses = [0, 6000];
+        for (var i = 0; i < pauses.length; i++) {
+            if (!isPoeGenerateModalOpen() || currentUsername() !== username) return null;
+            if (poeUi.control && poeUi.control.cancelled) return null;
+            if (pauses[i]) await sleepMs(pauses[i]);
+            if (!isPoeGenerateModalOpen() || currentUsername() !== username) return null;
+            if (poeUi.control && poeUi.control.cancelled) return null;
+            var page;
+            try {
+                page = await fetchRemoteBackupPage(username, '', poeUi.control, 30000);
+            } catch (error) {
+                if (poeUi.control && poeUi.control.cancelled) return null;
+                continue;
+            }
+            var match = pickRecoveredBackup(page.records || [], attempt);
+            if (!match) continue;
+            if (!match.content && match.remoteName) match = await fillLeanRemoteRecord(match);
+            if (!match || !String(match.content || '').trim()) continue;
+            if (match.username && match.username !== username) continue;
+            if (!(attempt.requestId && match.requestId === attempt.requestId) && !backupMatchesAttempt(match, attempt)) continue;
+            return match;
+        }
+        return null;
+    }
+
+    async function presentGenerationRecord(record, fromBackup, data) {
+        if (!isPoeGenerateModalOpen() || !record || !record.content) return;
+        var saved = true;
+        try {
+            await saveGeneration(record);
+            poeUi.records = await listGenerations(currentUsername());
+        } catch (error) {
+            saved = false;
+            poeUi.records = [record].concat(poeUi.records.filter(function (item) { return item.id !== record.id; }));
+        }
+        poeUi.historyPage = 0;
+        poeUi.historyCursors = [''];
+        poeUi.historyNextAfter = '';
+        poeUi.historyHasMore = false;
+        poeUi.historyError = '';
+        poeUi.activeRecord = record;
+        showResult(record);
+        renderHistory();
+        syncRemoteHistoryIntoUi(currentUsername());
+        var statusParts = [];
+        if (record.modeName) statusParts.push(record.modeName);
+        if (record.model) statusParts.push('模型：' + record.model);
+        statusParts.push('參考 ' + record.sentCount + ' / ' + record.filteredCount + ' 題');
+        if (record.durationMs) statusParts.push('用時 ' + Math.max(1, Math.round(record.durationMs / 1000)) + ' 秒');
+        statusParts.push(saved ? '已儲存在這部瀏覽器' : ERROR_TEXT.save_failed);
+        if (fromBackup) statusParts.push('已從儲存的備份取回');
+        if (data && data.logged === false) statusParts.push('未能寫入試算表紀錄');
+        if (data && data.backedUp === false) statusParts.push('未能備份回覆到試算表');
+        setStatus(statusParts.join(' · '));
+    }
+
     async function runGeneration(bankQuestions, summary, source) {
         if (poeUi.busy) return;
         showPoeTab('compose');
@@ -2878,6 +3030,17 @@
         syncActionButtons();
         showLoading();
         startElapsed();
+        var requestId = newRequestId();
+        var known = knownGenerationKeys();
+        var baselineUser = currentUsername();
+        var baselinePromise = fetchRemoteBackupPage(baselineUser, '').then(function (page) {
+            (page.records || []).forEach(function (row) {
+                if (!row || (Number(row.createdAt) || 0) >= poeUi.startedAt - 5000) return;
+                if (row.remoteName) known.names[row.remoteName] = true;
+                var key = contentDedupeKey(row);
+                if (key) known.content[key] = true;
+            });
+        }).catch(function () {});
         setStatus(filteredCount > sending.length
             ? '正在送出前 ' + sending.length + ' / ' + filteredCount + ' 題參考。'
             : '正在送出 ' + sending.length + ' 題參考。');
@@ -2891,8 +3054,9 @@
                 source: source,
                 modeId: mode.id,
                 model: model,
+                requestId: requestId,
                 referenceIds: source === 'paste' ? [] : normalizeReferenceIds(sending.map(function (item) { return item.id; }))
-            }), 240000, poeUi.control);
+            }), GENERATE_WAIT_MS, poeUi.control);
             if (!isPoeGenerateModalOpen()) return;
             if (!data || data.ok !== true || !data.content) {
                 var code = data && data.error ? data.error : 'server_error';
@@ -2923,32 +3087,7 @@
                 filterSummary: summary,
                 durationMs: data.durationMs || (Date.now() - poeUi.startedAt)
             };
-            var saved = true;
-            try {
-                await saveGeneration(record);
-                poeUi.records = await listGenerations(currentUsername());
-            } catch (error) {
-                saved = false;
-                poeUi.records = [record].concat(poeUi.records.filter(function (item) { return item.id !== record.id; }));
-            }
-            poeUi.historyPage = 0;
-            poeUi.historyCursors = [''];
-            poeUi.historyNextAfter = '';
-            poeUi.historyHasMore = false;
-            poeUi.historyError = '';
-            poeUi.activeRecord = record;
-            showResult(record);
-            renderHistory();
-            syncRemoteHistoryIntoUi(currentUsername());
-            var statusParts = [];
-            if (record.modeName) statusParts.push(record.modeName);
-            if (record.model) statusParts.push('模型：' + record.model);
-            statusParts.push('參考 ' + record.sentCount + ' / ' + record.filteredCount + ' 題');
-            if (record.durationMs) statusParts.push('用時 ' + Math.max(1, Math.round(record.durationMs / 1000)) + ' 秒');
-            statusParts.push(saved ? '已儲存在這部瀏覽器' : ERROR_TEXT.save_failed);
-            if (data.logged === false) statusParts.push('未能寫入試算表紀錄');
-            if (data.backedUp === false) statusParts.push('未能備份回覆到試算表');
-            setStatus(statusParts.join(' · '));
+            await presentGenerationRecord(record, false, data);
         } catch (error) {
             if (!isPoeGenerateModalOpen()) return;
             if (error && error.code === 'cancelled') {
@@ -2956,7 +3095,60 @@
                 setStatus('已取消這次出題。');
                 return;
             }
-            showError(error && error.code ? error.code : 'network');
+            var failCode = error && error.code ? error.code : 'network';
+            var recovered = null;
+            if (failCode === 'upstream_timeout' || failCode === 'network') {
+                try { await baselinePromise; } catch (ignore) {}
+                recovered = await recoverSavedGeneration({
+                    username: currentUsername(),
+                    requestId: requestId,
+                    modeId: mode.id,
+                    modeName: mode.name,
+                    model: model,
+                    source: source,
+                    instruction: instruction,
+                    startedAt: poeUi.startedAt,
+                    sentCount: sending.length,
+                    filteredCount: filteredCount,
+                    truncated: filteredCount > sending.length,
+                    summary: summary,
+                    referenceIds: source === 'paste' ? [] : normalizeReferenceIds(sending.map(function (item) { return item.id; })),
+                    pastedReferences: source === 'paste' ? sending.map(function (item) {
+                        return { question: item.question, explanation: item.explanation || '' };
+                    }) : [],
+                    singleQuestion: source === 'single' ? (bankQuestions[0] || null) : null,
+                    knownNames: known.names,
+                    knownContent: known.content
+                });
+            }
+            if (recovered && String(recovered.content || '').trim()) {
+                await presentGenerationRecord(recordFromRecoveredBackup(recovered, {
+                    username: currentUsername(),
+                    modeId: mode.id,
+                    modeName: mode.name,
+                    model: model,
+                    source: source,
+                    instruction: instruction,
+                    startedAt: poeUi.startedAt,
+                    sentCount: sending.length,
+                    filteredCount: filteredCount,
+                    truncated: filteredCount > sending.length,
+                    summary: summary,
+                    referenceIds: source === 'paste' ? [] : normalizeReferenceIds(sending.map(function (item) { return item.id; })),
+                    pastedReferences: source === 'paste' ? sending.map(function (item) {
+                        return { question: item.question, explanation: item.explanation || '' };
+                    }) : [],
+                    singleQuestion: source === 'single' ? (bankQuestions[0] || null) : null
+                }), true, null);
+                return;
+            }
+            if (!isPoeGenerateModalOpen()) return;
+            if (poeUi.control && poeUi.control.cancelled) {
+                showIdle(poeUi.filteredCount);
+                setStatus('已取消這次出題。');
+                return;
+            }
+            showError(failCode);
             setStatus('');
         } finally {
             poeUi.busy = false;
