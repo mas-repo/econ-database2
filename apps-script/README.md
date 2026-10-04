@@ -6,7 +6,7 @@ The site button **AI出題** is hidden until `checkAccess` returns `ai: true` fo
 
 Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
 
-GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the token must not be in the page. `fetchSharedAsset` and `listSharedData` are how the site reads those files. The question bank is not committed under `econ-database/data/`.
+GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the token must not be in the page. `fetchSharedAsset` and `listSharedData` are how the site reads those files. Questions load only from the private repository `mas-repo/econ-database-data`. The question bank is not committed under `econ-database/data/`, and a failed private-repo read does not fall back to a file in this repo.
 
 `Code.gs` in this repository is the source of truth. If the copy already deployed in Apps Script has drifted, replace it with this file and **redeploy** (section 4). Property-only edits apply immediately. Code changes, including the editable 出題指示, do not: an old deployment ignores the client `instruction` field until you deploy a new version.
 
@@ -144,7 +144,7 @@ Only `githubSync` (the admin role) sees **自動同步**, **上傳到 GitHub**, 
 - **上傳到 GitHub** sends the current question bank to `syncDataUpload`.
 - **從 GitHub 載入** calls `syncDataDownload` and replaces the browser’s IndexedDB copy.
 - With **自動同步** on, opening the page tries to load the private copy. Saving, deleting, importing, or exporting a question uploads the current bank. Clearing the database does not upload by itself.
-- Reloading the page loads the question bank through the Apps Script proxy. If that read fails, the page stays without questions.
+- Reloading the page loads questions only from the private repository `mas-repo/econ-database-data` through the Apps Script proxy. If that read fails, the page stays without questions and does not use a local copy.
 
 Both actions require `githubSync` before any GitHub read or write. A refused call returns `feature_unavailable` and does not say whether GitHub is configured.
 

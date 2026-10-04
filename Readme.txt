@@ -1,10 +1,13 @@
 # HKDSE Economics Questions Database
 
 A single-page web app for browsing, filtering, and managing a database of
-HKDSE / HKCEE / HKALE Economics past-paper questions. Data is loaded from
-a JSON file (data/database.json) into IndexedDB for fast client-side
-filtering. Users can also import another JSON file with the same shape.
-The UI is in Traditional Chinese.
+HKDSE / HKCEE / HKALE Economics past-paper questions. Questions load only
+from the private repository mas-repo/econ-database-data
+(shared/data/database.json) through the Apps Script proxy, then into
+IndexedDB for fast client-side filtering. If that private-repo load fails,
+the page stays without questions and does not use a local copy. Users can
+also import another JSON file with the same shape. The UI is in Traditional
+Chinese.
 
 Future agents adding mock papers should read /README.md first. The
 Python builder is only the first import. Records with reviewedByAI Y
@@ -20,11 +23,13 @@ plain lists instead.
 
 1. Serve the project folder with any static web server over http or https.
    A file:// page cannot call the Apps Script proxy that holds the question bank.
-2. After sign-in, a known username loads the bank from the private data
-   repository (shared/data/database.json) through that proxy. The app shows
-   「載入中...」while that read finishes and the questions are written into
-   IndexedDB. The bank, diagrams, and paper packs are not files in this
-   public folder.
+2. After sign-in, a known username loads the bank only from the private
+   repository mas-repo/econ-database-data (shared/data/database.json)
+   through that proxy. If the private repo cannot be loaded, the page
+   fails and stays without questions. It does not fall back to a copy in
+   this repo. The app shows 「載入中...」while that read finishes and the
+   questions are written into IndexedDB. The bank, diagrams, and paper
+   packs are not files in this public folder.
 3. When sync completes, a「✓ 資料載入完成」pill appears in the header
    corner and the question list renders.
 
@@ -133,8 +138,10 @@ Templates (js/templates/):
 
 ### Data & Security
 - IndexedDB is treated as a disposable cache: it is wiped and rebuilt
-  from data/database.json on every load. Do not store user-entered
-  data only in IndexedDB (this is why the old 備註 feature was removed).
+  from the private repository mas-repo/econ-database-data on every load.
+  A failed load leaves the cache empty rather than reading a local
+  data/database.json. Do not store user-entered data only in IndexedDB
+  (this is why the old 備註 feature was removed).
 - Each question record has id, topic (identified syllabus topic) and
   plainText (the question wording). questionTextChi is kept equal to
   plainText so older card code still has the wording.
