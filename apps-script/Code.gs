@@ -82,7 +82,7 @@ var POE_MODEL_MAX_ = 120;
 // Dropdown presets for Poe (keep in sync with POE_MODELS in js/poeGenerateModal.js).
 // Clients may also send a sanitized free-text Poe bot id (isAllowedPoeModelId_).
 // OpenRouter accepts free-text ids (validated by isAllowedOpenRouterModel_).
-var POE_ALLOWED_MODELS_ = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash'];
+var POE_ALLOWED_MODELS_ = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'GLM-5.3-flash', 'GLM-5.3'];
 // Ids and display names only. Prompts stay in POE_GENERATION_MODES on the client
 // and arrive as `instruction`. Keep ids and names in sync with that object.
 var POE_MODE_NAMES_ = {
