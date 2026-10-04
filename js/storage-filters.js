@@ -1,5 +1,53 @@
 // Dependencies: storage-core.js (extends IndexedDBStorage)
 
+// Sentinel for "this field has no value". It is not a stored tag.
+// Blank strings and "-" (the bank's empty placeholder) count as no value.
+const EMPTY_FIELD_SENTINEL = '__empty__';
+const EMPTY_FIELD_LABELS = {
+    graph: '沒有圖表',
+    table: '沒有表格',
+    calculation: '沒有計算',
+    multipleSelection: '沒有複選',
+    concepts: '沒有概念',
+    patterns: '沒有題型',
+    stemPatterns: '沒有題幹模式'
+};
+
+function isBlankFilterValue(value) {
+    if (value == null) return true;
+    const text = String(value).trim();
+    return text === '' || text === '-';
+}
+
+function meaningfulArrayValues(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter(item => !isBlankFilterValue(item));
+}
+
+function isModalFieldEmpty(question, key) {
+    const arrays = { concepts: 'concepts', patterns: 'patterns', stemPatterns: 'stemPatterns' };
+    const scalars = {
+        graph: 'graphType',
+        table: 'tableType',
+        calculation: 'calculationType',
+        multipleSelection: 'multipleSelectionType'
+    };
+    if (arrays[key]) return meaningfulArrayValues(question[arrays[key]]).length === 0;
+    if (scalars[key]) return isBlankFilterValue(question[scalars[key]]);
+    return false;
+}
+
+function partitionEmptySelection(stateMap) {
+    const checked = Object.keys(stateMap).filter(key => stateMap[key] === 'checked');
+    const excluded = Object.keys(stateMap).filter(key => stateMap[key] === 'excluded');
+    return {
+        includeEmpty: checked.includes(EMPTY_FIELD_SENTINEL),
+        excludeEmpty: excluded.includes(EMPTY_FIELD_SENTINEL),
+        checked: checked.filter(key => key !== EMPTY_FIELD_SENTINEL),
+        excluded: excluded.filter(key => key !== EMPTY_FIELD_SENTINEL)
+    };
+}
+
 // Helper to extract unique values from a dataset for a specific field
 IndexedDBStorage.prototype.getUniqueValues = function(questions, field) {
     const values = new Set();
@@ -291,60 +339,66 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
 
         // Concept filters
         if (filters.triState.concepts) {
-            const checkedConcepts = Object.keys(filters.triState.concepts).filter(k => filters.triState.concepts[k] === 'checked');
-            const excludedConcepts = Object.keys(filters.triState.concepts).filter(k => filters.triState.concepts[k] === 'excluded');
+            const conceptPick = partitionEmptySelection(filters.triState.concepts);
 
-            if (checkedConcepts.length > 0) {
+            if (conceptPick.checked.length > 0 || conceptPick.includeEmpty) {
                 questions = questions.filter(q => {
+                    if (conceptPick.includeEmpty && isModalFieldEmpty(q, 'concepts')) return true;
+                    if (!conceptPick.checked.length) return false;
                     if (!q.concepts || !Array.isArray(q.concepts)) return false;
-                    return checkedConcepts.some(c => q.concepts.includes(c));
+                    return conceptPick.checked.some(c => q.concepts.includes(c));
                 });
             }
 
-            if (excludedConcepts.length > 0) {
+            if (conceptPick.excluded.length > 0 || conceptPick.excludeEmpty) {
                 questions = questions.filter(q => {
+                    if (conceptPick.excludeEmpty && isModalFieldEmpty(q, 'concepts')) return false;
                     if (!q.concepts || !Array.isArray(q.concepts)) return true;
-                    return !excludedConcepts.some(c => q.concepts.includes(c));
+                    return !conceptPick.excluded.some(c => q.concepts.includes(c));
                 });
             }
         }
 
         // Pattern filters
         if (filters.triState.patterns) {
-            const checkedPatterns = Object.keys(filters.triState.patterns).filter(k => filters.triState.patterns[k] === 'checked');
-            const excludedPatterns = Object.keys(filters.triState.patterns).filter(k => filters.triState.patterns[k] === 'excluded');
+            const patternPick = partitionEmptySelection(filters.triState.patterns);
 
-            if (checkedPatterns.length > 0) {
+            if (patternPick.checked.length > 0 || patternPick.includeEmpty) {
                 questions = questions.filter(q => {
+                    if (patternPick.includeEmpty && isModalFieldEmpty(q, 'patterns')) return true;
+                    if (!patternPick.checked.length) return false;
                     if (!q.patterns || !Array.isArray(q.patterns)) return false;
-                    return checkedPatterns.some(p => q.patterns.includes(p));
+                    return patternPick.checked.some(p => q.patterns.includes(p));
                 });
             }
 
-            if (excludedPatterns.length > 0) {
+            if (patternPick.excluded.length > 0 || patternPick.excludeEmpty) {
                 questions = questions.filter(q => {
+                    if (patternPick.excludeEmpty && isModalFieldEmpty(q, 'patterns')) return false;
                     if (!q.patterns || !Array.isArray(q.patterns)) return true;
-                    return !excludedPatterns.some(p => q.patterns.includes(p));
+                    return !patternPick.excluded.some(p => q.patterns.includes(p));
                 });
             }
         }
 
         // Stem pattern filters
         if (filters.triState.stemPatterns) {
-            const checkedStemPatterns = Object.keys(filters.triState.stemPatterns).filter(k => filters.triState.stemPatterns[k] === 'checked');
-            const excludedStemPatterns = Object.keys(filters.triState.stemPatterns).filter(k => filters.triState.stemPatterns[k] === 'excluded');
+            const stemPick = partitionEmptySelection(filters.triState.stemPatterns);
 
-            if (checkedStemPatterns.length > 0) {
+            if (stemPick.checked.length > 0 || stemPick.includeEmpty) {
                 questions = questions.filter(q => {
+                    if (stemPick.includeEmpty && isModalFieldEmpty(q, 'stemPatterns')) return true;
+                    if (!stemPick.checked.length) return false;
                     if (!q.stemPatterns || !Array.isArray(q.stemPatterns)) return false;
-                    return checkedStemPatterns.some(p => q.stemPatterns.includes(p));
+                    return stemPick.checked.some(p => q.stemPatterns.includes(p));
                 });
             }
 
-            if (excludedStemPatterns.length > 0) {
+            if (stemPick.excluded.length > 0 || stemPick.excludeEmpty) {
                 questions = questions.filter(q => {
+                    if (stemPick.excludeEmpty && isModalFieldEmpty(q, 'stemPatterns')) return false;
                     if (!q.stemPatterns || !Array.isArray(q.stemPatterns)) return true;
-                    return !excludedStemPatterns.some(p => q.stemPatterns.includes(p));
+                    return !stemPick.excluded.some(p => q.stemPatterns.includes(p));
                 });
             }
         }
@@ -392,53 +446,73 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
 
         // Multiple Selection Filter
         if (filters.triState.multipleSelection) {
-            const checked = Object.keys(filters.triState.multipleSelection).filter(k => filters.triState.multipleSelection[k] === 'checked');
-            const excluded = Object.keys(filters.triState.multipleSelection).filter(k => filters.triState.multipleSelection[k] === 'excluded');
+            const pick = partitionEmptySelection(filters.triState.multipleSelection);
 
-            if (checked.length > 0) {
-                questions = questions.filter(q => checked.includes(q.multipleSelectionType));
+            if (pick.checked.length > 0 || pick.includeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.includeEmpty && isModalFieldEmpty(q, 'multipleSelection')) return true;
+                    return pick.checked.includes(q.multipleSelectionType);
+                });
             }
-            if (excluded.length > 0) {
-                questions = questions.filter(q => !excluded.includes(q.multipleSelectionType));
+            if (pick.excluded.length > 0 || pick.excludeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.excludeEmpty && isModalFieldEmpty(q, 'multipleSelection')) return false;
+                    return !pick.excluded.includes(q.multipleSelectionType);
+                });
             }
         }
 
         // Graph Filter
         if (filters.triState.graph) {
-            const checked = Object.keys(filters.triState.graph).filter(k => filters.triState.graph[k] === 'checked');
-            const excluded = Object.keys(filters.triState.graph).filter(k => filters.triState.graph[k] === 'excluded');
+            const pick = partitionEmptySelection(filters.triState.graph);
 
-            if (checked.length > 0) {
-                questions = questions.filter(q => checked.includes(q.graphType));
+            if (pick.checked.length > 0 || pick.includeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.includeEmpty && isModalFieldEmpty(q, 'graph')) return true;
+                    return pick.checked.includes(q.graphType);
+                });
             }
-            if (excluded.length > 0) {
-                questions = questions.filter(q => !excluded.includes(q.graphType));
+            if (pick.excluded.length > 0 || pick.excludeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.excludeEmpty && isModalFieldEmpty(q, 'graph')) return false;
+                    return !pick.excluded.includes(q.graphType);
+                });
             }
         }
 
         // Table Filter
         if (filters.triState.table) {
-            const checked = Object.keys(filters.triState.table).filter(k => filters.triState.table[k] === 'checked');
-            const excluded = Object.keys(filters.triState.table).filter(k => filters.triState.table[k] === 'excluded');
+            const pick = partitionEmptySelection(filters.triState.table);
 
-            if (checked.length > 0) {
-                questions = questions.filter(q => checked.includes(q.tableType));
+            if (pick.checked.length > 0 || pick.includeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.includeEmpty && isModalFieldEmpty(q, 'table')) return true;
+                    return pick.checked.includes(q.tableType);
+                });
             }
-            if (excluded.length > 0) {
-                questions = questions.filter(q => !excluded.includes(q.tableType));
+            if (pick.excluded.length > 0 || pick.excludeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.excludeEmpty && isModalFieldEmpty(q, 'table')) return false;
+                    return !pick.excluded.includes(q.tableType);
+                });
             }
         }
 
         // Calculation Filter
         if (filters.triState.calculation) {
-            const checked = Object.keys(filters.triState.calculation).filter(k => filters.triState.calculation[k] === 'checked');
-            const excluded = Object.keys(filters.triState.calculation).filter(k => filters.triState.calculation[k] === 'excluded');
+            const pick = partitionEmptySelection(filters.triState.calculation);
 
-            if (checked.length > 0) {
-                questions = questions.filter(q => checked.includes(q.calculationType));
+            if (pick.checked.length > 0 || pick.includeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.includeEmpty && isModalFieldEmpty(q, 'calculation')) return true;
+                    return pick.checked.includes(q.calculationType);
+                });
             }
-            if (excluded.length > 0) {
-                questions = questions.filter(q => !excluded.includes(q.calculationType));
+            if (pick.excluded.length > 0 || pick.excludeEmpty) {
+                questions = questions.filter(q => {
+                    if (pick.excludeEmpty && isModalFieldEmpty(q, 'calculation')) return false;
+                    return !pick.excluded.includes(q.calculationType);
+                });
             }
         }
 

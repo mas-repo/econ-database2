@@ -47,9 +47,11 @@ function populateModalFilter(key, data) {
     modalFilterData[key] = data;
 
     // Hide the trigger entirely when the dataset has no values for it
-    // (same behavior as the old input-first dropdowns).
+    // (same behavior as the old input-first dropdowns). An empty-field
+    // choice still counts, so a field of only blanks stays reachable.
     const item = document.getElementById(`mf-item-${key}`);
-    if (item) item.style.display = data.values.length ? '' : 'none';
+    const hasChoices = data.values.length > 0 || (data.emptyCount || 0) > 0;
+    if (item) item.style.display = hasChoices ? '' : 'none';
 
     updateModalFilterBadge(key);
 
@@ -103,6 +105,7 @@ function openFilterModal(key) {
                 <button type="button" class="mf-close" onclick="closeFilterModal()" aria-label="關閉">✕</button>
             </div>
             <div class="mf-hint">點擊選項切換：未選 → ✔ 包含 → ✕ 排除</div>
+            <div class="mf-empty-slot" id="mf-empty-slot"></div>
             <input type="text" class="mf-search" id="mf-search" placeholder="搜尋選項...">
             <div class="mf-list" id="mf-list"></div>
             <div class="mf-footer">
@@ -138,12 +141,34 @@ function closeFilterModal() {
 
 // ---------- Option list ----------
 
+function renderEmptyFieldOption(key) {
+    const slot = document.getElementById('mf-empty-slot');
+    if (!slot) return;
+    const label = EMPTY_FIELD_LABELS[key];
+    if (!label) {
+        slot.innerHTML = '';
+        return;
+    }
+    const state = ((window.triStateFilters && window.triStateFilters[key]) || {})[EMPTY_FIELD_SENTINEL];
+    const mode = state === 'checked' ? 'include' : state === 'excluded' ? 'exclude' : 'none';
+    const mark = mode === 'include' ? '✔' : mode === 'exclude' ? '✕' : '';
+    const count = (modalFilterData[key] && modalFilterData[key].emptyCount) || 0;
+    slot.innerHTML = `
+        <button type="button" class="mf-option mf-empty-option mf-${mode}">
+            <span class="mf-mark">${mark}</span>
+            <span class="mf-option-label">${escapeHTML(label)}</span>
+            <span class="mf-count">(${count})</span>
+        </button>`;
+    slot.onclick = () => cycleModalOption(key, EMPTY_FIELD_SENTINEL);
+}
+
 function renderModalOptionList() {
     const list = document.getElementById('mf-list');
     if (!list || !_mfActiveKey) return;
     const key = _mfActiveKey;
     const data = modalFilterData[key];
     const state = (window.triStateFilters && window.triStateFilters[key]) || {};
+    renderEmptyFieldOption(key);
 
     // Frozen base order + any values that appeared after opening.
     const base = _mfFrozenOrder ? [..._mfFrozenOrder] : [...data.values];

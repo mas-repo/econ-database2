@@ -415,14 +415,18 @@ function buildOptionData(fieldName, filterType, isArrayField, contextQuestions, 
 
     if (window.triStateFilters[filterType]) {
         Object.keys(window.triStateFilters[filterType]).forEach(val => {
+            // The empty-field sentinel is not a stored tag. Keep it.
+            if (val === EMPTY_FIELD_SENTINEL) return;
             if (!allValuesSet.has(val)) {
                 delete window.triStateFilters[filterType][val];
             }
         });
     }
 
-    // 4. Always render active selections, even with 0 context matches
+    // 4. Always render active selections, even with 0 context matches.
+    // The empty-field choice is a pinned button, not a list row.
     Object.keys(window.triStateFilters[filterType] || {}).forEach(val => {
+        if (val === EMPTY_FIELD_SENTINEL) return;
         if (!validValues.includes(val)) {
             validValues.push(val);
         }
@@ -453,7 +457,14 @@ function buildOptionData(fieldName, filterType, isArrayField, contextQuestions, 
         return a.localeCompare(b, 'zh-HK');
     });
 
-    return { values: validValues, counts };
+    let emptyCount = 0;
+    if (typeof isModalFieldEmpty === 'function' && EMPTY_FIELD_LABELS[filterType]) {
+        contextQuestions.forEach(q => {
+            if (isModalFieldEmpty(q, filterType)) emptyCount += 1;
+        });
+    }
+
+    return { values: validValues, counts, emptyCount };
 }
 
 async function updateDynamicDropdowns() {
@@ -1042,7 +1053,9 @@ function updateSearchInfo() {
                 }
 
                 const label = categories[catKey] || catKey;
-                const shown = catKey === 'year' ? yearFilterLabel(itemVal)
+                const shown = itemVal === EMPTY_FIELD_SENTINEL && EMPTY_FIELD_LABELS[catKey]
+                    ? EMPTY_FIELD_LABELS[catKey]
+                    : catKey === 'year' ? yearFilterLabel(itemVal)
                     : catKey === 'paper' ? paperFilterLabel(itemVal)
                     : itemVal;
                 if (state === 'checked') {

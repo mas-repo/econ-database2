@@ -357,6 +357,7 @@ function staticFilterUniverse(def, counts) {
 }
 
 function filterValueLabel(def, value) {
+    if (value === EMPTY_FIELD_SENTINEL && EMPTY_FIELD_LABELS[def.key]) return EMPTY_FIELD_LABELS[def.key];
     if (def.kind === 'chapter') {
         const name = (typeof CHAPTER_DESCRIPTIONS !== 'undefined' && CHAPTER_DESCRIPTIONS[value]) || '';
         return name ? `${value} ${name}` : value;
@@ -902,11 +903,16 @@ async function openStatsFilterModal(tabId, key) {
     const counts = countFilterValues(context, def);
     const selected = state.triState[key] || {};
     Object.keys(selected).forEach(value => {
+        if (value === EMPTY_FIELD_SENTINEL) return;
         if (counts[value] === undefined) counts[value] = 0;
     });
-    const order = sortFilterValues(def, staticFilterUniverse(def, counts), state);
+    const order = sortFilterValues(def, staticFilterUniverse(def, counts), state)
+        .filter(value => value !== EMPTY_FIELD_SENTINEL);
+    const emptyCount = EMPTY_FIELD_LABELS[key]
+        ? context.filter(q => isModalFieldEmpty(q, key)).length
+        : 0;
 
-    sfModal = { tabId, key, def, order, counts, rendered: order.slice() };
+    sfModal = { tabId, key, def, order, counts, emptyCount, rendered: order.slice() };
 
     const logic = def.logic ? `
         <div class="sf-logic-wrap">
@@ -930,6 +936,7 @@ async function openStatsFilterModal(tabId, key) {
                 <button type="button" class="mf-close" id="sf-close" aria-label="關閉">✕</button>
             </div>
             <div class="mf-hint">點擊選項切換：未選 → ✔ 包含 → ✕ 排除</div>
+            <div class="mf-empty-slot" id="sf-empty-slot"></div>
             <input type="text" class="mf-search" id="sf-search" placeholder="搜尋選項...">
             <div class="mf-list" id="sf-list"></div>
             <div class="mf-footer">${logic}<span class="sf-modal-actions"><button type="button" class="btn mf-clear-btn" id="sf-clear">🗑️ 清除</button><button type="button" class="btn mf-done-btn" id="sf-done">完成</button></span></div>
@@ -963,11 +970,32 @@ async function openStatsFilterModal(tabId, key) {
     document.getElementById('sf-search').focus();
 }
 
+function renderStatsEmptyFieldOption() {
+    const slot = document.getElementById('sf-empty-slot');
+    if (!slot || !sfModal) return;
+    const label = EMPTY_FIELD_LABELS[sfModal.key];
+    if (!label) {
+        slot.innerHTML = '';
+        return;
+    }
+    const selected = (getStatsTabState(sfModal.tabId).triState[sfModal.key] || {})[EMPTY_FIELD_SENTINEL];
+    const mode = selected === 'checked' ? 'include' : selected === 'excluded' ? 'exclude' : 'none';
+    const mark = mode === 'include' ? '✔' : mode === 'exclude' ? '✕' : '';
+    slot.innerHTML = `
+        <button type="button" class="mf-option mf-empty-option mf-${mode}" id="sf-empty-option">
+            <span class="mf-mark">${mark}</span>
+            <span class="mf-option-label">${escapeHTML(label)}</span>
+            <span class="mf-count">(${sfModal.emptyCount || 0})</span>
+        </button>`;
+    slot.onclick = () => cycleStatsOption(sfModal.tabId, sfModal.key, EMPTY_FIELD_SENTINEL);
+}
+
 function renderStatsModalList() {
     const list = document.getElementById('sf-list');
     if (!list || !sfModal) return;
     const state = getStatsTabState(sfModal.tabId);
     const selected = state.triState[sfModal.key] || {};
+    renderStatsEmptyFieldOption();
     const term = (document.getElementById('sf-search')?.value || '').trim().toUpperCase();
     const opts = sfModal.order.filter(value => {
         if (!term) return true;

@@ -828,6 +828,27 @@
     border-color: var(--secondary-color);
 }
 
+.mf-empty-slot {
+    padding: 0 16px 8px;
+    margin-bottom: 8px;
+}
+
+.mf-empty-slot:empty {
+    display: none;
+    padding: 0;
+    margin: 0;
+}
+
+.mf-empty-slot:not(:empty) {
+    border-bottom: 1px solid #e5e7eb;
+}
+
+/* Pinned above the search box. Include and exclude colours still win. */
+.mf-option.mf-empty-option.mf-none {
+    background: #f8fafc;
+    border-style: dashed;
+}
+
 .mf-list {
     overflow-y: auto;
     padding: 0 12px 8px;
