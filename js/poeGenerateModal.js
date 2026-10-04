@@ -61,6 +61,7 @@
     var API_KEY_OPENROUTER = 'econ_openrouter_api_key_v1';
     var CLIENT_SEND_CAP = 60;
     var LOCAL_KEY = 'econ_poe_generations_v1';
+    // One page of personal history and of admin usage. Matches AI_BACKUP_LIST_MAX_.
     var HISTORY_LIMIT = 30;
     var ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
@@ -106,7 +107,18 @@
         usageActiveId: '',
         usageLoaded: false,
         usageLoading: false,
-        usageError: ''
+        usageError: '',
+        historyPage: 0,
+        historyCursors: [''],
+        historyNextAfter: '',
+        historyHasMore: false,
+        historyLoading: false,
+        historyLoadToken: 0,
+        historyError: '',
+        usagePage: 0,
+        usageCursors: [null],
+        usageNextAfter: null,
+        usageHasMore: false
     };
 
     function modeById(id) {
@@ -1245,17 +1257,32 @@
         return merged.slice(0, HISTORY_LIMIT);
     }
 
-    async function fetchRemoteBackups(username) {
-        if (!username || !proxyUrl()) return [];
-        var data = await proxyRequest({
+    async function fetchRemoteBackupPage(username, afterName) {
+        if (!username || !proxyUrl()) return { records: [], hasMore: false, nextAfter: '' };
+        var payload = {
             action: 'listAiBackups',
             username: username
-        }, 90000, null);
-        if (!data || data.ok !== true || !Array.isArray(data.backups)) return [];
-        return data.backups
+        };
+        if (afterName) payload.after = afterName;
+        var data = await proxyRequest(payload, 90000, null);
+        if (!data || data.ok !== true || !Array.isArray(data.backups)) {
+            var failure = new Error('history');
+            failure.code = data && data.error ? data.error : 'server_error';
+            throw failure;
+        }
+        var records = data.backups
             .map(function (item) { return mapRemoteBackup(item, username); })
-            .filter(Boolean);
+            .filter(Boolean)
+            .slice(0, HISTORY_LIMIT);
+        var nextAfter = String(data.nextAfter || '');
+        if (!nextAfter && records.length) nextAfter = String(records[records.length - 1].remoteName || '');
+        return {
+            records: records,
+            hasMore: data.hasMore === true && !!nextAfter,
+            nextAfter: nextAfter
+        };
     }
+
 
     async function fillLeanRemoteRecord(record) {
         if (!record || !record.lean || record.content || !record.remoteName) return record;
@@ -1298,13 +1325,16 @@
         } catch (error) {
             local = [];
         }
-        var remote = [];
+        var remotePage;
         try {
-            remote = await fetchRemoteBackups(username);
+            remotePage = await fetchRemoteBackupPage(username, '');
         } catch (error) {
             return null;
         }
-        if (!remote.length) return local;
+        var remote = remotePage.records || [];
+        if (!remote.length) {
+            return { records: local, hasMore: false, nextAfter: '' };
+        }
         var merged = mergeGenerationRecords(local, remote);
         for (var i = 0; i < merged.length; i++) {
             var row = merged[i];
@@ -1319,28 +1349,60 @@
                 // Quota or private-mode storage failures must not block the UI.
             }
         }
+        var listed;
         try {
-            return await listGenerations(username);
+            listed = await listGenerations(username);
         } catch (error) {
-            return merged;
+            listed = merged;
         }
+        return {
+            records: listed,
+            hasMore: remotePage.hasMore === true,
+            nextAfter: remotePage.nextAfter || ''
+        };
     }
 
-    function syncRemoteHistoryIntoUi(username) {
+
+    function syncRemoteHistoryIntoUi(username, showLoading) {
         if (!username) return;
-        syncRemoteHistory(username).then(function (records) {
-            if (!records) return;
-            if (!isPoeGenerateModalOpen()) return;
-            if (currentUsername() !== username) return;
-            poeUi.records = records;
+        var token = ++poeUi.historyLoadToken;
+        var previousPage = poeUi.historyPage;
+        if (showLoading) {
+            poeUi.historyPage = 0;
+            poeUi.historyLoading = true;
+            poeUi.historyError = '';
+            renderHistory();
+        }
+        syncRemoteHistory(username).then(function (payload) {
+            if (token !== poeUi.historyLoadToken) return;
+            if (!isPoeGenerateModalOpen() || currentUsername() !== username) return;
+            poeUi.historyLoading = false;
+            if (!payload) {
+                if (showLoading) poeUi.historyPage = previousPage;
+                renderHistory();
+                return;
+            }
+            poeUi.historyPage = 0;
+            poeUi.records = payload.records || [];
+            poeUi.historyHasMore = payload.hasMore === true && !!payload.nextAfter;
+            poeUi.historyNextAfter = payload.nextAfter || '';
+            poeUi.historyCursors = [''];
+            if (poeUi.historyHasMore) poeUi.historyCursors[1] = poeUi.historyNextAfter;
+            poeUi.historyError = '';
             if (poeUi.activeRecord) {
                 var activeId = poeUi.activeRecord.id;
-                var refreshed = records.filter(function (item) { return item.id === activeId; })[0];
+                var refreshed = poeUi.records.filter(function (item) { return item.id === activeId; })[0];
                 if (refreshed) poeUi.activeRecord = refreshed;
             }
             renderHistory();
-        }).catch(function () {});
+        }).catch(function () {
+            if (token !== poeUi.historyLoadToken) return;
+            poeUi.historyLoading = false;
+            if (showLoading) poeUi.historyPage = previousPage;
+            renderHistory();
+        });
     }
+
 
 
     function isSettingsModalOpen() {
@@ -1558,7 +1620,13 @@
             + '      </div>'
             + '      <label class="poe-history-search" for="poe-history-search">搜尋參考題編號'
             + '        <input type="search" id="poe-history-search" autocomplete="off" spellcheck="false" placeholder="例如 2026-P1-01" aria-label="搜尋參考題編號">'
+            + '        <span class="poe-history-search-note">只搜尋本頁。</span>'
             + '      </label>'
+            + '      <div class="poe-history-pager" role="navigation" aria-label="過往紀錄分頁">'
+            + '        <button type="button" class="poe-page-btn" id="poe-history-prev" disabled>上一頁</button>'
+            + '        <span class="poe-history-page" id="poe-history-page">第 1 頁</span>'
+            + '        <button type="button" class="poe-page-btn" id="poe-history-next" disabled>下一頁</button>'
+            + '      </div>'
             + '      <div id="poe-history-list"></div>'
             + '    </aside>'
             + '  </div>'
@@ -1600,6 +1668,8 @@
         overlay.querySelector('#poe-tab-compose').addEventListener('click', function () { showPoeTab('compose'); });
         overlay.querySelector('#poe-tab-history').addEventListener('click', function () { showPoeTab('history'); });
         overlay.querySelector('#poe-history-search').addEventListener('input', onHistorySearchInput);
+        overlay.querySelector('#poe-history-prev').addEventListener('click', function () { showHistoryPage(poeUi.historyPage - 1); });
+        overlay.querySelector('#poe-history-next').addEventListener('click', function () { showHistoryPage(poeUi.historyPage + 1); });
         overlay.addEventListener('keydown', onDialogKeydown);
     }
 
@@ -1698,6 +1768,17 @@
         poeUi.usageLoaded = false;
         poeUi.usageError = '';
         poeUi.usageActiveId = '';
+        poeUi.usagePage = 0;
+        poeUi.usageCursors = [null];
+        poeUi.usageNextAfter = null;
+        poeUi.usageHasMore = false;
+        poeUi.historyPage = 0;
+        poeUi.historyCursors = [''];
+        poeUi.historyNextAfter = '';
+        poeUi.historyHasMore = false;
+        poeUi.historyLoading = false;
+        poeUi.historyError = '';
+        poeUi.historyLoadToken = (poeUi.historyLoadToken || 0) + 1;
         loadComposer();
         refreshProviderSummary();
         clearTestBanner();
@@ -2132,7 +2213,38 @@
         input.placeholder = '例如 2026-P1-01';
         input.setAttribute('aria-label', '搜尋參考題編號');
         label.appendChild(input);
+        var usageSearchNote = document.createElement('span');
+        usageSearchNote.className = 'poe-history-search-note';
+        usageSearchNote.textContent = '只搜尋本頁。';
+        label.appendChild(usageSearchNote);
         panel.appendChild(label);
+
+        var usagePager = document.createElement('div');
+        usagePager.className = 'poe-history-pager';
+        usagePager.setAttribute('role', 'navigation');
+        usagePager.setAttribute('aria-label', '使用紀錄分頁');
+        var usagePrev = document.createElement('button');
+        usagePrev.type = 'button';
+        usagePrev.className = 'poe-page-btn';
+        usagePrev.id = 'poe-usage-prev';
+        usagePrev.disabled = true;
+        usagePrev.textContent = '上一頁';
+        usagePrev.addEventListener('click', function () { showUsagePage(poeUi.usagePage - 1); });
+        var usagePageLabel = document.createElement('span');
+        usagePageLabel.className = 'poe-history-page';
+        usagePageLabel.id = 'poe-usage-page';
+        usagePageLabel.textContent = '第 1 頁';
+        var usageNext = document.createElement('button');
+        usageNext.type = 'button';
+        usageNext.className = 'poe-page-btn';
+        usageNext.id = 'poe-usage-next';
+        usageNext.disabled = true;
+        usageNext.textContent = '下一頁';
+        usageNext.addEventListener('click', function () { showUsagePage(poeUi.usagePage + 1); });
+        usagePager.appendChild(usagePrev);
+        usagePager.appendChild(usagePageLabel);
+        usagePager.appendChild(usageNext);
+        panel.appendChild(usagePager);
 
         var list = document.createElement('div');
         list.id = 'poe-usage-list';
@@ -2171,38 +2283,59 @@
         return mapped;
     }
 
-    async function loadUsageRecords(force) {
+    async function loadUsageRecords(force, pageIndex) {
         if (!viewerIsAdmin() || !document.getElementById('poe-tab-usage')) return;
         if (poeUi.usageLoading) return;
-        if (poeUi.usageLoaded && !force) {
+        var page = typeof pageIndex === 'number' ? pageIndex : poeUi.usagePage;
+        if (page < 0) page = 0;
+        if (poeUi.usageLoaded && !force && page === poeUi.usagePage) {
             renderUsage();
             return;
         }
         var username = currentUsername();
         if (!username || !proxyUrl()) {
+            poeUi.usagePage = page;
             poeUi.usageRecords = [];
             poeUi.usageActiveId = '';
+            poeUi.usageHasMore = false;
             poeUi.usageError = '暫時未能載入使用紀錄，請再試一次。';
             poeUi.usageLoaded = false;
             renderUsage();
             return;
         }
+        var after = page > 0 ? poeUi.usageCursors[page] : null;
+        if (page > 0 && !(after && after.name && after.username)) return;
+        poeUi.usagePage = page;
         poeUi.usageLoading = true;
         poeUi.usageError = '';
         renderUsage();
+        var payload = {
+            action: 'listAiUsageRecords',
+            username: username
+        };
+        if (after && after.name && (after.username === 'ryan' || after.username === 'user57')) {
+            payload.afterName = after.name;
+            payload.afterUser = after.username;
+        }
         try {
-            var data = await proxyRequest({
-                action: 'listAiUsageRecords',
-                username: username
-            }, 90000, null);
+            var data = await proxyRequest(payload, 90000, null);
             if (!isPoeGenerateModalOpen() || currentUsername() !== username || !viewerIsAdmin()) return;
             if (!data || data.ok !== true || !Array.isArray(data.records)) {
                 poeUi.usageRecords = [];
                 poeUi.usageActiveId = '';
+                poeUi.usageHasMore = false;
                 poeUi.usageError = '暫時未能載入使用紀錄，請再試一次。';
                 poeUi.usageLoaded = false;
             } else {
-                poeUi.usageRecords = data.records.map(mapUsageRecord).filter(Boolean);
+                poeUi.usageRecords = data.records.map(mapUsageRecord).filter(Boolean).slice(0, HISTORY_LIMIT);
+                var nextAfter = null;
+                if (data.nextAfter && data.nextAfter.name && (data.nextAfter.username === 'ryan' || data.nextAfter.username === 'user57')) {
+                    nextAfter = { name: String(data.nextAfter.name), username: String(data.nextAfter.username) };
+                }
+                poeUi.usageHasMore = data.hasMore === true && !!nextAfter;
+                poeUi.usageNextAfter = nextAfter;
+                if (poeUi.usageHasMore) poeUi.usageCursors[page + 1] = nextAfter;
+                if (!poeUi.usageRecords.length) poeUi.usageHasMore = false;
                 poeUi.usageError = '';
                 poeUi.usageLoaded = true;
                 if (poeUi.usageActiveId && !poeUi.usageRecords.some(function (item) { return item.id === poeUi.usageActiveId; })) {
@@ -2213,6 +2346,7 @@
             if (!isPoeGenerateModalOpen() || currentUsername() !== username) return;
             poeUi.usageRecords = [];
             poeUi.usageActiveId = '';
+            poeUi.usageHasMore = false;
             poeUi.usageError = '暫時未能載入使用紀錄，請再試一次。';
             poeUi.usageLoaded = false;
         } finally {
@@ -2220,6 +2354,7 @@
             if (document.getElementById('poe-usage-list')) renderUsage();
         }
     }
+
 
     function renderUsageDetail(record) {
         var box = document.getElementById('poe-usage-detail');
@@ -2245,6 +2380,7 @@
     }
 
     function renderUsage() {
+        updateUsagePager();
         var list = document.getElementById('poe-usage-list');
         if (!list) return;
         list.textContent = '';
@@ -2268,6 +2404,7 @@
             var empty = document.createElement('p');
             empty.className = 'poe-history-empty';
             empty.textContent = '尚未有可顯示的使用紀錄。';
+            if (poeUi.usagePage > 0) empty.textContent = '沒有更早的使用紀錄。';
             list.appendChild(empty);
             renderUsageDetail(null);
             return;
@@ -2375,14 +2512,97 @@
         return clipPreview(line, 42);
     }
 
+
+    function updateHistoryPager() {
+        var prev = document.getElementById('poe-history-prev');
+        var next = document.getElementById('poe-history-next');
+        var label = document.getElementById('poe-history-page');
+        if (label) label.textContent = '\u7b2c ' + (poeUi.historyPage + 1) + ' \u9801';
+        if (prev) prev.disabled = !!(poeUi.historyLoading || poeUi.historyPage <= 0);
+        if (next) next.disabled = !!(poeUi.historyLoading || !poeUi.historyHasMore);
+    }
+
+    function updateUsagePager() {
+        var prev = document.getElementById('poe-usage-prev');
+        var next = document.getElementById('poe-usage-next');
+        var label = document.getElementById('poe-usage-page');
+        if (label) label.textContent = '\u7b2c ' + (poeUi.usagePage + 1) + ' \u9801';
+        if (prev) prev.disabled = !!(poeUi.usageLoading || poeUi.usagePage <= 0);
+        if (next) next.disabled = !!(poeUi.usageLoading || !poeUi.usageHasMore);
+    }
+
+    function showHistoryPage(pageIndex) {
+        if (poeUi.historyLoading) return;
+        var page = pageIndex | 0;
+        if (page < 0 || page === poeUi.historyPage) return;
+        if (page === poeUi.historyPage + 1) {
+            if (!poeUi.historyHasMore || !poeUi.historyNextAfter) return;
+            poeUi.historyCursors[page] = poeUi.historyNextAfter;
+        }
+        if (page === 0) {
+            syncRemoteHistoryIntoUi(currentUsername(), true);
+            return;
+        }
+        var after = poeUi.historyCursors[page] || '';
+        if (!after) return;
+        var username = currentUsername();
+        if (!username) return;
+        var token = ++poeUi.historyLoadToken;
+        poeUi.historyPage = page;
+        poeUi.historyLoading = true;
+        poeUi.historyError = '';
+        renderHistory();
+        fetchRemoteBackupPage(username, after).then(function (remotePage) {
+            if (token !== poeUi.historyLoadToken) return;
+            if (!isPoeGenerateModalOpen() || currentUsername() !== username) return;
+            poeUi.records = remotePage.records || [];
+            poeUi.historyHasMore = remotePage.hasMore === true && !!remotePage.nextAfter;
+            poeUi.historyNextAfter = remotePage.nextAfter || '';
+            if (poeUi.historyHasMore) poeUi.historyCursors[page + 1] = remotePage.nextAfter;
+            if (!poeUi.records.length) poeUi.historyHasMore = false;
+            poeUi.historyLoading = false;
+            renderHistory();
+        }).catch(function () {
+            if (token !== poeUi.historyLoadToken) return;
+            if (!isPoeGenerateModalOpen() || currentUsername() !== username) return;
+            poeUi.records = [];
+            poeUi.historyHasMore = false;
+            poeUi.historyNextAfter = '';
+            poeUi.historyError = '暫時未能載入過往紀錄，請再試一次。';
+            poeUi.historyLoading = false;
+            renderHistory();
+        });
+    }
+
+    function showUsagePage(pageIndex) {
+        if (poeUi.usageLoading) return;
+        var page = pageIndex | 0;
+        if (page < 0 || page === poeUi.usagePage) return;
+        if (page === poeUi.usagePage + 1) {
+            if (!poeUi.usageHasMore || !poeUi.usageNextAfter) return;
+            poeUi.usageCursors[page] = poeUi.usageNextAfter;
+        }
+        if (page > 0 && !(poeUi.usageCursors[page] && poeUi.usageCursors[page].name)) return;
+        loadUsageRecords(true, page);
+    }
+
     function renderHistory() {
+        updateHistoryPager();
         var list = document.getElementById('poe-history-list');
         if (!list) return;
         list.textContent = '';
+        if (poeUi.historyLoading || poeUi.historyError) {
+            var notice = document.createElement('p');
+            notice.className = 'poe-history-empty';
+            notice.textContent = poeUi.historyLoading ? '正在載入過往紀錄…' : poeUi.historyError;
+            list.appendChild(notice);
+            return;
+        }
         if (!poeUi.records.length) {
             var empty = document.createElement('p');
             empty.className = 'poe-history-empty';
             empty.textContent = '尚未有儲存的生成結果。成功出題後可以在這裡重新打開。';
+            if (poeUi.historyPage > 0) empty.textContent = '沒有更早的紀錄。';
             list.appendChild(empty);
             return;
         }
@@ -2485,7 +2705,7 @@
             setStatus('未能清除紀錄。');
             return;
         }
-        poeUi.records = [];
+        if (poeUi.historyPage === 0) poeUi.records = [];
         poeUi.activeRecord = null;
         renderHistory();
         showIdle(poeUi.filteredCount);
@@ -2711,9 +2931,15 @@
                 saved = false;
                 poeUi.records = [record].concat(poeUi.records.filter(function (item) { return item.id !== record.id; }));
             }
+            poeUi.historyPage = 0;
+            poeUi.historyCursors = [''];
+            poeUi.historyNextAfter = '';
+            poeUi.historyHasMore = false;
+            poeUi.historyError = '';
             poeUi.activeRecord = record;
             showResult(record);
             renderHistory();
+            syncRemoteHistoryIntoUi(currentUsername());
             var statusParts = [];
             if (record.modeName) statusParts.push(record.modeName);
             if (record.model) statusParts.push('模型：' + record.model);
