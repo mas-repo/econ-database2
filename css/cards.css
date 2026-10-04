@@ -102,6 +102,38 @@
     margin: 0 0 10px 0;
     font-size: 1.1rem;
     color: var(--text-color);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.stat-card-sub {
+    font-weight: 400;
+    font-size: 0.85em;
+    color: var(--text-light);
+}
+
+.stat-card-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-light);
+}
+
+.stats-page-info {
+    font-size: 14px;
+    color: var(--text-light);
+}
+
+.stats-page-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.tab-content > .pagination-container:empty {
+    display: none;
+    margin: 0;
 }
 
 .stat-details {

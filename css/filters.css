@@ -883,9 +883,28 @@
     color: #9ca3af;
 }
 
+.sf-logic-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-light);
+}
+
+.sf-modal-actions {
+    display: inline-flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.stats-filters {
+    margin-top: var(--spacing-md);
+}
+
 .mf-footer {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 8px;
     padding: 12px 16px;
     border-top: 1px solid #e5e7eb;

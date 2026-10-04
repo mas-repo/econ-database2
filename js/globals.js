@@ -12,6 +12,7 @@ var triStateFilters = {
     exam: {},
     qtype: {},
     section: {},
+    paper: {},
     concepts: {},
     patterns: {},
     stemPatterns: {},

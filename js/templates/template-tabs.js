@@ -113,27 +113,37 @@ function renderTabContentsTemplate() {
 
     <div id="topics-tab" class="tab-content">
         <h2>課程分類統計</h2>
+        <div id="topics-stats-filters"></div>
         <div class="stats-grid" id="topics-grid"></div>
+        <div id="topics-stats-pager" class="pagination-container"></div>
     </div>
 
     <div id="chapters-tab" class="tab-content">
         <h2>Chapters統計</h2>
+        <div id="chapters-stats-filters"></div>
         <div class="stats-grid" id="chapters-grid"></div>
+        <div id="chapters-stats-pager" class="pagination-container"></div>
     </div>
 
     <div id="concepts-tab" class="tab-content">
         <h2>涉及概念統計</h2>
+        <div id="concepts-stats-filters"></div>
         <div class="stats-grid" id="concepts-grid"></div>
+        <div id="concepts-stats-pager" class="pagination-container"></div>
     </div>
 
     <div id="patterns-tab" class="tab-content">
         <h2>題型統計</h2>
+        <div id="patterns-stats-filters"></div>
         <div class="stats-grid" id="patterns-grid"></div>
+        <div id="patterns-stats-pager" class="pagination-container"></div>
     </div>
 
     <div id="stemPatterns-tab" class="tab-content">
         <h2>題幹模式統計</h2>
+        <div id="stemPatterns-stats-filters"></div>
         <div class="stats-grid" id="stemPatterns-grid"></div>
+        <div id="stemPatterns-stats-pager" class="pagination-container"></div>
     </div>`;
 }
 

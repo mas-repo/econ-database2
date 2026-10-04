@@ -393,6 +393,10 @@ document.addEventListener('keydown', function(e) {
         }
         // If a filter modal is open, Esc closes it — and does NOT clear
         // the user's filters. Only a "bare" Esc clears filters.
+        if (document.getElementById('sf-overlay')) {
+            if (typeof closeStatsFilterModal === 'function') closeStatsFilterModal();
+            return;
+        }
         if (document.getElementById('mf-overlay')) {
             if (typeof closeFilterModal === 'function') closeFilterModal();
             return;

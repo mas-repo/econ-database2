@@ -225,8 +225,11 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
                         const checkedCurr = Object.keys(filters.triState.curriculum).filter(k => filters.triState.curriculum[k] === 'checked');
                         const excludedCurr = Object.keys(filters.triState.curriculum).filter(k => filters.triState.curriculum[k] === 'excluded');
                         
-                        // Get current logic (Default to OR)
-                        const logic = (window.filterLogic && window.filterLogic.curriculum) || 'OR';
+                        // Prefer logic passed with this filter set (stats tabs).
+                        // The questions tab keeps using window.filterLogic.
+                        const logic = (filters.filterLogic && filters.filterLogic.curriculum)
+                            || (window.filterLogic && window.filterLogic.curriculum)
+                            || 'OR';
 
                         if (checkedCurr.length > 0) {
                             questions = questions.filter(q => {
@@ -257,8 +260,10 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
             const checkedChapter = Object.keys(filters.triState.chapter).filter(k => filters.triState.chapter[k] === 'checked');
             const excludedChapter = Object.keys(filters.triState.chapter).filter(k => filters.triState.chapter[k] === 'excluded');
             
-            // Get current logic (Default to OR)
-            const logic = (window.filterLogic && window.filterLogic.chapter) || 'OR';
+            // Prefer logic passed with this filter set (stats tabs).
+            const logic = (filters.filterLogic && filters.filterLogic.chapter)
+                || (window.filterLogic && window.filterLogic.chapter)
+                || 'OR';
 
             if (checkedChapter.length > 0) {
                 questions = questions.filter(q => {
@@ -341,6 +346,20 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
                     if (!q.stemPatterns || !Array.isArray(q.stemPatterns)) return true;
                     return !excludedStemPatterns.some(p => q.stemPatterns.includes(p));
                 });
+            }
+        }
+
+        // Paper (卷一 / 卷二). Values are stored as "1" / "2".
+        if (filters.triState.paper) {
+            const checkedPapers = Object.keys(filters.triState.paper).filter(k => filters.triState.paper[k] === 'checked');
+            const excludedPapers = Object.keys(filters.triState.paper).filter(k => filters.triState.paper[k] === 'excluded');
+
+            if (checkedPapers.length > 0) {
+                questions = questions.filter(q => checkedPapers.includes(String(q.paper)));
+            }
+
+            if (excludedPapers.length > 0) {
+                questions = questions.filter(q => !excludedPapers.includes(String(q.paper)));
             }
         }
 

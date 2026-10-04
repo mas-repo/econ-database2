@@ -116,6 +116,20 @@ function renderFiltersTemplate() {
                     </div>
                 </div>
 
+                <!-- 📄 卷別 -->
+                <div class="filter-item">
+                    <div class="dropdown-filter">
+                        <button class="dropdown-btn" onclick="toggleDropdown('paper-options')">
+                            <span>📄 卷別</span><span class="arrow" id="paper-arrow">▶</span>
+                        </button>
+                        <span class="active-indicator" id="indicator-paper"></span>
+                        <div class="dropdown-content" id="paper-options">
+                            ${triLabel('paper', '1', '卷一')}
+                            ${triLabel('paper', '2', '卷二')}
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 📝 Section -->
                 <div class="filter-item">
                     <div class="dropdown-filter">

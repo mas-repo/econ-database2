@@ -38,6 +38,7 @@ if (!window.triStateFilters) {
         exam: {}, 
         qtype: {},
         section: {},
+        paper: {},
         year: {},
         concepts: {},
         patterns: {},
@@ -68,6 +69,7 @@ const ARROW_MAP = {
     'exam-options': 'exam-arrow',
     'qtype-options': 'qtype-arrow',
     'section-options': 'section-arrow',
+    'paper-options': 'paper-arrow',
 
     // Range Filters
     'percentage-options': 'percentage-arrow',
@@ -265,7 +267,7 @@ function updateFilterIndicators() {
     // use modal trigger badges (filter-modal.js) instead of dot indicators.
     const triStateTypes = [
         'publisher', 'exam', 'qtype', 'curriculum', 'chapter', 'feature', 'year',
-        'section', 'ai'
+        'section', 'paper', 'ai'
     ];
     
     triStateTypes.forEach(type => {
@@ -679,6 +681,13 @@ function yearFilterLabel(year) {
     return text;
 }
 
+function paperFilterLabel(paper) {
+    const text = String(paper).trim();
+    if (text === '1') return '卷一';
+    if (text === '2') return '卷二';
+    return text;
+}
+
 function populateSearchScope() {
     const select = document.getElementById('search-scope');
     if (!select) return;
@@ -879,6 +888,7 @@ function clearFilters() {
         exam: {}, 
         qtype: {},
         section: {},
+        paper: {},
         year: {},
         concepts: {},
         patterns: {},
@@ -1012,6 +1022,7 @@ function updateSearchInfo() {
         'exam': '考試',
         'qtype': '題型',
         'section': 'Section',
+        'paper': '卷別',
         'year': '年份',
         'concepts': '概念',
         'patterns': '題型標籤',
@@ -1031,7 +1042,9 @@ function updateSearchInfo() {
                 }
 
                 const label = categories[catKey] || catKey;
-                const shown = catKey === 'year' ? yearFilterLabel(itemVal) : itemVal;
+                const shown = catKey === 'year' ? yearFilterLabel(itemVal)
+                    : catKey === 'paper' ? paperFilterLabel(itemVal)
+                    : itemVal;
                 if (state === 'checked') {
                     html += createBadge(label, shown, 'blue', 'tag', catKey, itemVal);
                     hasFilters = true;

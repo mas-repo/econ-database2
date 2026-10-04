@@ -52,230 +52,168 @@ async function renderPublisherStats() {
         `).join('');
 }
 
-// Dependencies: storage-core.js (window.storage), constants.js (CURRICULUM_ORDER)
+// Grouped statistics (概念 / 課程分類 / Chapters / 題型 / 題幹).
+// Filters and the 「查看題目」 jump live in stats-filters.js.
 async function renderTopicStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        if (q.curriculumClassification && Array.isArray(q.curriculumClassification)) {
-            q.curriculumClassification.forEach(topic => {
-                if (!stats[topic]) {
-                    stats[topic] = { total: 0, mc: 0, text: 0 };
-                }
-                stats[topic].total++;
-                if (q.questionType === 'MC') stats[topic].mc++;
-                if (q.questionType === '文字題 (SQ/LQ)') stats[topic].text++;
-            });
-        }
-    });
-    
-    const grid = document.getElementById('topics-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無主題資料</p>';
-        return;
-    }
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => {
-            // Sort by curriculum order using constants
-            const keyA = getCurriculumSortKey(a[0]);
-            const keyB = getCurriculumSortKey(b[0]);
-            return CURRICULUM_ORDER.indexOf(keyA) - CURRICULUM_ORDER.indexOf(keyB);
-        })
-        .map(([topic, data]) => `
-            <div class="stat-card">
-                <h3>${topic}</h3>
-                <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
-                </div>
-            </div>
-        `).join('');
+    await renderGroupedStats('topics');
 }
 
-// Dependencies: storage-core.js (window.storage), constants.js (CHAPTER_DESCRIPTIONS)
-// Each chapter card shows the full chapter name from CHAPTER_DESCRIPTIONS
-// (e.g. "Ch01 基本經濟概念") when that map is loaded.
 async function renderChapterStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        if (q.AristochapterClassification && Array.isArray(q.AristochapterClassification)) {
-            q.AristochapterClassification.forEach(chapter => {
-                if (!stats[chapter]) {
-                    stats[chapter] = { total: 0, mc: 0, text: 0 };
-                }
-                stats[chapter].total++;
-                if (q.questionType === 'MC') stats[chapter].mc++;
-                if (q.questionType === '文字題 (SQ/LQ)') stats[chapter].text++;
-            });
-        }
-    });
-    
-    const grid = document.getElementById('chapters-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無章節資料</p>';
-        return;
-    }
-    
-    const showNames = typeof CHAPTER_DESCRIPTIONS !== 'undefined';
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => {
-            // Sort by chapter number (Ch01, Ch02, ..., Ch29)
-            const numA = parseInt(a[0].replace('Ch', ''));
-            const numB = parseInt(b[0].replace('Ch', ''));
-            return numA - numB;
-        })
-        .map(([chapter, data]) => {
-            // Extract the number and look up the full name (e.g. "Ch1"/"Ch01" -> "01")
-            let chapterName = '';
-            if (showNames) {
-                const match = String(chapter).match(/(\d+)/);
-                if (match) {
-                    const padded = match[1].padStart(2, '0');
-                    chapterName = CHAPTER_DESCRIPTIONS[padded] || '';
-                }
-            }
-            
-            return `
-            <div class="stat-card">
-                <h3>${chapter}${chapterName ? ` <span style="font-weight: 400; font-size: 0.85em; color: var(--text-light);">${chapterName}</span>` : ''}</h3>
-                <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
-                </div>
-            </div>
-        `;
-        }).join('');
+    await renderGroupedStats('chapters');
 }
 
-// Dependencies: storage-core.js (window.storage)
 async function renderConceptStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        const concepts = Array.isArray(q.concepts) ? q.concepts : [];
-        concepts.forEach(concept => {
-            if (!stats[concept]) {
-                stats[concept] = { total: 0, mc: 0, text: 0 };
-            }
-            stats[concept].total++;
-            if (q.questionType === 'MC') stats[concept].mc++;
-            if (q.questionType === '文字題 (SQ/LQ)') stats[concept].text++;
+    await renderGroupedStats('concepts');
+}
+
+async function renderPatternStats() {
+    await renderGroupedStats('patterns');
+}
+
+async function renderStemPatternStats() {
+    await renderGroupedStats('stemPatterns');
+}
+
+function sortStatRows(tabId, rows) {
+    const state = getStatsTabState(tabId);
+    const copy = rows.slice();
+    const byCount = (dir) => copy.sort((a, b) => {
+        const diff = dir * (a.data.total - b.data.total);
+        if (diff !== 0) return diff;
+        return a.searchText.localeCompare(b.searchText, 'zh-HK');
+    });
+    if (state.sort === 'count-asc') return byCount(1);
+    if (state.sort === 'name') {
+        return copy.sort((a, b) => a.searchText.localeCompare(b.searchText, 'zh-HK'));
+    }
+    if (state.sort === 'curriculum') {
+        return copy.sort((a, b) => {
+            const ia = CURRICULUM_ORDER.indexOf(getCurriculumSortKey(a.value));
+            const ib = CURRICULUM_ORDER.indexOf(getCurriculumSortKey(b.value));
+            return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        });
+    }
+    if (state.sort === 'number') {
+        return copy.sort((a, b) => {
+            const na = parseInt(String(a.value).replace(/\D/g, ''), 10) || 0;
+            const nb = parseInt(String(b.value).replace(/\D/g, ''), 10) || 0;
+            return na - nb;
+        });
+    }
+    return byCount(-1);
+}
+
+function renderStatsPager(tabId, page, pageSize, rowCount) {
+    const pager = document.getElementById(STAT_TABS[tabId].pagerId);
+    if (!pager) return;
+    if (pageSize === -1 || rowCount === 0) {
+        pager.innerHTML = '';
+        return;
+    }
+    const totalPages = Math.max(1, Math.ceil(rowCount / pageSize));
+    const start = (page - 1) * pageSize + 1;
+    const end = Math.min(page * pageSize, rowCount);
+    let buttons = '';
+    if (totalPages > 1) {
+        if (page > 1) buttons += `<button type="button" class="pagination-btn" data-sf-page="${tabId}" data-sf-page-num="${page - 1}">&laquo;</button>`;
+        const startPage = Math.max(1, page - 2);
+        const endPage = Math.min(totalPages, page + 2);
+        if (startPage > 1) {
+            buttons += `<button type="button" class="pagination-btn" data-sf-page="${tabId}" data-sf-page-num="1">1</button>`;
+            if (startPage > 2) buttons += '<span style="padding: 8px;">...</span>';
+        }
+        for (let i = startPage; i <= endPage; i++) {
+            buttons += `<button type="button" class="pagination-btn${i === page ? ' active' : ''}" data-sf-page="${tabId}" data-sf-page-num="${i}">${i}</button>`;
+        }
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) buttons += '<span style="padding: 8px;">...</span>';
+            buttons += `<button type="button" class="pagination-btn" data-sf-page="${tabId}" data-sf-page-num="${totalPages}">${totalPages}</button>`;
+        }
+        if (page < totalPages) buttons += `<button type="button" class="pagination-btn" data-sf-page="${tabId}" data-sf-page-num="${page + 1}">&raquo;</button>`;
+    }
+    pager.innerHTML = `
+        <div class="stats-page-info">顯示 ${start}-${end} 共 ${rowCount} 項</div>
+        <div class="stats-page-buttons">${buttons}</div>`;
+}
+
+async function renderGroupedStats(tabId, gen) {
+    const cfg = (typeof STAT_TABS !== 'undefined') ? STAT_TABS[tabId] : null;
+    const grid = cfg && document.getElementById(cfg.gridId);
+    if (!cfg || !grid || !window.storage) return;
+
+    if (typeof ensureStatsFilterBar === 'function') ensureStatsFilterBar(tabId);
+
+    const all = await window.storage.getQuestions();
+    if (typeof statsRenderIsCurrent === 'function' && typeof gen === 'number' && !statsRenderIsCurrent(tabId, gen)) return;
+
+    const filtered = (typeof questionsMatchingStatsFilters === 'function')
+        ? questionsMatchingStatsFilters(tabId, all)
+        : all;
+
+    const counts = new Map();
+    filtered.forEach(q => {
+        const seen = new Set();
+        cfg.valuesOf(q).forEach(raw => {
+            const value = String(raw == null ? '' : raw).trim();
+            if (!value || seen.has(value)) return;
+            seen.add(value);
+            if (!counts.has(value)) counts.set(value, { total: 0, mc: 0, text: 0 });
+            const bucket = counts.get(value);
+            bucket.total += 1;
+            if (q.questionType === 'MC') bucket.mc += 1;
+            else if (q.questionType === '文字題 (SQ/LQ)') bucket.text += 1;
         });
     });
-    
-    const grid = document.getElementById('concepts-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無概念資料</p>';
-        return;
+
+    const query = (typeof statsNameQuery === 'function') ? statsNameQuery(tabId) : '';
+    let rows = Array.from(counts.entries()).map(([value, data]) => {
+        const presentation = statsRowPresentation(tabId, value);
+        return { value, data, ...presentation };
+    });
+    if (query) {
+        rows = rows.filter(row => row.searchText.toLowerCase().includes(query));
     }
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => b[1].total - a[1].total)
-        .map(([concept, data]) => `
+    rows = sortStatRows(tabId, rows);
+
+    const state = getStatsTabState(tabId);
+    const pageSize = state.pageSize;
+    const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(rows.length / pageSize) || 1);
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+    const pageRows = pageSize === -1 ? rows : rows.slice((state.page - 1) * pageSize, state.page * pageSize);
+
+    window._statsRowIndex = window._statsRowIndex || {};
+    window._statsRowIndex[tabId] = pageRows.map(row => row.value);
+
+    const taggedInAll = all.some(q => cfg.valuesOf(q).some(value => String(value == null ? '' : value).trim()));
+    if (!pageRows.length) {
+        const message = !taggedInAll ? cfg.empty : cfg.filteredEmpty;
+        grid.innerHTML = `<p class="empty-state">${escapeHTML(message)}</p>`;
+    } else {
+        grid.innerHTML = pageRows.map((row, index) => `
             <div class="stat-card">
-                <h3>${concept}</h3>
+                <h3>${row.titleHtml}</h3>
                 <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
+                    <div>總題目: ${row.data.total}</div>
+                    <div>MC: ${row.data.mc}</div>
+                    <div>文字題: ${row.data.text}</div>
                 </div>
-            </div>
-        `).join('');
+                <div class="stat-card-footer">
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-stats-jump="${tabId}" data-stats-idx="${index}" title="在題目分頁顯示這 ${row.data.total} 題">查看題目</button>
+                </div>
+            </div>`).join('');
+    }
+
+    renderStatsPager(tabId, state.page, pageSize, rows.length);
+    if (typeof refreshStatsFilterVisibility === 'function') refreshStatsFilterVisibility(tabId, all);
+    if (typeof updateStatsFilterChrome === 'function') {
+        updateStatsFilterChrome(tabId, { questionCount: filtered.length, rowCount: rows.length });
+    }
 }
 
-// Dependencies: storage-core.js (window.storage)
-async function renderPatternStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        if (q.patterns && Array.isArray(q.patterns)) {
-            q.patterns.forEach(pattern => {
-                if (!stats[pattern]) {
-                    stats[pattern] = { total: 0, mc: 0, text: 0 };
-                }
-                stats[pattern].total++;
-                if (q.questionType === 'MC') stats[pattern].mc++;
-                if (q.questionType === '文字題 (SQ/LQ)') stats[pattern].text++;
-            });
-        }
-    });
-    
-    const grid = document.getElementById('patterns-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無題型資料</p>';
-        return;
-    }
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => b[1].total - a[1].total)
-        .map(([pattern, data]) => `
-            <div class="stat-card">
-                <h3>${pattern}</h3>
-                <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
-                </div>
-            </div>
-        `).join('');
-}
-
-// Dependencies: storage-core.js (window.storage)
-async function renderStemPatternStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        if (q.stemPatterns && Array.isArray(q.stemPatterns)) {
-            q.stemPatterns.forEach(pattern => {
-                if (!stats[pattern]) {
-                    stats[pattern] = { total: 0, mc: 0, text: 0 };
-                }
-                stats[pattern].total++;
-                if (q.questionType === 'MC') stats[pattern].mc++;
-                if (q.questionType === '文字題 (SQ/LQ)') stats[pattern].text++;
-            });
-        }
-    });
-    
-    const grid = document.getElementById('stemPatterns-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無題幹模式資料</p>';
-        return;
-    }
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => b[1].total - a[1].total)
-        .map(([pattern, data]) => `
-            <div class="stat-card">
-                <h3>${pattern}</h3>
-                <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
-                </div>
-            </div>
-        `).join('');
-}
+window.renderStatsTab = function (tabId, gen) {
+    return renderGroupedStats(tabId, gen);
+};
 
 // Dependencies: None (calls all render functions)
 async function refreshStatistics() {
