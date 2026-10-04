@@ -29,7 +29,8 @@ function renderFormTemplate() {
                 </div>
                 <div class="form-group">
                     <label for="year">年份 *</label>
-                    <input type="number" id="year" required>
+                    <!-- Text, not number: stored years include PP and SP as well as 2016 and 27. -->
+                    <input type="text" id="year" required>
                 </div>
                 <div class="form-group">
                     <label for="paper">試卷</label>

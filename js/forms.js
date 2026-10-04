@@ -67,7 +67,7 @@ function setupFormHandler() {
             id: window.editingId || document.getElementById('question-id').value.trim(),
             publisher: document.getElementById('publisher').value.trim(),
             examination: document.getElementById('examination').value,
-            year: parseInt(document.getElementById('year').value),
+            year: document.getElementById('year').value.trim(),
             paper: document.getElementById('paper').value.trim(),
             questionType: document.getElementById('question-type').value,
             marks: parseFloat(document.getElementById('marks').value) || 0,
@@ -99,6 +99,11 @@ function setupFormHandler() {
         
         if (!question.id) {
             alert('請輸入題目 ID');
+            return;
+        }
+
+        if (!question.year) {
+            alert('請輸入年份');
             return;
         }
 
