@@ -269,7 +269,7 @@ The modal can send the current filter or questions the user pasted. The request 
 
 The modal has four 出題模式. Choosing one fills 出題指示 with that mode’s prompt. The user can still edit the textarea. **回復預設** restores the prompt of the mode that is currently selected. The last edit, mode, and model are kept in that browser’s `localStorage`. The request fields are `instruction`, `modeId`, `provider`, `model`, and optional `poeApiKey` or `openRouterApiKey` (per-browser key for the chosen provider; required for non-admin AI users; never written to UsageLog, GenerationBackup, or GitHub backups). Provider, keys, and models are edited in **API／模型設定**, not the main generate modal. Non-admin clients block **測試** / **出題** early when the local key is empty, and open that settings modal on `missing_api_key`.
 
-The mode prompts live in `POE_GENERATION_MODES` in `js/poeGenerateModal.js`. The server does not store those prompts. It records `modeId` only when it is one of `style-continue`, `vary-examples`, `add-novelty`, or `different-types`.
+The mode prompts live in `POE_GENERATION_MODES` in `js/poe-generate-state.js`. The server does not store those prompts. It records `modeId` only when it is one of `style-continue`, `vary-examples`, `add-novelty`, or `different-types`.
 
 | Mode | id | What it asks for |
 | --- | --- | --- |

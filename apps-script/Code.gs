@@ -79,7 +79,7 @@ var POE_DEFAULT_MODEL_ = 'Claude-Sonnet-5.5';
 var OPENROUTER_DEFAULT_MODEL_ = 'openai/gpt-4o-mini';
 var OPENROUTER_MODEL_MAX_ = 120;
 var POE_MODEL_MAX_ = 120;
-// Dropdown presets for Poe (keep in sync with POE_MODELS in js/poeGenerateModal.js).
+// Dropdown presets for Poe (keep in sync with POE_MODELS in js/poe-generate-state.js).
 // Clients may also send a sanitized free-text Poe bot id (isAllowedPoeModelId_).
 // OpenRouter accepts free-text ids (validated by isAllowedOpenRouterModel_).
 var POE_ALLOWED_MODELS_ = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'GLM-5.3-flash', 'GLM-5.3'];
