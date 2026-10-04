@@ -37,7 +37,7 @@
     ];
     var POE_INSTRUCTION = POE_GENERATION_MODES[0].prompt;
     var POE_DEFAULT_MODEL = 'Claude-Sonnet-5.5';
-    var POE_MODELS = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash'];
+    var POE_MODELS = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'GLM-5.3-flash', 'GLM-5.3'];
     var OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o-mini';
     var OPENROUTER_MODELS = [
         'openai/gpt-4o-mini',
