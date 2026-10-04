@@ -1170,3 +1170,48 @@ body:not(.poe-ai-allowed) .question-card-actions.only-ai {
     color: var(--text-light);
     font-size: 12px;
 }
+
+.poe-history-search-note {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-light);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.poe-history-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 14px 10px;
+    flex: 0 0 auto;
+}
+
+.poe-page-btn {
+    border: 1px solid var(--border-light);
+    background: #fff;
+    color: var(--secondary-color);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 10px;
+}
+
+.poe-page-btn:hover:not(:disabled) {
+    border-color: #b9d7ef;
+    background: #eaf4fc;
+}
+
+.poe-page-btn:disabled {
+    color: #9aa3af;
+    background: #f3f5f8;
+    border-color: var(--border-light);
+    cursor: default;
+}
+
+.poe-history-page {
+    color: var(--text-light);
+    font-size: 12px;
+    font-weight: 600;
+}
