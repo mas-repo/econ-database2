@@ -3,8 +3,8 @@
 //
 // What this is
 // ------------
-// A small, independent panel that lists preset consistency checks over the
-// loaded question bank. Each check is a free combination of conditions (AND).
+// A small, independent panel that lists consistency checks over the loaded
+// question bank. Each check is a free combination of conditions (AND).
 // Matching questions that are not in that check's exception list are the ones
 // that still need handling. Matching questions that are listed as exceptions
 // are counted separately and are not part of the "needs handling" set.
@@ -18,11 +18,15 @@
 //
 // How to add / edit / remove a check
 // ----------------------------------
-// Edit DATA_CHECKS below only. Do not bury checks inside the UI helpers.
-// - To add a check: append an object with id, name, conditions, exceptions.
-// - To remove a check: delete that object from the array.
-// - To change conditions: edit the conditions array (all entries are AND).
-// - To exempt an ID: put the question id string in that check's exceptions.
+// Prefer the in-panel UI (標題、條件、例外、新增檢查). Edits are saved to
+// localStorage for the signed-in username and survive reloads.
+//
+// The DEFAULT_DATA_CHECKS list below remains the seed / fallback when ken has
+// no saved edits. You can still edit that list in source:
+// - To change the defaults: edit DEFAULT_DATA_CHECKS.
+// - To add a default: append an object with id, name, conditions, exceptions.
+// - To remove a default: delete that object from the array.
+// - Conditions in one check are AND.
 //
 // Check shape
 // -----------
@@ -41,19 +45,30 @@
 //   exceptions: []
 // }
 //
+// Persistence
+// -----------
+// Saved under localStorage key econ_data_checks_v1:<username> (JSON). Only the
+// current user's key is read/written, so other users are unaffected. Question
+// bank data is never written.
+//
+// Clicking a needs-handling ID clears the question filters, sets search scope
+// to 題目 ID, fills that id, switches to the 題目 tab, and runs filterQuestions
+// — the same filter path the rest of the app uses.
+//
 // Concepts are matched with the same exact string includes() the filters use.
 // Question text is taken from questionTextChi, questionTextEng, and plainText.
 //
 // Dependencies: auth / accessRights (visibility), IndexedDBStorage.getQuestions
-// (data). Does not change question data.
+// (data), filters.js clearFilters / filterQuestions, tabs switchTab. Does not
+// change question data.
 
 (function () {
     'use strict';
 
     // =====================================================================
-    // Preset checks — edit this list to add, change, or remove a check.
+    // Default / seeded checks — used when ken has no saved edits.
     // =====================================================================
-    var DATA_CHECKS = [
+    var DEFAULT_DATA_CHECKS = [
         {
             id: 'text-opp-cost-missing-concept',
             name: '題文有「機會成本」但概念未標機會成本',
@@ -77,8 +92,19 @@
     ];
 
     var DATA_CHECKS_USERNAME = 'ken';
+    var STORAGE_PREFIX = 'econ_data_checks_v1:';
+    var CONDITION_TYPES = [
+        { type: 'textContains', label: '題文含' },
+        { type: 'textNotContains', label: '題文不含' },
+        { type: 'conceptPresent', label: '概念有' },
+        { type: 'conceptAbsent', label: '概念無' }
+    ];
+
     var overlay = null;
     var openDetails = {};
+    var editingCheckId = null;
+    var cachedQuestions = null;
+    var activeChecks = null;
 
     function currentUsername() {
         if (typeof gitUsername === 'function') {
@@ -91,6 +117,98 @@
     function canSeeDataChecks() {
         if (currentUsername() !== DATA_CHECKS_USERNAME) return false;
         return !!(window.accessRights && window.accessRights.admin === true);
+    }
+
+    function storageKeyForUser(username) {
+        var user = String(username || '').trim().toLowerCase();
+        if (!user) return '';
+        return STORAGE_PREFIX + user;
+    }
+
+    function cloneChecks(list) {
+        return JSON.parse(JSON.stringify(list || []));
+    }
+
+    function normalizeCondition(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        var type = String(raw.type || '').trim();
+        var allowed = CONDITION_TYPES.some(function (item) { return item.type === type; });
+        if (!allowed) return null;
+        return {
+            type: type,
+            value: String(raw.value == null ? '' : raw.value)
+        };
+    }
+
+    function normalizeCheck(raw, index) {
+        if (!raw || typeof raw !== 'object') return null;
+        var id = String(raw.id == null ? '' : raw.id).trim();
+        if (!id) id = 'check-' + String(index + 1) + '-' + Date.now().toString(36);
+        var conditions = Array.isArray(raw.conditions)
+            ? raw.conditions.map(normalizeCondition).filter(Boolean)
+            : [];
+        var exceptions = Array.isArray(raw.exceptions)
+            ? raw.exceptions.map(function (item) {
+                return String(item == null ? '' : item).trim();
+            }).filter(Boolean)
+            : [];
+        return {
+            id: id,
+            name: String(raw.name == null ? '' : raw.name).trim() || '未命名檢查',
+            conditions: conditions,
+            exceptions: exceptions
+        };
+    }
+
+    function normalizeChecks(list) {
+        if (!Array.isArray(list)) return cloneChecks(DEFAULT_DATA_CHECKS);
+        return list.map(normalizeCheck).filter(Boolean);
+    }
+
+    function readSavedChecks(username) {
+        var key = storageKeyForUser(username);
+        if (!key) return null;
+        try {
+            var raw = localStorage.getItem(key);
+            if (!raw) return null;
+            var parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            var list = Array.isArray(parsed.checks) ? parsed.checks : parsed;
+            if (!Array.isArray(list)) return null;
+            return normalizeChecks(list);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeSavedChecks(username, checks) {
+        var key = storageKeyForUser(username);
+        if (!key) return false;
+        try {
+            localStorage.setItem(key, JSON.stringify({
+                version: 1,
+                checks: normalizeChecks(checks)
+            }));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function loadActiveChecks() {
+        if (!canSeeDataChecks()) {
+            activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
+            return activeChecks;
+        }
+        var saved = readSavedChecks(currentUsername());
+        activeChecks = saved ? saved : cloneChecks(DEFAULT_DATA_CHECKS);
+        return activeChecks;
+    }
+
+    function persistActiveChecks() {
+        if (!canSeeDataChecks()) return false;
+        activeChecks = normalizeChecks(activeChecks);
+        return writeSavedChecks(currentUsername(), activeChecks);
     }
 
     function questionText(question) {
@@ -196,7 +314,10 @@
         if (!button) return;
         var allowed = canSeeDataChecks();
         button.hidden = !allowed;
-        if (!allowed) closeDataChecksPanel();
+        if (!allowed) {
+            editingCheckId = null;
+            closeDataChecksPanel();
+        }
     }
 
     function closeDataChecksPanel() {
@@ -217,10 +338,14 @@
             + '  <header class="data-checks-header">'
             + '    <div>'
             + '      <h2 id="data-checks-title">資料檢查</h2>'
-            + '      <p class="data-checks-subtitle">列出仍需處理的題目（符合條件且不在該檢查的例外清單）。例外題仍符合條件，但另計、不列入待處理。</p>'
+            + '      <p class="data-checks-subtitle">列出仍需處理的題目（符合條件且不在該檢查的例外清單）。可編輯標題、條件與例外；點題號會用既有「題目 ID」篩選顯示該題。</p>'
             + '    </div>'
             + '    <button type="button" class="data-checks-close" aria-label="關閉">×</button>'
             + '  </header>'
+            + '  <div class="data-checks-toolbar">'
+            + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-add">＋ 新增檢查</button>'
+            + '    <button type="button" class="btn btn-secondary btn-sm" id="data-checks-reset-defaults">還原預設檢查</button>'
+            + '  </div>'
             + '  <div class="data-checks-body" id="data-checks-body"></div>'
             + '  <footer class="data-checks-footer">'
             + '    <p class="data-checks-footer-note" id="data-checks-footer-note"></p>'
@@ -233,22 +358,65 @@
         });
         overlay.querySelector('.data-checks-close').addEventListener('click', closeDataChecksPanel);
         overlay.querySelector('#data-checks-done').addEventListener('click', closeDataChecksPanel);
+        overlay.querySelector('#data-checks-add').addEventListener('click', function () {
+            addBlankCheck();
+        });
+        overlay.querySelector('#data-checks-reset-defaults').addEventListener('click', function () {
+            resetToDefaults();
+        });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 closeDataChecksPanel();
             }
         });
+        overlay.addEventListener('click', function (event) {
+            var idBtn = event.target.closest('[data-dc-qid]');
+            if (idBtn) {
+                event.preventDefault();
+                showQuestionById(idBtn.getAttribute('data-dc-qid'));
+                return;
+            }
+            var editBtn = event.target.closest('[data-dc-edit]');
+            if (editBtn) {
+                editingCheckId = editBtn.getAttribute('data-dc-edit');
+                renderFromCache();
+                return;
+            }
+            var cancelBtn = event.target.closest('[data-dc-cancel]');
+            if (cancelBtn) {
+                editingCheckId = null;
+                renderFromCache();
+                return;
+            }
+            var saveBtn = event.target.closest('[data-dc-save]');
+            if (saveBtn) {
+                saveEditedCheck(saveBtn.getAttribute('data-dc-save'));
+                return;
+            }
+            var deleteBtn = event.target.closest('[data-dc-delete]');
+            if (deleteBtn) {
+                deleteCheck(deleteBtn.getAttribute('data-dc-delete'));
+                return;
+            }
+            var addCond = event.target.closest('[data-dc-add-cond]');
+            if (addCond) {
+                addConditionRow(addCond.getAttribute('data-dc-add-cond'));
+                return;
+            }
+            var removeCond = event.target.closest('[data-dc-remove-cond]');
+            if (removeCond) {
+                removeConditionRow(removeCond);
+            }
+        });
         return overlay;
     }
 
-    function escapeHtml(text) {
-        return String(text == null ? '' : text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    function conditionTypeOptions(selected) {
+        return CONDITION_TYPES.map(function (item) {
+            var sel = item.type === selected ? ' selected' : '';
+            return '<option value="' + item.type + '"' + sel + '>' + item.label + '</option>';
+        }).join('');
     }
 
     function conditionSummary(check) {
@@ -261,6 +429,216 @@
         }).join(' 且 ');
     }
 
+    function escapeAttr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;');
+    }
+
+    function escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function newCheckId() {
+        return 'check-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    }
+
+    function addBlankCheck() {
+        if (!canSeeDataChecks()) return;
+        loadActiveChecks();
+        var check = {
+            id: newCheckId(),
+            name: '新檢查',
+            conditions: [{ type: 'textContains', value: '' }],
+            exceptions: []
+        };
+        activeChecks.push(check);
+        persistActiveChecks();
+        editingCheckId = check.id;
+        renderFromCache();
+    }
+
+    function resetToDefaults() {
+        if (!canSeeDataChecks()) return;
+        if (!window.confirm('還原為程式內建的預設檢查？目前已儲存的標題、條件、例外與新增檢查都會被取代。')) {
+            return;
+        }
+        activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
+        persistActiveChecks();
+        editingCheckId = null;
+        renderFromCache();
+    }
+
+    function deleteCheck(checkId) {
+        if (!canSeeDataChecks()) return;
+        loadActiveChecks();
+        var next = activeChecks.filter(function (check) { return check.id !== checkId; });
+        if (next.length === activeChecks.length) return;
+        if (!window.confirm('刪除此檢查？')) return;
+        activeChecks = next;
+        persistActiveChecks();
+        if (editingCheckId === checkId) editingCheckId = null;
+        renderFromCache();
+    }
+
+    function readEditorForm(checkId) {
+        var row = overlay && overlay.querySelector('[data-check-id="' + checkId + '"]');
+        if (!row) return null;
+        var nameInput = row.querySelector('[data-dc-name]');
+        var exceptionInput = row.querySelector('[data-dc-exceptions]');
+        var conditionRows = row.querySelectorAll('[data-dc-cond-row]');
+        var conditions = [];
+        conditionRows.forEach(function (condRow) {
+            var typeEl = condRow.querySelector('[data-dc-cond-type]');
+            var valueEl = condRow.querySelector('[data-dc-cond-value]');
+            var type = typeEl ? typeEl.value : '';
+            var value = valueEl ? valueEl.value : '';
+            var normalized = normalizeCondition({ type: type, value: value });
+            if (normalized) conditions.push(normalized);
+        });
+        var exceptions = String(exceptionInput && exceptionInput.value || '')
+            .split(/[\n,，]+/)
+            .map(function (item) { return item.trim(); })
+            .filter(Boolean);
+        return {
+            id: checkId,
+            name: String(nameInput && nameInput.value || '').trim() || '未命名檢查',
+            conditions: conditions,
+            exceptions: exceptions
+        };
+    }
+
+    function saveEditedCheck(checkId) {
+        if (!canSeeDataChecks()) return;
+        loadActiveChecks();
+        var edited = readEditorForm(checkId);
+        if (!edited) return;
+        if (!edited.conditions.length) {
+            window.alert('請至少保留一項條件。');
+            return;
+        }
+        var found = false;
+        activeChecks = activeChecks.map(function (check) {
+            if (check.id !== checkId) return check;
+            found = true;
+            return edited;
+        });
+        if (!found) activeChecks.push(edited);
+        persistActiveChecks();
+        editingCheckId = null;
+        renderFromCache();
+    }
+
+    function addConditionRow(checkId) {
+        var row = overlay && overlay.querySelector('[data-check-id="' + checkId + '"] .data-checks-cond-list');
+        if (!row) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'data-checks-cond-row';
+        wrap.setAttribute('data-dc-cond-row', '1');
+        wrap.innerHTML = ''
+            + '<select data-dc-cond-type aria-label="條件類型">' + conditionTypeOptions('textContains') + '</select>'
+            + '<input type="text" data-dc-cond-value value="" placeholder="字串／概念" aria-label="條件值">'
+            + '<button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>';
+        row.appendChild(wrap);
+    }
+
+    function removeConditionRow(button) {
+        var row = button.closest('[data-dc-cond-row]');
+        var list = button.closest('.data-checks-cond-list');
+        if (!row || !list) return;
+        if (list.querySelectorAll('[data-dc-cond-row]').length <= 1) {
+            window.alert('請至少保留一項條件。');
+            return;
+        }
+        row.remove();
+    }
+
+    function showQuestionById(questionId) {
+        if (!canSeeDataChecks()) {
+            refreshDataChecksVisibility();
+            return;
+        }
+        var id = String(questionId == null ? '' : questionId).trim();
+        if (!id || id === '(無編號)') return;
+
+        // Reuse the existing question-list filter path (search scope = 題目 ID).
+        if (typeof clearFilters === 'function') {
+            clearFilters();
+        }
+
+        var searchEl = document.getElementById('search');
+        var scopeEl = document.getElementById('search-scope');
+        if (scopeEl) {
+            if (!scopeEl.querySelector('option[value="id"]') && typeof populateSearchScope === 'function') {
+                populateSearchScope();
+            }
+            if (scopeEl.querySelector('option[value="id"]')) {
+                scopeEl.value = 'id';
+                window.searchScope = 'id';
+            } else {
+                scopeEl.value = 'all';
+                window.searchScope = 'all';
+            }
+        } else {
+            window.searchScope = 'id';
+        }
+        if (searchEl) searchEl.value = id;
+
+        if (window.paginationState && window.paginationState.questions) {
+            window.paginationState.questions.page = 1;
+        }
+
+        closeDataChecksPanel();
+        if (typeof switchTab === 'function') switchTab('questions');
+        if (typeof filterQuestions === 'function') {
+            filterQuestions();
+        } else if (typeof renderQuestions === 'function') {
+            renderQuestions();
+        }
+        if (typeof scrollToTop === 'function') scrollToTop();
+    }
+
+    function renderEditor(check) {
+        var conditionsHtml = (check.conditions.length ? check.conditions : [{ type: 'textContains', value: '' }]).map(function (condition) {
+            return ''
+                + '<div class="data-checks-cond-row" data-dc-cond-row="1">'
+                + '  <select data-dc-cond-type aria-label="條件類型">' + conditionTypeOptions(condition.type) + '</select>'
+                + '  <input type="text" data-dc-cond-value value="' + escapeAttr(condition.value) + '" placeholder="字串／概念" aria-label="條件值">'
+                + '  <button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>'
+                + '</div>';
+        }).join('');
+
+        return ''
+            + '<div class="data-checks-editor">'
+            + '  <label class="data-checks-field">'
+            + '    <span>標題</span>'
+            + '    <input type="text" data-dc-name value="' + escapeAttr(check.name) + '" maxlength="120">'
+            + '  </label>'
+            + '  <div class="data-checks-field">'
+            + '    <div class="data-checks-field-head">'
+            + '      <span>條件（全部 AND）</span>'
+            + '      <button type="button" class="btn btn-outline-primary btn-sm" data-dc-add-cond="' + escapeAttr(check.id) + '">＋ 條件</button>'
+            + '    </div>'
+            + '    <div class="data-checks-cond-list">' + conditionsHtml + '</div>'
+            + '  </div>'
+            + '  <label class="data-checks-field">'
+            + '    <span>例外題號（每行一個，格式如 DSE-2026-P1-01）</span>'
+            + '    <textarea data-dc-exceptions rows="4" placeholder="DSE-2026-P1-01">' + escapeHtml((check.exceptions || []).join('\n')) + '</textarea>'
+            + '  </label>'
+            + '  <div class="data-checks-edit-actions">'
+            + '    <button type="button" class="btn btn-primary btn-sm" data-dc-save="' + escapeAttr(check.id) + '">儲存</button>'
+            + '    <button type="button" class="btn btn-secondary btn-sm" data-dc-cancel="' + escapeAttr(check.id) + '">取消</button>'
+            + '    <button type="button" class="btn btn-secondary btn-sm" data-dc-delete="' + escapeAttr(check.id) + '">刪除檢查</button>'
+            + '  </div>'
+            + '</div>';
+    }
+
     function renderResults(results, totalQuestions) {
         var body = document.getElementById('data-checks-body');
         var note = document.getElementById('data-checks-footer-note');
@@ -269,19 +647,20 @@
         if (!results.length) {
             var empty = document.createElement('p');
             empty.className = 'data-checks-empty';
-            empty.textContent = '尚未設定任何檢查。請在 js/data-checks.js 的 DATA_CHECKS 新增。';
+            empty.textContent = '尚未設定任何檢查。按上方「新增檢查」，或還原預設檢查。';
             body.appendChild(empty);
         } else {
             results.forEach(function (result) {
+                var check = result.check;
                 var row = document.createElement('section');
                 row.className = 'data-checks-row';
-                row.setAttribute('data-check-id', result.check.id);
+                row.setAttribute('data-check-id', check.id);
 
                 var head = document.createElement('div');
                 head.className = 'data-checks-row-head';
                 var title = document.createElement('h3');
                 title.className = 'data-checks-row-title';
-                title.textContent = result.check.name;
+                title.textContent = check.name;
                 head.appendChild(title);
 
                 var counts = document.createElement('div');
@@ -292,44 +671,101 @@
                 head.appendChild(counts);
                 row.appendChild(head);
 
-                var summary = document.createElement('p');
-                summary.className = 'data-checks-row-summary';
-                summary.textContent = conditionSummary(result.check);
-                row.appendChild(summary);
-
-                var details = document.createElement('details');
-                details.className = 'data-checks-ids';
-                if (openDetails[result.check.id]) details.open = true;
-                details.addEventListener('toggle', function () {
-                    openDetails[result.check.id] = details.open;
-                });
-                var summaryEl = document.createElement('summary');
-                summaryEl.textContent = result.needsCount
-                    ? ('查看待處理題目編號（' + result.needsCount + '）')
-                    : '沒有待處理題目';
-                details.appendChild(summaryEl);
-                if (result.needsCount) {
-                    var list = document.createElement('ul');
-                    list.className = 'data-checks-id-list';
-                    result.needsHandling.forEach(function (id) {
-                        var item = document.createElement('li');
-                        item.textContent = id;
-                        list.appendChild(item);
-                    });
-                    details.appendChild(list);
+                if (editingCheckId === check.id) {
+                    var editorWrap = document.createElement('div');
+                    editorWrap.innerHTML = renderEditor(check);
+                    row.appendChild(editorWrap.firstChild);
                 } else {
-                    var none = document.createElement('p');
-                    none.className = 'data-checks-empty';
-                    none.textContent = '目前沒有需要處理的題目。';
-                    details.appendChild(none);
+                    var summary = document.createElement('p');
+                    summary.className = 'data-checks-row-summary';
+                    summary.textContent = conditionSummary(check) || '（尚未設定條件）';
+                    row.appendChild(summary);
+
+                    var actions = document.createElement('div');
+                    actions.className = 'data-checks-row-actions';
+                    actions.innerHTML = ''
+                        + '<button type="button" class="btn btn-outline-primary btn-sm" data-dc-edit="' + escapeAttr(check.id) + '">編輯</button>'
+                        + '<button type="button" class="btn btn-secondary btn-sm" data-dc-delete="' + escapeAttr(check.id) + '">刪除</button>';
+                    row.appendChild(actions);
+
+                    var details = document.createElement('details');
+                    details.className = 'data-checks-ids';
+                    if (openDetails[check.id]) details.open = true;
+                    details.addEventListener('toggle', function () {
+                        openDetails[check.id] = details.open;
+                    });
+                    var summaryEl = document.createElement('summary');
+                    summaryEl.textContent = result.needsCount
+                        ? ('查看待處理題目編號（' + result.needsCount + '）— 點編號可篩選該題')
+                        : '沒有待處理題目';
+                    details.appendChild(summaryEl);
+                    if (result.needsCount) {
+                        var list = document.createElement('ul');
+                        list.className = 'data-checks-id-list';
+                        result.needsHandling.forEach(function (id) {
+                            var item = document.createElement('li');
+                            if (id === '(無編號)') {
+                                item.textContent = id;
+                            } else {
+                                var btn = document.createElement('button');
+                                btn.type = 'button';
+                                btn.className = 'data-checks-qid';
+                                btn.setAttribute('data-dc-qid', id);
+                                btn.title = '用題目 ID 篩選顯示此題';
+                                btn.textContent = id;
+                                item.appendChild(btn);
+                            }
+                            list.appendChild(item);
+                        });
+                        details.appendChild(list);
+                    } else {
+                        var none = document.createElement('p');
+                        none.className = 'data-checks-empty';
+                        none.textContent = '目前沒有需要處理的題目。';
+                        details.appendChild(none);
+                    }
+                    row.appendChild(details);
                 }
-                row.appendChild(details);
+
                 body.appendChild(row);
             });
         }
         if (note) {
-            note.textContent = '已載入 ' + totalQuestions + ' 題 · 共 ' + results.length + ' 項檢查';
+            var saved = canSeeDataChecks() && !!readSavedChecks(currentUsername());
+            note.textContent = '已載入 ' + totalQuestions + ' 題 · 共 ' + results.length + ' 項檢查'
+                + (saved ? ' · 已儲存個人設定' : ' · 使用預設檢查');
         }
+    }
+
+    function renderFromCache() {
+        if (!canSeeDataChecks()) {
+            refreshDataChecksVisibility();
+            return;
+        }
+        loadActiveChecks();
+        var questions = Array.isArray(cachedQuestions) ? cachedQuestions : [];
+        var results = activeChecks.map(function (check) {
+            return evaluateCheck(questions, check);
+        });
+        renderResults(results, questions.length);
+    }
+
+    async function loadQuestionsForChecks() {
+        var questions = [];
+        try {
+            if (window.storage && typeof window.storage.getQuestions === 'function') {
+                questions = await window.storage.getQuestions();
+            }
+        } catch (error) {
+            questions = [];
+        }
+        if (!Array.isArray(questions)) questions = [];
+        // Same permission filter the list view uses (mock papers hidden without mockTests).
+        if (window.storage && typeof window.storage.applyPermissionFilter === 'function') {
+            questions = window.storage.applyPermissionFilter(questions);
+        }
+        cachedQuestions = questions;
+        return questions;
     }
 
     async function openDataChecksPanel() {
@@ -344,23 +780,9 @@
         if (body) {
             body.innerHTML = '<p class="data-checks-empty">正在檢查題目…</p>';
         }
-        var questions = [];
-        try {
-            if (window.storage && typeof window.storage.getQuestions === 'function') {
-                questions = await window.storage.getQuestions();
-            }
-        } catch (error) {
-            questions = [];
-        }
-        if (!Array.isArray(questions)) questions = [];
-        // Same permission filter the list view uses (mock papers hidden without mockTests).
-        if (window.storage && typeof window.storage.applyPermissionFilter === 'function') {
-            questions = window.storage.applyPermissionFilter(questions);
-        }
-        var results = DATA_CHECKS.map(function (check) {
-            return evaluateCheck(questions, check);
-        });
-        renderResults(results, questions.length);
+        loadActiveChecks();
+        await loadQuestionsForChecks();
+        renderFromCache();
         var closeBtn = overlay.querySelector('.data-checks-close');
         if (closeBtn) closeBtn.focus();
     }
@@ -378,8 +800,8 @@
             + '}'
             + '.data-checks-overlay[hidden] { display: none !important; }'
             + '.data-checks-dialog {'
-            + '  display: flex; flex-direction: column; width: min(820px, 100%);'
-            + '  height: min(860px, calc(100vh - 24px)); background: #fff;'
+            + '  display: flex; flex-direction: column; width: min(860px, 100%);'
+            + '  height: min(900px, calc(100vh - 24px)); background: #fff;'
             + '  color: var(--text-color); border-radius: 16px;'
             + '  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28); overflow: hidden;'
             + '}'
@@ -393,6 +815,10 @@
             + '.data-checks-close {'
             + '  flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid var(--border-light);'
             + '  border-radius: 999px; background: #fff; color: var(--text-color); font-size: 22px; line-height: 1;'
+            + '}'
+            + '.data-checks-toolbar {'
+            + '  display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 18px;'
+            + '  border-bottom: 1px solid var(--border-light); background: #fff;'
             + '}'
             + '.data-checks-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 24px; background: #f4f7fb; }'
             + '.data-checks-row {'
@@ -411,17 +837,34 @@
             + '.data-checks-count.is-exceptions { background: #f8fafc; color: var(--text-light); }'
             + '.data-checks-count strong { font-size: 15px; font-weight: 800; }'
             + '.data-checks-row-summary { margin: 8px 0 0; color: var(--text-light); font-size: 13px; line-height: 1.55; }'
+            + '.data-checks-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }'
             + '.data-checks-ids { margin-top: 10px; border-top: 1px solid #eef3f8; padding-top: 8px; }'
             + '.data-checks-ids summary { cursor: pointer; color: var(--secondary-color); font-size: 13px; font-weight: 700; }'
             + '.data-checks-id-list {'
             + '  margin: 10px 0 0; padding: 0; list-style: none; display: grid;'
-            + '  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px 10px;'
+            + '  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 10px;'
             + '}'
-            + '.data-checks-id-list li {'
-            + '  margin: 0; padding: 6px 8px; border-radius: 8px; background: #f8fafc;'
-            + '  border: 1px solid #e7eef5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;'
-            + '  font-size: 12px; line-height: 1.4; word-break: break-all;'
+            + '.data-checks-id-list li { margin: 0; }'
+            + '.data-checks-qid {'
+            + '  display: block; width: 100%; margin: 0; padding: 6px 8px; border-radius: 8px;'
+            + '  background: #f8fafc; border: 1px solid #e7eef5; color: var(--secondary-color);'
+            + '  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;'
+            + '  font-size: 12px; line-height: 1.4; word-break: break-all; text-align: left; cursor: pointer;'
             + '}'
+            + '.data-checks-qid:hover { background: #eef6ff; border-color: #bfd6f0; }'
+            + '.data-checks-editor { margin-top: 12px; display: grid; gap: 12px; }'
+            + '.data-checks-field { display: grid; gap: 6px; font-size: 13px; color: var(--text-color); }'
+            + '.data-checks-field > span, .data-checks-field-head span { font-weight: 700; color: var(--primary-color); }'
+            + '.data-checks-field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }'
+            + '.data-checks-field input[type="text"], .data-checks-field textarea, .data-checks-cond-row select, .data-checks-cond-row input {'
+            + '  width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d7e3ef;'
+            + '  border-radius: 8px; font: inherit; color: inherit; background: #fff;'
+            + '}'
+            + '.data-checks-field textarea { resize: vertical; min-height: 88px;'
+            + '  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }'
+            + '.data-checks-cond-list { display: grid; gap: 8px; }'
+            + '.data-checks-cond-row { display: grid; grid-template-columns: minmax(110px, 150px) 1fr auto; gap: 8px; align-items: center; }'
+            + '.data-checks-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }'
             + '.data-checks-empty { margin: 8px 0 0; color: var(--text-light); font-size: 13px; line-height: 1.55; }'
             + '.data-checks-footer {'
             + '  display: flex; align-items: center; justify-content: space-between; gap: 12px;'
@@ -431,6 +874,7 @@
             + '@media (max-width: 700px) {'
             + '  .data-checks-row-head { flex-direction: column; }'
             + '  .data-checks-counts { justify-content: flex-start; }'
+            + '  .data-checks-cond-row { grid-template-columns: 1fr; }'
             + '  .data-checks-footer { flex-direction: column; align-items: stretch; }'
             + '}';
         document.head.appendChild(style);
@@ -460,9 +904,10 @@
     window.refreshDataChecksVisibility = refreshDataChecksVisibility;
     window.openDataChecksPanel = openDataChecksPanel;
     window.closeDataChecksPanel = closeDataChecksPanel;
-    // Exposed for manual verification / future tooling; not used by the UI list editor.
-    window.__DATA_CHECKS__ = DATA_CHECKS;
+    window.__DATA_CHECKS_DEFAULTS__ = DEFAULT_DATA_CHECKS;
     window.__evaluateDataCheck__ = evaluateCheck;
+    window.__dataChecksShowQuestionById__ = showQuestionById;
+    window.__dataChecksLoadActive__ = loadActiveChecks;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initDataChecksFeature);
