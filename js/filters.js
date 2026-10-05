@@ -352,7 +352,9 @@ function gatherFilterState() {
         percentageFilter: window.percentageFilter,
         marksFilter: window.marksFilter,
         questionNumberFilter: window.questionNumberFilter,
-        triState: window.triStateFilters
+        triState: window.triStateFilters,
+        idSetFilter: window.idSetFilter,
+        advancedFilter: window.advancedFilter
     };
 }
 
@@ -927,6 +929,16 @@ function clearFilters() {
     clearPercentageFilter();    
     clearMarksFilter();
     clearQuestionNumberFilter();
+    if (typeof clearQuestionIdSetFilter === 'function') {
+        clearQuestionIdSetFilter({ silent: true });
+    } else {
+        window.idSetFilter = typeof emptyIdSetFilter === 'function' ? emptyIdSetFilter() : { active: false, ids: null, label: '', source: '' };
+    }
+    if (typeof clearAdvancedConditionFilter === 'function') {
+        clearAdvancedConditionFilter({ silent: true });
+    } else {
+        window.advancedFilter = typeof emptyAdvancedFilter === 'function' ? emptyAdvancedFilter() : { active: false, conditions: [], label: '' };
+    }
     updateFilterIndicators();
 
     if (window.paginationState && window.paginationState.questions) {
@@ -941,6 +953,18 @@ function clearFilters() {
 window.removeFilter = function(type, param1, param2) {
     if (type === 'search') {
         document.getElementById('search').value = '';
+    } else if (type === 'idSet') {
+        if (typeof clearQuestionIdSetFilter === 'function') {
+            clearQuestionIdSetFilter({ silent: true });
+        } else {
+            window.idSetFilter = { active: false, ids: null, label: '', source: '' };
+        }
+    } else if (type === 'advanced') {
+        if (typeof clearAdvancedConditionFilter === 'function') {
+            clearAdvancedConditionFilter({ silent: true });
+        } else {
+            window.advancedFilter = { active: false, conditions: [], label: '' };
+        }
     } else if (type === 'year') {
         if (param1) {
             if (window.triStateFilters.year) {
@@ -1002,6 +1026,16 @@ function updateSearchInfo() {
     
     if (searchText) {
         html += createBadge(`搜尋 (${scopeText})`, searchText, 'blue', 'search');
+        hasFilters = true;
+    }
+
+    if (window.idSetFilter && window.idSetFilter.active) {
+        html += createBadge('題目集合', window.idSetFilter.label || '指定題目', 'green', 'idSet');
+        hasFilters = true;
+    }
+
+    if (window.advancedFilter && window.advancedFilter.active) {
+        html += createBadge('進階篩選', window.advancedFilter.label || '條件', 'green', 'advanced');
         hasFilters = true;
     }
 

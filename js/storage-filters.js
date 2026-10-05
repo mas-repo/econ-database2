@@ -607,6 +607,26 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
             });
         }
     }
+
+    // Exact ID-set layer (資料檢查 bulk pending / 進階「篩選全部待處理」).
+    var idSet = filters.idSetFilter || (typeof window !== 'undefined' ? window.idSetFilter : null);
+    if (idSet && idSet.active && idSet.ids) {
+        questions = questions.filter(function (q) {
+            var id = q && q.id != null ? String(q.id) : '';
+            return !!(id && idSet.ids[id]);
+        });
+    }
+
+    // Advanced condition layer (local-only; ConditionMatch AND).
+    var advanced = filters.advancedFilter || (typeof window !== 'undefined' ? window.advancedFilter : null);
+    if (advanced && advanced.active && Array.isArray(advanced.conditions) && advanced.conditions.length) {
+        var Match = typeof window !== 'undefined' ? window.ConditionMatch : null;
+        if (Match && typeof Match.matchesAllConditions === 'function') {
+            questions = questions.filter(function (q) {
+                return Match.matchesAllConditions(q, advanced.conditions);
+            });
+        }
+    }
     
     return questions;
 };
