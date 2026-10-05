@@ -64,7 +64,7 @@ var PoeGenerate = {};
     Poe.MODEL_KEY_LEGACY = 'econ_ai_model_v1';
     Poe.API_KEY_POE = 'econ_poe_api_key_v1';
     Poe.API_KEY_OPENROUTER = 'econ_openrouter_api_key_v1';
-    Poe.CLIENT_SEND_CAP = 60;
+    Poe.CLIENT_SEND_CAP = 30;
     Poe.LOCAL_KEY = 'econ_poe_generations_v1';
     // One page of personal history and of admin usage. Matches AI_BACKUP_LIST_MAX_.
     Poe.HISTORY_LIMIT = 30;

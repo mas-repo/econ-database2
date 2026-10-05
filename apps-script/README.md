@@ -282,7 +282,7 @@ The script keeps a client instruction only when it is a non-empty string after t
 
 > 參考以下題目，撰寫全新的題目，並參考過程題目的風格、用字、句式撰寫解釋。請盡量提供最多的題目。一條題目不一定只涉及一件事件。有沒有甚麼有少許新意的問法？請同樣提供問題與解釋，並說明它創新之處。
 
-The browser may send up to 60 questions. The script then applies `POE_MAX_REFERENCES` and `POE_MAX_REFERENCE_CHARS`. The upstream call is `POST https://api.poe.com/v1/chat/completions` or `POST https://openrouter.ai/api/v1/chat/completions`, chosen from `provider`. The full reply is returned to the modal (Apps Script does not stream the body back to the browser). The modal keeps past replies in IndexedDB on that browser, keyed by the signed-in username and time, and falls back to `localStorage` if IndexedDB is unavailable.
+The browser may send up to 30 questions. The script then applies `POE_MAX_REFERENCES` and `POE_MAX_REFERENCE_CHARS`. The upstream call is `POST https://api.poe.com/v1/chat/completions` or `POST https://openrouter.ai/api/v1/chat/completions`, chosen from `provider`. The full reply is returned to the modal (Apps Script does not stream the body back to the browser). The modal keeps past replies in IndexedDB on that browser, keyed by the signed-in username and time, and falls back to `localStorage` if IndexedDB is unavailable.
 
 ## Local pages
 
