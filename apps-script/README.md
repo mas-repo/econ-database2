@@ -6,14 +6,25 @@ The site button **AI出題** is hidden until `checkAccess` returns `ai: true` fo
 
 Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
 
-GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the token must not be in the page. `fetchSharedAsset` and `listSharedData` are how the site reads those files. Questions load only from the private repository `mas-repo/econ-database-data`. The question bank is not committed under `econ-database/data/`, and a failed private-repo read does not fall back to a file in this repo.
+GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the write token must not be in the page. Large shared reads prefer `issueSharedReadToken` plus direct GitHub API calls; `fetchSharedAsset` and `listSharedData` remain Apps Script fallbacks. Questions load only from the private repository `mas-repo/econ-database-data`. The question bank is not committed under `econ-database/data/`, and a failed private-repo read does not fall back to a file in this repo.
 
 `Code.gs` in this repository is the source of truth. If the copy already deployed in Apps Script has drifted, replace it with this file and **redeploy** (section 4). Property-only edits apply immediately. Code changes, including the editable 出題指示, do not: an old deployment ignores the client `instruction` field until you deploy a new version.
+
+## Code.gs layout (how to navigate)
+
+`apps-script/Code.gs` is one file on purpose. Start at the **top-of-file map** (inside the header comment): it lists every POST `action` → `handle…_` function, grouped by area. Inside the file, `// === … ===` banners mark the major blocks (access/rights, AI generate, admin Git sync, data-checks, `issueSharedReadToken` / GitHub App, shared-asset proxy fallback, AI backups, GitHub I/O, utilities). Prefer jumping via the map + banners over scrolling the whole file.
+
+**Architecture contrast (reads vs writes):**
+
+- **Large shared assets** (question bank, diagrams, originals, papers, data-checks *download*): after username validation, the client prefers `issueSharedReadToken` (GitHub App installation token, or `GITHUB_READ_TOKEN` fallback) and fetches from `api.github.com` directly so multi‑MB bodies skip the Apps Script `googleusercontent` echo path. `fetchSharedAsset` / `listSharedData` remain server-side fallbacks.
+- **AI出題** (`generateQuestions`, `testModel`, AI backups, usage records), **admin bank upload**, and **data-checks upload** stay on Apps Script with the server write token (`GITHUB_TOKEN`). Normal `ai` users never receive write credentials.
+
+Comment-only edits to `Code.gs` do not require a new web-app deployment; paste + redeploy only when runtime code changes.
 
 ## Security model
 
 - `POE_API_KEY`, optional `OPENROUTER_API_KEY`, the allowlist, and every `GITHUB_*` value live only in **Apps Script → Project Settings → Script properties**.
-- The page calls `POST` on the web app URL. It does not call the upstream API host or `api.github.com`.
+- The page calls `POST` on the web app URL for auth, AI出題, admin writes, and token issuance. For large shared-asset *reads*, a known user may then call `api.github.com` with a short-lived **read-only** credential from `issueSharedReadToken` (never `GITHUB_TOKEN`).
 - Never commit the token, the GitHub owner, or the private repository name into this public site. Not in JavaScript, HTML, README examples, or `js/config.js`. The `/exec` URL is the only client setting, and it is not a secret.
 - `checkAccess` (alias `checkRights`) returns `{ "ok": true, "admin": false, "ai": false, "githubSync": false, "mockTests": false, "allowed": false }`. It does not return a username, a hash, or a role name. `allowed` mirrors `githubSync` only (admin). An older page that still checks `data.allowed` therefore shows the GitHub panel only for admin; AI出題 must use the `ai` flag on the current page. The current page uses `ai`, `githubSync`, `admin`, and `mockTests` and ignores `allowed`.
 - `generateQuestions` and `testModel` require `ai`. GitHub upload and download require `githubSync`. Shared reads require a known username. A refused call does not reveal who is listed.

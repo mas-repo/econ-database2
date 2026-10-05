@@ -47,8 +47,9 @@
  * The script reads <prefix>/<relative path> and will not read users/.
  * A static host such as GitHub Pages cannot read a private repository:
  * raw file URLs for a private repo answer 404 unless a token is sent, and
- * the token stays in Script properties. fetchSharedAsset and listSharedData
- * are the only browser path to those files.
+ * the token stays in Script properties. Large shared assets prefer
+ * issueSharedReadToken + direct GitHub API from the browser; fetchSharedAsset
+ * and listSharedData remain Apps Script fallbacks for those files.
  *
  * Least privilege (admin):
  * - Deploy the web app as "Execute as: Me" (the account that owns the key
@@ -79,8 +80,42 @@
  * - Bind this project to the log spreadsheet (Extensions → Apps Script)
  *   or set SPREADSHEET_ID. Do not point LOG_SHEET_NAME at a data tab.
  * - GitHub responses to the browser are ok/error, plus a commit sha and the
- *   configured relative path. They never include the token, owner, or repo.
+ *   configured relative path. They never include the write token. Direct-read
+ *   sessions (issueSharedReadToken) intentionally return a short-lived read
+ *   credential plus owner/repo/branch so the browser can call api.github.com.
+ *
+ * === Code.gs map (POST action → handler) ===
+ * Entry: doGet / doPost → handlePost_
+ * Access / login:
+ *   checkAccess | checkRights → handleCheck_
+ *   logLogin                   → handleLogin_
+ * AI generate / test / personal backups / admin usage:
+ *   generateQuestions   → handleGenerate_
+ *   testModel           → handleTest_
+ *   listAiBackups       → handleListAiBackups_
+ *   getAiBackup         → handleGetAiBackup_
+ *   listAiUsageRecords  → handleListAiUsageRecords_  (admin)
+ * Shared bank read (Apps Script body fallback; prefer direct read below):
+ *   fetchSharedAsset → handleFetchShared_
+ *   listSharedData   → handleListShared_
+ * Direct browser read (short-lived read credential; large files bypass echo):
+ *   issueSharedReadToken → handleIssueSharedReadToken_
+ *     GitHub App install token preferred (mintGithubInstallationToken_);
+ *     else GITHUB_READ_TOKEN (issueGithubDirectReadCredential_)
+ * Admin Git sync (shared bank write/read via server GITHUB_TOKEN):
+ *   syncDataUpload   → handleGitUpload_
+ *   syncDataDownload → handleGitDownload_
+ * Data-checks sync (ken + githubSync; shared/data/data-checks.json):
+ *   syncDataChecksUpload   → handleDataChecksUpload_
+ *   syncDataChecksDownload → handleDataChecksDownload_
+ * Notable helpers (not POST actions):
+ *   Rights: lookupRights_ / rightsFromLists_
+ *   GitHub App PEM/JWT: normalizeGithubAppPrivateKeyPem_ / githubAppJwt_
+ *   GitHub I/O: githubFetch_ / githubReadText_ / githubWriteText_
+ *   AI backup file: writeGitAiBackup_
  */
+
+// === Constants / HTTP entry ===
 
 var POE_CHAT_URL_ = 'https://api.poe.com/v1/chat/completions';
 var OPENROUTER_CHAT_URL_ = 'https://openrouter.ai/api/v1/chat/completions';
@@ -149,12 +184,16 @@ function handlePost_(e) {
   return { ok: false, error: 'bad_request' };
 }
 
+// === Access / login / role helpers ===
+
+// Booleans only (admin, ai, githubSync, mockTests). No username echo.
 function handleCheck_(body) {
   var username = normalizeUsername_(body.username);
   if (!username) return rightsResponse_(null);
   return rightsResponse_(lookupRights_(username));
 }
 
+// Deduped login audit row for a known username.
 function handleLogin_(body) {
   var username = normalizeUsername_(body.username);
   if (!username) return { ok: false, error: 'bad_request' };
@@ -335,6 +374,9 @@ function resolveAiBackupOwner_(requester, body) {
   return owner;
 }
 
+// === AI generate / test / lean reply payload ===
+
+// Poe or OpenRouter completion; may defer large content via Git AI backup.
 function handleGenerate_(body) {
   // Budget is the 6-minute web-app cap, measured from entry so a slow model
   // call can still return after the reply is saved.
@@ -534,6 +576,7 @@ function handleGenerate_(body) {
   }
 }
 
+// Short model ping (expects 正常). Does not count toward POE_DAILY_LIMIT.
 function handleTest_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).ai) {
@@ -1325,6 +1368,8 @@ function selfTestPromptShape() {
   console.log('selfTestPromptShape ok');
 }
 
+// === Admin shared-bank Git sync (server GITHUB_TOKEN) ===
+
 // GitHub identity stays in Script properties. Callers are checked for githubSync first.
 // Files that fit the Contents API are written with that API. Larger question
 // banks use the Git Data API (blob, tree, commit, ref), which the same
@@ -1353,6 +1398,7 @@ var AI_BACKUP_CONTENT_CHUNK_CHARS_ = 40000;
 // The request cannot add, remove, or rename these folders.
 var AI_USAGE_RECORD_USERS_ = ['ryan', 'user57'];
 
+// Shared question-bank upload for githubSync users.
 function handleGitUpload_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
@@ -1407,6 +1453,7 @@ function handleGitUpload_(body) {
   }
 }
 
+// Shared question-bank download for githubSync users (Apps Script body path).
 function handleGitDownload_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
@@ -1442,6 +1489,8 @@ function handleGitDownload_(body) {
     return gitClientError_(code);
   }
 }
+
+// === Data-checks sync (ken + githubSync only) ===
 
 // Fixed shared path for ken's data-checks panel (not the question bank).
 var DATA_CHECKS_REL_PATH_ = 'data/data-checks.json';
@@ -1485,6 +1534,7 @@ function dataChecksPayloadText_(raw) {
   return JSON.stringify(out);
 }
 
+// Upload shared/data/data-checks.json.
 function handleDataChecksUpload_(body) {
   var username = normalizeUsername_(body.username);
   if (!canUseDataChecksSync_(username)) return gitClientError_('feature_unavailable');
@@ -1539,6 +1589,7 @@ function handleDataChecksUpload_(body) {
   }
 }
 
+// Download shared/data/data-checks.json (Apps Script body fallback).
 function handleDataChecksDownload_(body) {
   var username = normalizeUsername_(body.username);
   if (!canUseDataChecksSync_(username)) return gitClientError_('feature_unavailable');
@@ -1577,6 +1628,9 @@ function handleDataChecksDownload_(body) {
   }
 }
 
+// === Direct browser read (issueSharedReadToken / GitHub App / read PAT) ===
+
+// Short-lived read-only credential for known users. Never returns GITHUB_TOKEN.
 function handleIssueSharedReadToken_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -1628,6 +1682,9 @@ function handleIssueSharedReadToken_(body) {
   };
 }
 
+// === Shared asset proxy fallback (fetchSharedAsset / listSharedData) ===
+
+// Return one shared file body through ContentService (fallback when direct read fails).
 function handleFetchShared_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -1679,6 +1736,7 @@ function handleFetchShared_(body) {
   }
 }
 
+// Directory listing under the shared prefix (Apps Script fallback).
 function handleListShared_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -1737,6 +1795,8 @@ function handleListShared_(body) {
     return gitClientError_(code);
   }
 }
+
+// === AI personal backups / admin usage records ===
 
 function aiBackupFileNameOk_(name) {
   var file = String(name || '');
@@ -1915,6 +1975,7 @@ function collectGenerateBackups_(cfg, username, limit, afterName) {
 }
 
 
+// One page of the caller's personal generateQuestions backups (lean).
 function handleListAiBackups_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).ai) return gitClientError_('feature_unavailable');
@@ -1944,6 +2005,7 @@ function handleListAiBackups_(body) {
 }
 
 
+// Full (optionally chunked) personal backup body; admin may pass owner for usage folders.
 function handleGetAiBackup_(body) {
   var username = normalizeUsername_(body.username);
   if (!username) return gitClientError_('feature_unavailable');
@@ -2097,6 +2159,7 @@ function usagePageOk_(records, hasMore, nextAfter) {
   };
 }
 
+// Admin-only merged page of fixed folders (ryan / user57), lean records.
 function handleListAiUsageRecords_(body) {
   var username = normalizeUsername_(body.username);
   var rights = username ? lookupRights_(username) : null;
@@ -2186,6 +2249,7 @@ function referenceIdsForBackup_(body, packed, source) {
   return kept.length ? kept : sentIds;
 }
 
+// Write one personal AI reply JSON under users/<username>/<backupDir>/.
 function writeGitAiBackup_(info) {
   var cfg = githubConfig_();
   if (!githubBackupReady_(cfg)) return '';
@@ -2240,6 +2304,8 @@ function writeGitAiBackup_(info) {
     lock.releaseLock();
   }
 }
+
+// === GitHub config / App JWT + PEM normalize / direct-read credentials ===
 
 function githubConfig_() {
   var stored = props_();
@@ -2493,6 +2559,8 @@ function issueGithubDirectReadCredential_(cfg) {
   }
   throw gitFail_('github_not_configured');
 }
+
+// === Shared GitHub path / Contents / Git Data I/O ===
 
 function githubDataReady_(cfg) {
   return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo) && githubBranchOk_(cfg.branch) && githubSharedBankPath_(cfg));
@@ -3463,6 +3531,8 @@ function selfTestGitPaths() {
   if (JSON.stringify(sharedOut).indexOf('private-data') !== -1) throw new Error('shared_response_repo');
   console.log('selfTestGitPaths ok');
 }
+
+// === Small utilities / logging / JSON response ===
 
 function props_() {
   return PropertiesService.getScriptProperties();
