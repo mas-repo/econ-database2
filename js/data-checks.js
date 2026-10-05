@@ -34,16 +34,23 @@
 //   id: 'stable-slug',
 //   name: 'Short Traditional Chinese label',
 //   conditions: [
-//     { type: 'textContains', value: '機會成本' },      // question text has this
-//     { type: 'textNotContains', value: '…' },         // question text lacks this
-//     { type: 'conceptPresent', value: '機會成本' },   // concepts[] includes this
-//     { type: 'conceptAbsent', value: '機會成本' }     // concepts[] lacks this
+//     // Stored as type + value (same meaning as the editor checkboxes):
+//     //   包含+字串 → textContains,  不包括+字串 → textNotContains,
+//     //   包含+概念 → conceptPresent, 不包括+概念 → conceptAbsent
+//     { type: 'textContains', value: '機會成本' },
+//     { type: 'conceptAbsent', value: '機會成本' }
 //   ],
 //   // Question IDs (same format as question.id), e.g. 'DSE-2026-P1-01'.
 //   // An exception still matches the conditions, but is excluded from the
 //   // "needs handling" count / ID list. It still appears in the exception count.
 //   exceptions: []
 // }
+//
+// Condition editor
+// ----------------
+// Each condition row has two checkbox pairs (exactly one checked in each pair):
+//   「包含」/「不包括」 and 「字串」/「概念」, plus a value box.
+// Old saved type fields (and include/field if present) map onto those checkboxes.
 //
 // Persistence
 // -----------
@@ -93,12 +100,18 @@
 
     var DATA_CHECKS_USERNAME = 'ken';
     var STORAGE_PREFIX = 'econ_data_checks_v1:';
-    var CONDITION_TYPES = [
-        { type: 'textContains', label: '題文含' },
-        { type: 'textNotContains', label: '題文不含' },
-        { type: 'conceptPresent', label: '概念有' },
-        { type: 'conceptAbsent', label: '概念無' }
-    ];
+    var CONDITION_TYPE_BY_CHOICE = {
+        'include|text': 'textContains',
+        'exclude|text': 'textNotContains',
+        'include|concept': 'conceptPresent',
+        'exclude|concept': 'conceptAbsent'
+    };
+    var CONDITION_CHOICE_BY_TYPE = {
+        textContains: { include: true, field: 'text' },
+        textNotContains: { include: false, field: 'text' },
+        conceptPresent: { include: true, field: 'concept' },
+        conceptAbsent: { include: false, field: 'concept' }
+    };
 
     var overlay = null;
     var openDetails = {};
@@ -129,13 +142,48 @@
         return JSON.parse(JSON.stringify(list || []));
     }
 
-    function normalizeCondition(raw) {
+    function conditionChoicesFromRaw(raw) {
         if (!raw || typeof raw !== 'object') return null;
         var type = String(raw.type || '').trim();
-        var allowed = CONDITION_TYPES.some(function (item) { return item.type === type; });
-        if (!allowed) return null;
+        if (CONDITION_CHOICE_BY_TYPE[type]) {
+            return {
+                include: CONDITION_CHOICE_BY_TYPE[type].include,
+                field: CONDITION_CHOICE_BY_TYPE[type].field
+            };
+        }
+        // Newer / alternate saved shape: include + field (text|concept).
+        var include;
+        if (typeof raw.include === 'boolean') {
+            include = raw.include;
+        } else if (raw.mode === 'include' || raw.mode === 'exclude') {
+            include = raw.mode === 'include';
+        } else if (raw.include === 'include' || raw.include === 'exclude') {
+            include = raw.include === 'include';
+        } else {
+            include = null;
+        }
+        var field = String(raw.field || raw.match || raw.target || '').trim().toLowerCase();
+        if (field === 'string' || field === 'text' || field === '字串') field = 'text';
+        if (field === 'concept' || field === '概念') field = 'concept';
+        if (include === null || (field !== 'text' && field !== 'concept')) return null;
+        return { include: include, field: field };
+    }
+
+    function typeFromChoices(include, field) {
+        var key = (include ? 'include' : 'exclude') + '|' + field;
+        return CONDITION_TYPE_BY_CHOICE[key] || null;
+    }
+
+    function normalizeCondition(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        var choices = conditionChoicesFromRaw(raw);
+        if (!choices) return null;
+        var type = typeFromChoices(choices.include, choices.field);
+        if (!type) return null;
         return {
             type: type,
+            include: choices.include,
+            field: choices.field,
             value: String(raw.value == null ? '' : raw.value)
         };
     }
@@ -227,18 +275,19 @@
     }
 
     function matchesCondition(question, condition) {
-        if (!condition || !condition.type) return false;
-        var value = String(condition.value == null ? '' : condition.value);
-        if (condition.type === 'textContains') {
+        var normalized = normalizeCondition(condition);
+        if (!normalized) return false;
+        var value = String(normalized.value == null ? '' : normalized.value);
+        if (normalized.type === 'textContains') {
             return questionText(question).indexOf(value) !== -1;
         }
-        if (condition.type === 'textNotContains') {
+        if (normalized.type === 'textNotContains') {
             return questionText(question).indexOf(value) === -1;
         }
-        if (condition.type === 'conceptPresent') {
+        if (normalized.type === 'conceptPresent') {
             return hasConcept(question, value);
         }
-        if (condition.type === 'conceptAbsent') {
+        if (normalized.type === 'conceptAbsent') {
             return !hasConcept(question, value);
         }
         return false;
@@ -409,24 +458,77 @@
                 removeConditionRow(removeCond);
             }
         });
+        overlay.addEventListener('change', function (event) {
+            var includeBox = event.target.closest('input[data-dc-include]');
+            if (includeBox) {
+                enforceExclusivePair(includeBox, 'data-dc-include');
+                return;
+            }
+            var fieldBox = event.target.closest('input[data-dc-field]');
+            if (fieldBox) {
+                enforceExclusivePair(fieldBox, 'data-dc-field');
+            }
+        });
         return overlay;
-    }
-
-    function conditionTypeOptions(selected) {
-        return CONDITION_TYPES.map(function (item) {
-            var sel = item.type === selected ? ' selected' : '';
-            return '<option value="' + item.type + '"' + sel + '>' + item.label + '</option>';
-        }).join('');
     }
 
     function conditionSummary(check) {
         return ((check && check.conditions) || []).map(function (condition) {
-            if (condition.type === 'textContains') return '題文含「' + condition.value + '」';
-            if (condition.type === 'textNotContains') return '題文不含「' + condition.value + '」';
-            if (condition.type === 'conceptPresent') return '概念有「' + condition.value + '」';
-            if (condition.type === 'conceptAbsent') return '概念無「' + condition.value + '」';
-            return String(condition.type || '');
+            var choices = conditionChoicesFromRaw(condition) || { include: true, field: 'text' };
+            var includeLabel = choices.include ? '包含' : '不包括';
+            var fieldLabel = choices.field === 'concept' ? '概念' : '字串';
+            return includeLabel + fieldLabel + '「' + condition.value + '」';
         }).join(' 且 ');
+    }
+
+    function conditionRowHtml(condition) {
+        var choices = conditionChoicesFromRaw(condition) || { include: true, field: 'text' };
+        var value = condition && condition.value != null ? condition.value : '';
+        var includeChecked = choices.include ? ' checked' : '';
+        var excludeChecked = choices.include ? '' : ' checked';
+        var textChecked = choices.field === 'concept' ? '' : ' checked';
+        var conceptChecked = choices.field === 'concept' ? ' checked' : '';
+        return ''
+            + '<div class="data-checks-cond-row" data-dc-cond-row="1">'
+            + '  <div class="data-checks-cond-pairs">'
+            + '    <div class="data-checks-cond-pair" role="group" aria-label="包含或不包括">'
+            + '      <label class="data-checks-check"><input type="checkbox" data-dc-include value="include"' + includeChecked + '>包含</label>'
+            + '      <label class="data-checks-check"><input type="checkbox" data-dc-include value="exclude"' + excludeChecked + '>不包括</label>'
+            + '    </div>'
+            + '    <div class="data-checks-cond-pair" role="group" aria-label="字串或概念">'
+            + '      <label class="data-checks-check"><input type="checkbox" data-dc-field value="text"' + textChecked + '>字串</label>'
+            + '      <label class="data-checks-check"><input type="checkbox" data-dc-field value="concept"' + conceptChecked + '>概念</label>'
+            + '    </div>'
+            + '  </div>'
+            + '  <input type="text" data-dc-cond-value value="' + escapeAttr(value) + '" placeholder="字串或概念名稱" aria-label="條件值">'
+            + '  <button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>'
+            + '</div>';
+    }
+
+    function enforceExclusivePair(changedInput, attrName) {
+        if (!changedInput || !changedInput.checked) {
+            // Exactly one must stay checked: if user unchecks the only one, re-check it.
+            var row = changedInput && changedInput.closest('[data-dc-cond-row]');
+            if (!row) return;
+            var boxes = row.querySelectorAll('input[' + attrName + ']');
+            var anyChecked = false;
+            boxes.forEach(function (box) { if (box.checked) anyChecked = true; });
+            if (!anyChecked && changedInput) changedInput.checked = true;
+            return;
+        }
+        var condRow = changedInput.closest('[data-dc-cond-row]');
+        if (!condRow) return;
+        condRow.querySelectorAll('input[' + attrName + ']').forEach(function (box) {
+            if (box !== changedInput) box.checked = false;
+        });
+    }
+
+    function readConditionChoices(condRow) {
+        var includeBox = condRow.querySelector('input[data-dc-include]:checked');
+        var fieldBox = condRow.querySelector('input[data-dc-field]:checked');
+        var include = !(includeBox && includeBox.value === 'exclude');
+        var field = (fieldBox && fieldBox.value === 'concept') ? 'concept' : 'text';
+        return { include: include, field: field };
     }
 
     function escapeAttr(text) {
@@ -495,11 +597,14 @@
         var conditionRows = row.querySelectorAll('[data-dc-cond-row]');
         var conditions = [];
         conditionRows.forEach(function (condRow) {
-            var typeEl = condRow.querySelector('[data-dc-cond-type]');
             var valueEl = condRow.querySelector('[data-dc-cond-value]');
-            var type = typeEl ? typeEl.value : '';
+            var choices = readConditionChoices(condRow);
             var value = valueEl ? valueEl.value : '';
-            var normalized = normalizeCondition({ type: type, value: value });
+            var normalized = normalizeCondition({
+                include: choices.include,
+                field: choices.field,
+                value: value
+            });
             if (normalized) conditions.push(normalized);
         });
         var exceptions = String(exceptionInput && exceptionInput.value || '')
@@ -539,13 +644,8 @@
         var row = overlay && overlay.querySelector('[data-check-id="' + checkId + '"] .data-checks-cond-list');
         if (!row) return;
         var wrap = document.createElement('div');
-        wrap.className = 'data-checks-cond-row';
-        wrap.setAttribute('data-dc-cond-row', '1');
-        wrap.innerHTML = ''
-            + '<select data-dc-cond-type aria-label="條件類型">' + conditionTypeOptions('textContains') + '</select>'
-            + '<input type="text" data-dc-cond-value value="" placeholder="字串／概念" aria-label="條件值">'
-            + '<button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>';
-        row.appendChild(wrap);
+        wrap.innerHTML = conditionRowHtml({ type: 'textContains', value: '' });
+        row.appendChild(wrap.firstChild);
     }
 
     function removeConditionRow(button) {
@@ -606,12 +706,7 @@
 
     function renderEditor(check) {
         var conditionsHtml = (check.conditions.length ? check.conditions : [{ type: 'textContains', value: '' }]).map(function (condition) {
-            return ''
-                + '<div class="data-checks-cond-row" data-dc-cond-row="1">'
-                + '  <select data-dc-cond-type aria-label="條件類型">' + conditionTypeOptions(condition.type) + '</select>'
-                + '  <input type="text" data-dc-cond-value value="' + escapeAttr(condition.value) + '" placeholder="字串／概念" aria-label="條件值">'
-                + '  <button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>'
-                + '</div>';
+            return conditionRowHtml(condition);
         }).join('');
 
         return ''
@@ -622,7 +717,7 @@
             + '  </label>'
             + '  <div class="data-checks-field">'
             + '    <div class="data-checks-field-head">'
-            + '      <span>條件（全部 AND）</span>'
+            + '      <span>條件（全部 AND；每列選 包含/不包括 與 字串/概念）</span>'
             + '      <button type="button" class="btn btn-outline-primary btn-sm" data-dc-add-cond="' + escapeAttr(check.id) + '">＋ 條件</button>'
             + '    </div>'
             + '    <div class="data-checks-cond-list">' + conditionsHtml + '</div>'
@@ -856,14 +951,25 @@
             + '.data-checks-field { display: grid; gap: 6px; font-size: 13px; color: var(--text-color); }'
             + '.data-checks-field > span, .data-checks-field-head span { font-weight: 700; color: var(--primary-color); }'
             + '.data-checks-field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }'
-            + '.data-checks-field input[type="text"], .data-checks-field textarea, .data-checks-cond-row select, .data-checks-cond-row input {'
+            + '.data-checks-field input[type="text"], .data-checks-field textarea, .data-checks-cond-row input[type="text"] {'
             + '  width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d7e3ef;'
             + '  border-radius: 8px; font: inherit; color: inherit; background: #fff;'
             + '}'
             + '.data-checks-field textarea { resize: vertical; min-height: 88px;'
             + '  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }'
-            + '.data-checks-cond-list { display: grid; gap: 8px; }'
-            + '.data-checks-cond-row { display: grid; grid-template-columns: minmax(110px, 150px) 1fr auto; gap: 8px; align-items: center; }'
+            + '.data-checks-cond-list { display: grid; gap: 10px; }'
+            + '.data-checks-cond-row {'
+            + '  display: grid; grid-template-columns: minmax(220px, auto) 1fr auto;'
+            + '  gap: 8px; align-items: center; padding: 8px; border: 1px solid #e7eef5;'
+            + '  border-radius: 10px; background: #f8fafc;'
+            + '}'
+            + '.data-checks-cond-pairs { display: grid; gap: 6px; }'
+            + '.data-checks-cond-pair { display: flex; flex-wrap: wrap; gap: 8px 12px; }'
+            + '.data-checks-check {'
+            + '  display: inline-flex; align-items: center; gap: 4px; margin: 0;'
+            + '  font-size: 13px; font-weight: 600; color: var(--primary-color); cursor: pointer;'
+            + '}'
+            + '.data-checks-check input { width: auto; margin: 0; accent-color: var(--secondary-color); }'
             + '.data-checks-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }'
             + '.data-checks-empty { margin: 8px 0 0; color: var(--text-light); font-size: 13px; line-height: 1.55; }'
             + '.data-checks-footer {'
