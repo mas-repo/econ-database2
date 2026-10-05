@@ -27,44 +27,86 @@
         return JSON.parse(cleaned);
     }
 
-    Poe.proxyRequest = async function proxyRequest(payload, timeoutMs, control) {
+    Poe.isRetryableProxyCode = function isRetryableProxyCode(code) {
+        return code === 'network' || code === 'bad_response' || code === 'empty_response';
+    }
+
+    Poe.proxyError = function proxyError(code, detail) {
+        var error = new Error(code || 'network');
+        error.code = code || 'network';
+        if (detail) error.detail = detail;
+        return error;
+    }
+
+    // One attempt. Retries for connection-style failures go through proxyRequest.
+    Poe.proxyRequestOnce = async function proxyRequestOnce(payload, timeoutMs, control) {
         var url = Poe.proxyUrl();
-        if (!url) {
-            var missing = new Error('network');
-            missing.code = 'network';
-            throw missing;
-        }
+        if (!url) throw Poe.proxyError('proxy_not_configured');
         var handle = Poe.beginRequest(timeoutMs);
         if (control) control.handle = handle;
+        var response = null;
+        var text = '';
         try {
-            var response = await fetch(url, {
+            response = await fetch(url, {
                 method: 'POST',
                 redirect: 'follow',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(payload),
                 signal: handle.signal
             });
-            var text = await response.text();
+            // A body that already started reading must not be thrown away for a
+            // later retry. Parse what arrived, even when the HTTP status is odd.
+            text = await response.text();
+            if (!String(text || '').trim()) {
+                throw Poe.proxyError('empty_response', 'http_' + response.status);
+            }
             try {
                 return Poe.parseProxyJson(text);
             } catch (error) {
-                var invalid = new Error('network');
-                invalid.code = 'network';
-                throw invalid;
+                throw Poe.proxyError('bad_response', 'http_' + response.status);
             }
         } catch (error) {
-            if (error && error.name === 'AbortError') {
-                var aborted = new Error('aborted');
-                aborted.code = control && control.cancelled ? 'cancelled' : 'upstream_timeout';
-                throw aborted;
-            }
             if (error && error.code) throw error;
-            var network = new Error('network');
-            network.code = 'network';
-            throw network;
+            if (error && error.name === 'AbortError') {
+                throw Poe.proxyError(control && control.cancelled ? 'cancelled' : 'upstream_timeout');
+            }
+            throw Poe.proxyError('network');
         } finally {
             handle.clear();
+            if (control && control.handle === handle) control.handle = null;
         }
+    }
+
+    Poe.proxyRequest = async function proxyRequest(payload, timeoutMs, control, options) {
+        options = options || {};
+        var retries = options.retries;
+        if (retries == null) retries = Poe.PROXY_RETRY_MAX;
+        retries = Math.max(1, Number(retries) || 1);
+        var lastError = null;
+        for (var attempt = 1; attempt <= retries; attempt++) {
+            if (control && control.cancelled) throw Poe.proxyError('cancelled');
+            var started = Date.now();
+            try {
+                return await Poe.proxyRequestOnce(payload, timeoutMs, control);
+            } catch (error) {
+                lastError = error;
+                var code = error && error.code ? error.code : 'network';
+                var elapsed = Date.now() - started;
+                // Only retry short connection failures. A long wait that ends in a
+                // bad body already used the model; do not run the whole call again.
+                var canRetry = attempt < retries
+                    && Poe.isRetryableProxyCode(code)
+                    && elapsed < 45000
+                    && !(control && control.cancelled);
+                if (!canRetry) throw error;
+                var wait = Poe.PROXY_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+                if (typeof Poe.setStatus === 'function' && Poe.isPoeGenerateModalOpen && Poe.isPoeGenerateModalOpen()) {
+                    Poe.setStatus('連線不穩，正在重試（' + attempt + '/' + retries + '）…');
+                }
+                await new Promise(function (resolve) { setTimeout(resolve, wait); });
+            }
+        }
+        throw lastError || Poe.proxyError('network');
     }
 
     Poe.poeCheckAccess = async function poeCheckAccess() {

@@ -191,6 +191,7 @@
         var merged = [];
         var byId = {};
         var byContent = {};
+        var byRequest = {};
 
         function prefer(existing, next) {
             if (!existing) return next;
@@ -198,7 +199,10 @@
             var existingLocal = String(existing.id || '').indexOf('remote:') !== 0;
             var nextLocal = String(next.id || '').indexOf('remote:') !== 0;
             if (existingLocal && !nextLocal) {
-                if (!existing.content && next.content) existing.content = next.content;
+                if (!existing.content && next.content) {
+                    existing.content = next.content;
+                    existing.incomplete = false;
+                }
                 if (!existing.modeId && next.modeId) existing.modeId = next.modeId;
                 if (!existing.modeName && next.modeName) existing.modeName = next.modeName;
                 if (!existing.instruction && next.instruction) existing.instruction = next.instruction;
@@ -210,7 +214,21 @@
                 }
                 return existing;
             }
-            if (!existing.content && next.content) return next;
+            if (!existing.content && next.content) {
+                next.incomplete = false;
+                return next;
+            }
+            if (existing.incomplete && next.content && !next.incomplete) {
+                next.id = existing.id;
+                next.referenceIds = existing.referenceIds && existing.referenceIds.length
+                    ? existing.referenceIds
+                    : next.referenceIds;
+                next.pastedReferences = existing.pastedReferences || next.pastedReferences || [];
+                next.filterSummary = existing.filterSummary || next.filterSummary || '';
+                next.singleQuestion = existing.singleQuestion || next.singleQuestion || null;
+                next.incomplete = false;
+                return next;
+            }
             if ((next.modeName || next.instruction) && !(existing.modeName || existing.instruction)) return next;
             if ((next.createdAt || 0) > (existing.createdAt || 0)) {
                 if (!next.referenceIds || !next.referenceIds.length) {
@@ -227,18 +245,24 @@
             if (!record || !record.id) return;
             var existing = byId[record.id];
             var key = Poe.contentDedupeKey(record);
+            var requestId = String(record.requestId || '').trim();
             if (!existing && key && byContent[key]) existing = byContent[key];
+            if (!existing && requestId && byRequest[requestId]) existing = byRequest[requestId];
             var chosen = prefer(existing, record);
             if (existing && existing !== chosen) {
                 merged = merged.filter(function (item) { return item !== existing; });
                 delete byId[existing.id];
                 var oldKey = Poe.contentDedupeKey(existing);
                 if (oldKey && byContent[oldKey] === existing) delete byContent[oldKey];
+                var oldRequest = String(existing.requestId || '').trim();
+                if (oldRequest && byRequest[oldRequest] === existing) delete byRequest[oldRequest];
             }
             if (!byId[chosen.id]) merged.push(chosen);
             byId[chosen.id] = chosen;
             var chosenKey = Poe.contentDedupeKey(chosen);
             if (chosenKey) byContent[chosenKey] = chosen;
+            var chosenRequest = String(chosen.requestId || '').trim();
+            if (chosenRequest) byRequest[chosenRequest] = chosen;
         }
 
         (localRecords || []).forEach(add);

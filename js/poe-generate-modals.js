@@ -316,7 +316,12 @@
 
     Poe.closePoeGenerateModal = function closePoeGenerateModal() {
         if (!Poe.isPoeGenerateModalOpen()) return;
-        if (Poe.poeUi.busy) Poe.cancelGeneration(true);
+        // A long generate must keep running after the modal closes so a reply
+        // that finishes later is still written to 使用紀錄. Explicit cancel
+        // still aborts. Short model tests do not need to outlive the modal.
+        if (Poe.poeUi.busy && Poe.poeUi.busyAction === 'test') {
+            Poe.cancelGeneration(true);
+        }
         Poe.closeSettingsModal();
         Poe.closeEnlargeOverlay();
         Poe.poeUi.overlay.hidden = true;
@@ -391,9 +396,18 @@
         Poe.syncPinnedChrome();
         Poe.poeUi.overlay.hidden = false;
         document.body.classList.add('poe-modal-open');
-        Poe.setStatus('');
+        Poe.setStatus(Poe.poeUi.busy && Poe.poeUi.busyAction === 'generate'
+            ? '出題仍在背景進行。關閉視窗不會中斷這次請求。'
+            : '');
         Poe.poeUi.counting = true;
-        if (!Poe.poeUi.activeRecord) Poe.showIdle(0, true);
+        if (Poe.poeUi.busy && Poe.poeUi.busyAction === 'generate') {
+            Poe.showLoading();
+            Poe.startElapsed();
+        } else if (!Poe.poeUi.activeRecord) {
+            Poe.showIdle(0, true);
+        } else if (Poe.poeUi.activeRecord) {
+            Poe.showResult(Poe.poeUi.activeRecord);
+        }
         Poe.updateMeta(0, true);
         Poe.syncActionButtons();
         var closeButton = Poe.poeUi.overlay.querySelector('.poe-close');
@@ -404,7 +418,15 @@
         } catch (error) {
             Poe.poeUi.records = [];
         }
-        Poe.showPoeTab('compose');
+        if (Poe.poeUi.activeRecord) {
+            var activeId = Poe.poeUi.activeRecord.id;
+            var refreshed = Poe.poeUi.records.filter(function (item) { return item.id === activeId; })[0];
+            if (refreshed) {
+                Poe.poeUi.activeRecord = refreshed;
+                if (!(Poe.poeUi.busy && Poe.poeUi.busyAction === 'generate')) Poe.showResult(refreshed);
+            }
+        }
+        Poe.showPoeTab(Poe.poeUi.busy && Poe.poeUi.busyAction === 'generate' ? 'compose' : (Poe.poeUi.activeTab || 'compose'));
         Poe.renderHistory();
         // Cross-device history: merge GitHub AI backups without blocking the modal.
         Poe.syncRemoteHistoryIntoUi(historyUser);

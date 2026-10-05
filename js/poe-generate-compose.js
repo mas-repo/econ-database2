@@ -184,6 +184,14 @@
             : (Poe.ERROR_TEXT[code] || Poe.ERROR_TEXT.server_error);
         box.appendChild(title);
         box.appendChild(message);
+        if (code === 'network' || code === 'bad_response' || code === 'empty_response') {
+            var netTip = document.createElement('p');
+            netTip.className = 'poe-note';
+            netTip.textContent = code === 'network'
+                ? '常見原因是瀏覽器到出題服務的連線中斷。已自動重試短暫的連線失敗；若仍失敗，請稍後再試。未完成的紀錄會留在「使用紀錄」。'
+                : '服務有回應但內容無法解析。未完成的紀錄會留在「使用紀錄」，可稍後再打開查看是否已取回備份。';
+            box.appendChild(netTip);
+        }
         if (code === 'missing_api_key') {
             var tip = document.createElement('p');
             tip.className = 'poe-note';
@@ -675,11 +683,26 @@
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         stage.textContent = '';
+        if (record && record.incomplete && !String(record.content || '').trim()) {
+            Poe.setStageChrome({ label: '出題結果', enlarge: false, hasPaper: false });
+            var pending = document.createElement('div');
+            pending.className = 'poe-idle';
+            var pendingTitle = document.createElement('p');
+            pendingTitle.className = 'poe-idle-title';
+            pendingTitle.textContent = '這次出題尚未完成';
+            var pendingBody = document.createElement('p');
+            pendingBody.textContent = '關閉視窗或連線中斷時還沒有收到回覆文字。若伺服器稍後有備份，可再打開「使用紀錄」查看。';
+            pending.appendChild(pendingTitle);
+            pending.appendChild(pendingBody);
+            stage.appendChild(pending);
+            return;
+        }
         var built = Poe.buildPaperView(record || {});
         stage.appendChild(built.root);
         stage.scrollTop = 0;
+        var label = record && record.incomplete ? '出題結果（未完成）' : '出題結果';
         Poe.setStageChrome({
-            label: '出題結果',
+            label: label,
             countText: !record || !record.content
                 ? ''
                 : (built.structured ? ('共 ' + built.questionCount + ' 題') : '整份回覆'),

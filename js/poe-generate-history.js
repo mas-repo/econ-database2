@@ -22,9 +22,17 @@
         return false;
     }
 
-    Poe.previewText = function previewText(content) {
+    Poe.incompleteLabel = function incompleteLabel(record) {
+        return record && record.incomplete ? '未完成' : '';
+    }
+
+    Poe.previewText = function previewText(content, record) {
+        if (record && record.incomplete && !String(content || '').trim()) {
+            return '（出題未完成，尚無回覆文字）';
+        }
         var line = String(content || '').split('\n').map(function (item) { return item.trim(); }).filter(Boolean)[0] || '（沒有內容）';
         line = line.replace(/^#{1,6}\s+/, '');
+        if (record && record.incomplete) line = '未完成 · ' + line;
         return Poe.clipPreview(line, 42);
     }
 
@@ -145,10 +153,11 @@
             time.textContent = Poe.formatTime(record.createdAt);
             var preview = document.createElement('span');
             preview.className = 'poe-history-preview';
-            Poe.setInlineMarkdown(preview, Poe.previewText(record.content));
+            Poe.setInlineMarkdown(preview, Poe.previewText(record.content, record));
             var meta = document.createElement('span');
             meta.className = 'poe-history-meta';
             var metaBits = [];
+            if (record.incomplete) metaBits.push('未完成');
             if (record.referenceSource === 'paste') metaBits.push('貼上');
             if (record.referenceSource === 'single') metaBits.push('單題');
             if (record.modeName) metaBits.push(record.modeName);
@@ -184,9 +193,11 @@
         }
         Poe.showResult(record);
         var bits = [Poe.formatTime(record.createdAt), record.filterSummary || ''];
+        if (record.incomplete) bits.push('未完成');
         if (record.modeName) bits.push(record.modeName);
         if (record.model) bits.push('模型：' + record.model);
         if (record.truncated) bits.push('參考題曾經截斷');
+        if (record.incomplete && !record.content) bits.push('關閉視窗或連線中斷時尚未收到回覆');
         Poe.setStatus(bits.filter(Boolean).join(' · '));
         Poe.renderHistory();
         Poe.syncActionButtons();

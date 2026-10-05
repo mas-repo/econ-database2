@@ -71,6 +71,9 @@ var PoeGenerate = {};
     // Apps Script runs for up to 6 minutes and only then writes the backup.
     // Aborting at 4 minutes threw away replies that were already saved.
     Poe.GENERATE_WAIT_MS = 375000;
+    // Connection-style failures only. Auth, rate limits, and cancellations do not retry.
+    Poe.PROXY_RETRY_MAX = 3;
+    Poe.PROXY_RETRY_BASE_MS = 1200;
     Poe.ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
         proxy_not_configured: '出題服務尚未完成設定。',
@@ -84,6 +87,8 @@ var PoeGenerate = {};
         bad_request: '無法送出這次請求。',
         server_error: '出題服務發生錯誤，請再試一次。',
         network: '無法連線到出題服務。',
+        bad_response: '出題服務有回覆，但內容無法讀取。請再試一次。',
+        empty_response: '出題服務沒有回傳內容。請再試一次。',
         save_failed: '題目已產生，但未能寫入這部瀏覽器。'
     };
 
