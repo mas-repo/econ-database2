@@ -11,12 +11,17 @@ async function buildQuestionExport(includeAll) {
         ? await source.getAllQuestions()
         : await source.getQuestions();
 
-    return {
+    const exportData = {
         version: '1.0',
+        schemaVersion: typeof SCHEMA_VERSION === 'number' ? SCHEMA_VERSION : 1,
         exportDate: new Date().toISOString(),
         questionCount: questions.length,
         questions: questions
     };
+    if (typeof stampSchemaVersion === 'function') {
+        stampSchemaVersion(exportData);
+    }
+    return exportData;
 }
 
 async function exportJSON() {
@@ -84,6 +89,9 @@ async function importJSON() {
             if (window.questionJsonSource) {
                 imported = await window.questionJsonSource.importPayload(data);
             } else {
+                if (typeof guardIncomingBankPayload === 'function') {
+                    guardIncomingBankPayload(data);
+                }
                 await storage.clear();
                 for (const question of data.questions) {
                     try {

@@ -22,7 +22,9 @@ var GIT_ERROR_TEXT = {
     payload_too_large: '題庫太大，無法上傳',
     rate_limited: '操作太頻繁，請稍後再試',
     network: '無法連線到同步服務',
-    server_error: '同步服務發生錯誤'
+    server_error: '同步服務發生錯誤',
+    schema_too_new: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
+    schema_unreadable: '無法安全載入較新格式的題庫，請先更新網頁'
 };
 
 function gitProxyUrl() {
@@ -56,12 +58,47 @@ function gitErrorMessage(code) {
 }
 
 function gitFailureText(error) {
+    if (error && error.code === 'schema_too_new') {
+        if (typeof schemaNewerUploadMessage === 'function') {
+            return schemaNewerUploadMessage(error.cloudSchemaVersion);
+        }
+        return GIT_ERROR_TEXT.schema_too_new;
+    }
+    if (error && error.code === 'schema_unreadable') {
+        return error.message || GIT_ERROR_TEXT.schema_unreadable;
+    }
     if (error && error.code && GIT_ERROR_TEXT[error.code]) return GIT_ERROR_TEXT[error.code];
     var message = error && error.message ? String(error.message) : '';
     if (message && message.length <= 80 && message.indexOf('token') === -1 && message.indexOf('github.com') === -1) {
         return message;
     }
     return gitErrorMessage(error && error.code ? error.code : 'network');
+}
+
+// Read the shared bank for schemaVersion only (full JSON). Missing file → null.
+async function peekCloudQuestionBankForSchema() {
+    if (typeof fetchSharedJsonDirectOrProxy === 'function') {
+        try {
+            var direct = await fetchSharedJsonDirectOrProxy('data/database.json', 180000);
+            if (direct && direct.data) return direct.data;
+        } catch (directErr) {
+            var directCode = directErr && directErr.code ? String(directErr.code) : '';
+            if (directCode === 'github_not_found') return null;
+            // Fall through to admin syncDataDownload when direct read fails.
+        }
+    }
+    var data = await gitProxyRequest({
+        action: 'syncDataDownload',
+        username: gitUsername()
+    }, 180000);
+    if (!data || data.ok !== true) {
+        var code = data && data.error ? String(data.error) : 'github_error';
+        if (code === 'github_not_found') return null;
+        var failed = new Error(code);
+        failed.code = code;
+        throw failed;
+    }
+    return data.data || null;
 }
 
 function setGitStatus(text, kind) {
@@ -220,11 +257,20 @@ async function uploadQuestionsToGit(options) {
         console.log('[GitHub upload] ' + new Date().toISOString() + ' starting (' + mode + ')');
         setGitStatus(options.auto ? '正在自動同步到 GitHub…' : '正在上傳到 GitHub…', '');
         try {
+            setGitStatus('正在檢查共用題庫版本…', '');
+            var cloudPayload = await peekCloudQuestionBankForSchema();
+            if (typeof assertCanUploadOverCloud === 'function') {
+                assertCanUploadOverCloud(cloudPayload);
+            }
+            setGitStatus(options.auto ? '正在自動同步到 GitHub…' : '正在上傳到 GitHub…', '');
             var exportData = typeof buildQuestionExport === 'function'
                 ? await buildQuestionExport(true)
                 : null;
             if (!exportData || !Array.isArray(exportData.questions)) {
                 throw Object.assign(new Error('bad_request'), { code: 'bad_request' });
+            }
+            if (typeof stampSchemaVersion === 'function') {
+                stampSchemaVersion(exportData);
             }
             var data = await gitProxyRequest({
                 action: 'syncDataUpload',
@@ -297,7 +343,10 @@ async function downloadQuestionsFromGit(options) {
             gitSyncState.suppressAuto = true;
             var imported = 0;
             try {
-                imported = await window.questionJsonSource.importPayload(data.data);
+                imported = await window.questionJsonSource.importPayload(data.data, {
+                    quiet: !!options.quiet,
+                    statusSetter: setGitStatus
+                });
                 if (typeof refreshViews === 'function') await refreshViews();
             } finally {
                 gitSyncState.suppressAuto = false;

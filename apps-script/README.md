@@ -156,8 +156,8 @@ Opening the `/exec` URL in a browser should return JSON like `{ "ok": true, "ser
 
 Only `githubSync` (the admin role) sees **自動同步**, **上傳到 GitHub**, and **從 GitHub 載入**. AI editors and restricted users do not see that panel. The checkbox is stored only in that browser’s `localStorage`. It is not sent to the server.
 
-- **上傳到 GitHub** sends the current question bank to `syncDataUpload`.
-- **從 GitHub 載入** calls `syncDataDownload` and replaces the browser’s IndexedDB copy.
+- **上傳到 GitHub** sends the current question bank to `syncDataUpload`. The **browser** first reads the cloud bank and refuses the upload when local `SCHEMA_VERSION` is lower than cloud `schemaVersion` (see site `README.md` / `js/schema-version.js`). Apps Script does not yet re-check `schemaVersion` in `handleGitUpload_`.
+- **從 GitHub 載入** calls `syncDataDownload` (or direct shared read) and replaces the browser’s IndexedDB copy. If cloud `schemaVersion` is newer than the page, the client shows an update warning.
 - Ken’s admin **資料檢查** panel uses `syncDataChecksDownload` / `syncDataChecksUpload` for `shared/data/data-checks.json` (same proxy; not the question bank). The 題目-tab **進階篩選** modal does not use these actions and must not write that shared file (browser-local only).
 - With **自動同步** on, opening the page tries to load the private copy. Saving, deleting, importing, or exporting a question uploads the current bank. Clearing the database does not upload by itself.
 - Reloading the page loads questions only from the private repository `mas-repo/econ-database-data` through the Apps Script proxy. If that read fails, the page stays without questions and does not use a local copy.

@@ -115,6 +115,9 @@ class QuestionJsonSource {
         try {
             console.log('🔄 開始從 JSON 載入題目...');
             const payload = await this.fetchPayload();
+            if (typeof guardIncomingBankPayload === 'function') {
+                guardIncomingBankPayload(payload);
+            }
             const questions = this.questionsFromPayload(payload);
 
             if (questions.length === 0) {
@@ -140,7 +143,11 @@ class QuestionJsonSource {
         }
     }
 
-    async importPayload(payload) {
+    async importPayload(payload, options) {
+        options = options || {};
+        if (!options.skipSchemaGuard && typeof guardIncomingBankPayload === 'function') {
+            guardIncomingBankPayload(payload, options);
+        }
         const questions = this.questionsFromPayload(payload);
         if (questions.length === 0) {
             throw new Error('JSON 內沒有有效題目（每題需要 id 與 examination）');
