@@ -5,7 +5,11 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
+<<<<<<< HEAD
 const APP_VERSION = '2026.10.05.2';
+=======
+const APP_VERSION = '2026.10.04.19';
+>>>>>>> b09590c (Persist ken data-checks via the shared GitHub proxy file.)
 console.log('Question bank version:', APP_VERSION);
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)

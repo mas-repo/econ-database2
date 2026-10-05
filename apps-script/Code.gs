@@ -22,6 +22,10 @@
  *   e.g. shared/data/database.json
  * Username is required for auth only and must not appear in the bank path.
  * Bank paths under users/ are rejected.
+ * Admin data-checks (ken only, githubSync) use a sibling shared file:
+ *   <GITHUB_SHARED_PREFIX>/data/data-checks.json
+ *   e.g. shared/data/data-checks.json
+ * via syncDataChecksUpload / syncDataChecksDownload.
  * Model-reply (AI出題) backups stay personal:
  *   users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json
  * <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
@@ -127,6 +131,8 @@ function handlePost_(e) {
   if (action === 'generateQuestions') return handleGenerate_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
+  if (action === 'syncDataChecksUpload') return handleDataChecksUpload_(body);
+  if (action === 'syncDataChecksDownload') return handleDataChecksDownload_(body);
   if (action === 'fetchSharedAsset') return handleFetchShared_(body);
   if (action === 'listSharedData') return handleListShared_(body);
   if (action === 'listAiBackups') return handleListAiBackups_(body);
@@ -1306,6 +1312,140 @@ function handleGitDownload_(body) {
   }
 }
 
+// Fixed shared path for ken's data-checks panel (not the question bank).
+var DATA_CHECKS_REL_PATH_ = 'data/data-checks.json';
+var DATA_CHECKS_USERNAME_ = 'ken';
+var DATA_CHECKS_MAX_BYTES_ = 500000;
+
+function githubSharedDataChecksPath_(cfg) {
+  var prefix = githubSharedPrefix_(cfg);
+  if (!prefix) return '';
+  return joinGithubPath_(prefix, DATA_CHECKS_REL_PATH_);
+}
+
+function canUseDataChecksSync_(username) {
+  var name = normalizeUsername_(username);
+  if (!name || name !== DATA_CHECKS_USERNAME_) return false;
+  return lookupRights_(name).githubSync === true;
+}
+
+function dataChecksPayloadText_(raw) {
+  var data = coerceJson_(raw);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    var bad = new Error('bad_request');
+    bad.code = 'bad_request';
+    throw bad;
+  }
+  var list = Array.isArray(data.checks) ? data.checks : null;
+  if (!list) {
+    var badList = new Error('bad_request');
+    badList.code = 'bad_request';
+    throw badList;
+  }
+  if (list.length > 500) {
+    var tooMany = new Error('bad_request');
+    tooMany.code = 'bad_request';
+    throw tooMany;
+  }
+  var out = {
+    version: typeof data.version === 'number' ? data.version : 1,
+    checks: list
+  };
+  return JSON.stringify(out);
+}
+
+function handleDataChecksUpload_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!canUseDataChecksSync_(username)) return gitClientError_('feature_unavailable');
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  var text;
+  try {
+    text = dataChecksPayloadText_(body && body.data);
+  } catch (err) {
+    return gitClientError_(err && err.code ? err.code : 'bad_request');
+  }
+  var bytes = utf8Length_(text);
+  if (bytes > DATA_CHECKS_MAX_BYTES_) return gitClientError_('payload_too_large');
+  var dataPath = githubSharedDataChecksPath_(cfg);
+  if (!dataPath) return gitClientError_('github_error');
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(20000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var count = 0;
+    try { count = JSON.parse(text).checks.length; } catch (ignore) { count = 0; }
+    var written = githubWriteText_(cfg, dataPath, text, 'Update data-checks (' + count + ')');
+    lock.releaseLock();
+    held = false;
+    writeLog_({
+      username: username,
+      action: 'syncDataChecksUpload',
+      success: true,
+      metadata: { checkCount: count, bytes: bytes }
+    }, true);
+    return gitOk_({ sha: written.sha, path: dataPath });
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code === 'payload_too_large' ? 'payload_too_large' : 'github_error';
+    writeLog_({
+      username: username,
+      action: 'syncDataChecksUpload',
+      success: false,
+      metadata: { error: code, detail: clip_(err && err.message, 120) }
+    }, true);
+    return gitClientError_(code);
+  }
+}
+
+function handleDataChecksDownload_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!canUseDataChecksSync_(username)) return gitClientError_('feature_unavailable');
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  var dataPath = githubSharedDataChecksPath_(cfg);
+  if (!dataPath) return gitClientError_('github_error');
+  try {
+    var read = githubReadText_(cfg, dataPath);
+    var parsed;
+    try {
+      parsed = JSON.parse(read.text);
+    } catch (ignore) {
+      return gitClientError_('github_error');
+    }
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.checks)) {
+      return gitClientError_('github_error');
+    }
+    writeLog_({
+      username: username,
+      action: 'syncDataChecksDownload',
+      success: true,
+      metadata: { bytes: String(read.text || '').length, checkCount: parsed.checks.length }
+    }, true);
+    return gitOk_({ sha: read.sha, path: dataPath, data: parsed });
+  } catch (err) {
+    safeLog_(err);
+    var code = err && err.code ? err.code : 'github_error';
+    writeLog_({
+      username: username,
+      action: 'syncDataChecksDownload',
+      success: false,
+      metadata: { error: code === 'github_not_found' ? 'github_not_found' : 'github_error' }
+    }, true);
+    return gitClientError_(code);
+  }
+}
+
 function handleFetchShared_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -1316,6 +1456,10 @@ function handleFetchShared_(body) {
   var rel = String(body.path || '').trim();
   var full = githubSharedFilePath_(cfg, rel);
   if (!full) return gitClientError_('bad_request');
+  // data-checks.json is ken/admin only (same gate as syncDataChecks*).
+  if (rel === DATA_CHECKS_REL_PATH_ && !canUseDataChecksSync_(username)) {
+    return gitClientError_('feature_unavailable');
+  }
   if (!rights.mockTests && sharedMockOnly_(rel)) return gitClientError_('feature_unavailable');
   var ext = sharedExt_(rel);
   try {

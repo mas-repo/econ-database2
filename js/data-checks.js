@@ -18,11 +18,13 @@
 //
 // How to add / edit / remove a check
 // ----------------------------------
-// Prefer the in-panel UI (標題、條件、例外、新增檢查). Edits are saved to
-// localStorage for the signed-in username and survive reloads.
+// Prefer the in-panel UI (標題、條件、例外、新增檢查). Edits are saved to the
+// private data repo (same Apps Script GitHub proxy as the question bank) at
+// shared/data/data-checks.json, and cached in localStorage for this browser.
+// The repo file is the source of truth across computers.
 //
-// The DEFAULT_DATA_CHECKS list below remains the seed / fallback when ken has
-// no saved edits. You can still edit that list in source:
+// The DEFAULT_DATA_CHECKS list below remains the seed / fallback when the
+// remote file is missing. You can still edit that list in source:
 // - To change the defaults: edit DEFAULT_DATA_CHECKS.
 // - To add a default: append an object with id, name, conditions, exceptions.
 // - To remove a default: delete that object from the array.
@@ -58,9 +60,12 @@
 //
 // Persistence
 // -----------
-// Saved under localStorage key econ_data_checks_v1:<username> (JSON). Only the
-// current user's key is read/written, so other users are unaffected. Question
-// bank data is never written.
+// Source of truth: shared/data/data-checks.json in mas-repo/econ-database-data,
+// read/written through Apps Script actions syncDataChecksDownload /
+// syncDataChecksUpload (same proxy/commit path as database.json; ken +
+// githubSync only). localStorage key econ_data_checks_v1:<username> is a
+// cache only. Missing remote file → DEFAULT_DATA_CHECKS (does not wipe the
+// bank). Question bank data is never written by this feature.
 //
 // Clicking a needs-handling ID clears the question filters, sets search scope
 // to 題目 ID, fills that id, switches to the 題目 tab, and runs filterQuestions
@@ -105,6 +110,12 @@
 
     var DATA_CHECKS_USERNAME = 'ken';
     var STORAGE_PREFIX = 'econ_data_checks_v1:';
+    var REMOTE_SOURCE = 'remote';
+    var DEFAULT_SOURCE = 'defaults';
+    var CACHE_SOURCE = 'cache';
+    var checksSource = DEFAULT_SOURCE;
+    var checksBusy = false;
+    var checksStatusText = '';
     // Real filterable fields from the question bank / filter UI.
     // id is what we store on the condition; prop is the question property when needed.
     var CONDITION_FIELDS = [
@@ -290,6 +301,13 @@
         return list.map(normalizeCheck).filter(Boolean);
     }
 
+    function checksPayload(checks) {
+        return {
+            version: 1,
+            checks: normalizeChecks(checks)
+        };
+    }
+
     function readSavedChecks(username) {
         var key = storageKeyForUser(username);
         if (!key) return null;
@@ -310,13 +328,106 @@
         var key = storageKeyForUser(username);
         if (!key) return false;
         try {
-            localStorage.setItem(key, JSON.stringify({
-                version: 1,
-                checks: normalizeChecks(checks)
-            }));
+            localStorage.setItem(key, JSON.stringify(checksPayload(checks)));
             return true;
         } catch (error) {
             return false;
+        }
+    }
+
+    function setChecksStatus(text) {
+        checksStatusText = String(text || '');
+        var note = document.getElementById('data-checks-footer-note');
+        if (!note) return;
+        var base = note.getAttribute('data-dc-base') || note.textContent || '';
+        if (checksStatusText) {
+            note.textContent = base + ' · ' + checksStatusText;
+        } else {
+            note.textContent = base;
+        }
+    }
+
+    async function downloadChecksFromRemote() {
+        if (!canSeeDataChecks()) {
+            var denied = new Error('feature_unavailable');
+            denied.code = 'feature_unavailable';
+            throw denied;
+        }
+        if (typeof gitProxyRequest !== 'function') {
+            var missing = new Error('network');
+            missing.code = 'network';
+            throw missing;
+        }
+        var data = await gitProxyRequest({
+            action: 'syncDataChecksDownload',
+            username: currentUsername()
+        }, 60000);
+        if (!data || data.ok !== true) {
+            var failed = new Error((data && data.error) || 'github_error');
+            failed.code = data && data.error ? data.error : 'github_error';
+            throw failed;
+        }
+        if (!data.data || !Array.isArray(data.data.checks)) {
+            var bad = new Error('github_error');
+            bad.code = 'github_error';
+            throw bad;
+        }
+        return normalizeChecks(data.data.checks);
+    }
+
+    async function uploadChecksToRemote(checks) {
+        if (!canSeeDataChecks()) {
+            var denied = new Error('feature_unavailable');
+            denied.code = 'feature_unavailable';
+            throw denied;
+        }
+        if (typeof gitProxyRequest !== 'function') {
+            var missing = new Error('network');
+            missing.code = 'network';
+            throw missing;
+        }
+        var payload = checksPayload(checks);
+        var data = await gitProxyRequest({
+            action: 'syncDataChecksUpload',
+            username: currentUsername(),
+            data: payload
+        }, 60000);
+        if (!data || data.ok !== true) {
+            var failed = new Error((data && data.error) || 'github_error');
+            failed.code = data && data.error ? data.error : 'github_error';
+            throw failed;
+        }
+        return payload.checks;
+    }
+
+    async function loadActiveChecksFromSource() {
+        if (!canSeeDataChecks()) {
+            activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
+            checksSource = DEFAULT_SOURCE;
+            return activeChecks;
+        }
+        try {
+            var remote = await downloadChecksFromRemote();
+            activeChecks = remote;
+            checksSource = REMOTE_SOURCE;
+            writeSavedChecks(currentUsername(), activeChecks);
+            return activeChecks;
+        } catch (error) {
+            var code = error && error.code ? error.code : '';
+            if (code === 'github_not_found') {
+                activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
+                checksSource = DEFAULT_SOURCE;
+                return activeChecks;
+            }
+            var cached = readSavedChecks(currentUsername());
+            if (cached) {
+                activeChecks = cached;
+                checksSource = CACHE_SOURCE;
+                return activeChecks;
+            }
+            activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
+            checksSource = DEFAULT_SOURCE;
+            return activeChecks;
         }
     }
 
@@ -325,15 +436,37 @@
             activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
             return activeChecks;
         }
+        if (Array.isArray(activeChecks) && activeChecks.length) return activeChecks;
         var saved = readSavedChecks(currentUsername());
         activeChecks = saved ? saved : cloneChecks(DEFAULT_DATA_CHECKS);
         return activeChecks;
     }
 
-    function persistActiveChecks() {
+    async function persistActiveChecks() {
         if (!canSeeDataChecks()) return false;
         activeChecks = normalizeChecks(activeChecks);
-        return writeSavedChecks(currentUsername(), activeChecks);
+        writeSavedChecks(currentUsername(), activeChecks);
+        if (checksBusy) return false;
+        checksBusy = true;
+        setChecksStatus('正在儲存到資料庫…');
+        try {
+            await uploadChecksToRemote(activeChecks);
+            checksSource = REMOTE_SOURCE;
+            writeSavedChecks(currentUsername(), activeChecks);
+            setChecksStatus('已儲存到共用資料庫');
+            return true;
+        } catch (error) {
+            var message = (typeof gitFailureText === 'function')
+                ? gitFailureText(error)
+                : '儲存失敗';
+            setChecksStatus('儲存失敗（已暫存本機）：' + message);
+            if (typeof showNotification === 'function') {
+                showNotification('資料檢查儲存失敗：' + message, 'error');
+            }
+            return false;
+        } finally {
+            checksBusy = false;
+        }
     }
 
     function questionText(question) {
@@ -754,7 +887,7 @@
         return 'check-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     }
 
-    function addBlankCheck() {
+    async function addBlankCheck() {
         if (!canSeeDataChecks()) return;
         loadActiveChecks();
         var check = {
@@ -764,31 +897,34 @@
             exceptions: []
         };
         activeChecks.push(check);
-        persistActiveChecks();
         editingCheckId = check.id;
+        renderFromCache();
+        await persistActiveChecks();
         renderFromCache();
     }
 
-    function resetToDefaults() {
+    async function resetToDefaults() {
         if (!canSeeDataChecks()) return;
         if (!window.confirm('還原為程式內建的預設檢查？目前已儲存的標題、條件、例外與新增檢查都會被取代。')) {
             return;
         }
         activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
-        persistActiveChecks();
         editingCheckId = null;
+        renderFromCache();
+        await persistActiveChecks();
         renderFromCache();
     }
 
-    function deleteCheck(checkId) {
+    async function deleteCheck(checkId) {
         if (!canSeeDataChecks()) return;
         loadActiveChecks();
         var next = activeChecks.filter(function (check) { return check.id !== checkId; });
         if (next.length === activeChecks.length) return;
         if (!window.confirm('刪除此檢查？')) return;
         activeChecks = next;
-        persistActiveChecks();
         if (editingCheckId === checkId) editingCheckId = null;
+        renderFromCache();
+        await persistActiveChecks();
         renderFromCache();
     }
 
@@ -822,7 +958,7 @@
         };
     }
 
-    function saveEditedCheck(checkId) {
+    async function saveEditedCheck(checkId) {
         if (!canSeeDataChecks()) return;
         loadActiveChecks();
         var edited = readEditorForm(checkId);
@@ -838,8 +974,9 @@
             return edited;
         });
         if (!found) activeChecks.push(edited);
-        persistActiveChecks();
         editingCheckId = null;
+        renderFromCache();
+        await persistActiveChecks();
         renderFromCache();
     }
 
@@ -1029,9 +1166,12 @@
             });
         }
         if (note) {
-            var saved = canSeeDataChecks() && !!readSavedChecks(currentUsername());
-            note.textContent = '已載入 ' + totalQuestions + ' 題 · 共 ' + results.length + ' 項檢查'
-                + (saved ? ' · 已儲存個人設定' : ' · 使用預設檢查');
+            var sourceLabel = checksSource === REMOTE_SOURCE
+                ? '共用資料庫'
+                : (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查');
+            var base = '已載入 ' + totalQuestions + ' 題 · 共 ' + results.length + ' 項檢查 · ' + sourceLabel;
+            note.setAttribute('data-dc-base', base);
+            note.textContent = checksStatusText ? (base + ' · ' + checksStatusText) : base;
         }
     }
 
@@ -1076,9 +1216,13 @@
         document.body.classList.add('data-checks-open');
         var body = document.getElementById('data-checks-body');
         if (body) {
-            body.innerHTML = '<p class="data-checks-empty">正在檢查題目…</p>';
+            body.innerHTML = '<p class="data-checks-empty">正在載入檢查設定與題目…</p>';
         }
-        loadActiveChecks();
+        checksStatusText = '';
+        await loadActiveChecksFromSource();
+        if (checksSource === REMOTE_SOURCE) setChecksStatus('已從共用資料庫載入');
+        else if (checksSource === CACHE_SOURCE) setChecksStatus('無法連線；顯示本機快取');
+        else setChecksStatus('共用檔尚未建立；使用預設檢查');
         await loadQuestionsForChecks();
         renderFromCache();
         var closeBtn = overlay.querySelector('.data-checks-close');

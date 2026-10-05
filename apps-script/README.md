@@ -143,6 +143,7 @@ Only `githubSync` (the admin role) sees **自動同步**, **上傳到 GitHub**, 
 
 - **上傳到 GitHub** sends the current question bank to `syncDataUpload`.
 - **從 GitHub 載入** calls `syncDataDownload` and replaces the browser’s IndexedDB copy.
+- Ken’s admin **資料檢查** panel uses `syncDataChecksDownload` / `syncDataChecksUpload` for `shared/data/data-checks.json` (same proxy; not the question bank).
 - With **自動同步** on, opening the page tries to load the private copy. Saving, deleting, importing, or exporting a question uploads the current bank. Clearing the database does not upload by itself.
 - Reloading the page loads questions only from the private repository `mas-repo/econ-database-data` through the Apps Script proxy. If that read fails, the page stays without questions and does not use a local copy.
 
