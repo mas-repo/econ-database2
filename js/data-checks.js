@@ -18,10 +18,13 @@
 //
 // How to add / edit / remove a check
 // ----------------------------------
-// Prefer the in-panel UI (標題、條件、例外、新增檢查). Edits are saved to the
-// private data repo (same Apps Script GitHub proxy as the question bank) at
-// shared/data/data-checks.json, and cached in localStorage for this browser.
-// The repo file is the source of truth across computers.
+// Prefer the in-panel UI (標題、條件、例外、新增檢查、強制上傳／下載). Edits are
+// saved to the private data repo (same Apps Script GitHub proxy as the question
+// bank) at shared/data/data-checks.json, and cached in localStorage for this
+// browser. The repo file is the source of truth across computers.
+// 強制上傳 writes the checks currently shown (including an open editor form).
+// 強制下載 reloads the remote file and replaces the panel; missing file keeps
+// the current checks.
 //
 // The DEFAULT_DATA_CHECKS list below remains the seed / fallback when the
 // remote file is missing. You can still edit that list in source:
@@ -344,6 +347,91 @@
             note.textContent = base + ' · ' + checksStatusText;
         } else {
             note.textContent = base;
+        }
+    }
+
+    function logChecksError(action, error) {
+        var code = (error && error.code) ? String(error.code) : 'unknown';
+        var detail = error && error.message ? String(error.message) : '';
+        var message = '[資料檢查] ' + action + ' failed (error code: ' + code + ')';
+        if (detail && detail !== code) message += ' — ' + detail;
+        console.error(message, error || null);
+    }
+
+    function captureShownChecks() {
+        loadActiveChecks();
+        if (editingCheckId) {
+            var edited = readEditorForm(editingCheckId);
+            if (edited && edited.conditions && edited.conditions.length) {
+                var found = false;
+                activeChecks = activeChecks.map(function (check) {
+                    if (check.id !== editingCheckId) return check;
+                    found = true;
+                    return edited;
+                });
+                if (!found) activeChecks.push(edited);
+            }
+        }
+        activeChecks = normalizeChecks(activeChecks);
+        return activeChecks;
+    }
+
+    async function forceUploadChecks() {
+        if (!canSeeDataChecks()) {
+            refreshDataChecksVisibility();
+            return;
+        }
+        if (checksBusy) return;
+        checksBusy = true;
+        setChecksStatus('正在強制上傳…');
+        try {
+            var checks = captureShownChecks();
+            await uploadChecksToRemote(checks);
+            writeSavedChecks(currentUsername(), checks);
+            checksSource = REMOTE_SOURCE;
+            setChecksStatus('已強制上傳到共用資料庫');
+            renderFromCache();
+        } catch (error) {
+            logChecksError('強制上傳', error);
+            var message = (typeof gitFailureText === 'function')
+                ? gitFailureText(error)
+                : '上傳失敗';
+            setChecksStatus('強制上傳失敗：' + message);
+        } finally {
+            checksBusy = false;
+        }
+    }
+
+    async function forceDownloadChecks() {
+        if (!canSeeDataChecks()) {
+            refreshDataChecksVisibility();
+            return;
+        }
+        if (checksBusy) return;
+        checksBusy = true;
+        setChecksStatus('正在強制下載…');
+        try {
+            var remote = await downloadChecksFromRemote();
+            activeChecks = remote;
+            editingCheckId = null;
+            checksSource = REMOTE_SOURCE;
+            writeSavedChecks(currentUsername(), activeChecks);
+            setChecksStatus('已強制下載並取代目前檢查');
+            renderFromCache();
+        } catch (error) {
+            var code = error && error.code ? error.code : '';
+            if (code === 'github_not_found') {
+                setChecksStatus('共用檔尚未建立；保留目前檢查');
+                renderFromCache();
+                return;
+            }
+            logChecksError('強制下載', error);
+            var message = (typeof gitFailureText === 'function')
+                ? gitFailureText(error)
+                : '下載失敗';
+            setChecksStatus('強制下載失敗：' + message);
+        } finally {
+            checksBusy = false;
         }
     }
 
@@ -685,6 +773,8 @@
             + '  <div class="data-checks-toolbar">'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-add">＋ 新增檢查</button>'
             + '    <button type="button" class="btn btn-secondary btn-sm" id="data-checks-reset-defaults">還原預設檢查</button>'
+            + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-force-upload">強制上傳</button>'
+            + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-force-download">強制下載</button>'
             + '  </div>'
             + '  <div class="data-checks-body" id="data-checks-body"></div>'
             + '  <footer class="data-checks-footer">'
@@ -703,6 +793,12 @@
         });
         overlay.querySelector('#data-checks-reset-defaults').addEventListener('click', function () {
             resetToDefaults();
+        });
+        overlay.querySelector('#data-checks-force-upload').addEventListener('click', function () {
+            forceUploadChecks();
+        });
+        overlay.querySelector('#data-checks-force-download').addEventListener('click', function () {
+            forceDownloadChecks();
         });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
