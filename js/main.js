@@ -146,6 +146,9 @@ async function initializeApp() {
     if (typeof initPoeGenerateFeature === 'function') {
         initPoeGenerateFeature();
     }
+    if (typeof initDataChecksFeature === 'function') {
+        initDataChecksFeature();
+    }
     if (typeof initGitSyncFeature === 'function') {
         initGitSyncFeature();
     }
