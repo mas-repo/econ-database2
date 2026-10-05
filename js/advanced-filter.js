@@ -246,9 +246,11 @@
             renderBody();
         });
         overlay.querySelector('#af-apply').addEventListener('click', function () {
-            var conditions = readRows();
+            var conditions = readRows().filter(function (condition) {
+                return String(condition.value == null ? '' : condition.value).length > 0;
+            });
             if (!conditions.length) {
-                window.alert('請至少保留一項條件。');
+                window.alert('請至少填寫一項有內容的條件。');
                 return;
             }
             draftConditions = conditions;
