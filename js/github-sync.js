@@ -91,13 +91,28 @@ function parseGitProxyJson(text) {
     return JSON.parse(cleaned);
 }
 
-async function gitProxyRequest(payload, timeoutMs) {
+// Match the AI出題 client: only short connection-style failures retry.
+// A parsed JSON body (ok:true or ok:false) is never retried.
+var GIT_PROXY_RETRY_MAX = 3;
+var GIT_PROXY_RETRY_BASE_MS = 1200;
+
+function gitProxyError(code) {
+    var error = new Error(code || 'network');
+    error.code = code || 'network';
+    return error;
+}
+
+function isRetryableGitProxyCode(code) {
+    return code === 'network' || code === 'bad_response' || code === 'empty_response';
+}
+
+function gitProxyActionName(payload) {
+    return payload && payload.action ? String(payload.action) : 'unknown';
+}
+
+async function gitProxyRequestOnce(payload, timeoutMs) {
     var url = gitProxyUrl();
-    if (!url) {
-        var missing = new Error('network');
-        missing.code = 'network';
-        throw missing;
-    }
+    if (!url) throw gitProxyError('network');
     var controller = new AbortController();
     var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
     try {
@@ -108,27 +123,50 @@ async function gitProxyRequest(payload, timeoutMs) {
             body: JSON.stringify(payload),
             signal: controller.signal
         });
+        // A body that already started reading must not be thrown away for a
+        // later retry. Parse what arrived; a real {ok:false} reply returns once.
         var text = await response.text();
+        if (!String(text || '').trim()) throw gitProxyError('empty_response');
         try {
             return parseGitProxyJson(text);
         } catch (error) {
-            var invalid = new Error('network');
-            invalid.code = 'network';
-            throw invalid;
+            throw gitProxyError('bad_response');
         }
     } catch (error) {
         if (error && error.code) throw error;
-        if (error && error.name === 'AbortError') {
-            var timeout = new Error('network');
-            timeout.code = 'network';
-            throw timeout;
-        }
-        var network = new Error('network');
-        network.code = 'network';
-        throw network;
+        if (error && error.name === 'AbortError') throw gitProxyError('network');
+        throw gitProxyError('network');
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function gitProxyRequest(payload, timeoutMs) {
+    var action = gitProxyActionName(payload);
+    var lastError = null;
+    for (var attempt = 1; attempt <= GIT_PROXY_RETRY_MAX; attempt++) {
+        var started = Date.now();
+        try {
+            return await gitProxyRequestOnce(payload, timeoutMs);
+        } catch (error) {
+            lastError = error;
+            var code = error && error.code ? error.code : 'network';
+            var elapsed = Date.now() - started;
+            // Only retry short connection failures. A long wait that ends in a
+            // bad body already used the attempt's timeout; do not stack three.
+            var canRetry = attempt < GIT_PROXY_RETRY_MAX
+                && isRetryableGitProxyCode(code)
+                && elapsed < 45000;
+            if (!canRetry) throw error;
+            console.warn(
+                '[gitProxyRequest] ' + action + ' failed (' + code + '); retry '
+                + attempt + '/' + GIT_PROXY_RETRY_MAX
+            );
+            var wait = GIT_PROXY_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+            await new Promise(function (resolve) { setTimeout(resolve, wait); });
+        }
+    }
+    throw lastError || gitProxyError('network');
 }
 
 async function refreshGitSyncAccess() {
