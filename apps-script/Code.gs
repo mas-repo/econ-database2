@@ -16,6 +16,9 @@
  *   GITHUB_DATA_PATH     (under shared prefix; shape data/database.json → shared/data/database.json)
  *   GITHUB_AI_BACKUP_DIR (inside each user's folder; shape ai-backups)
  *   GITHUB_SHARED_PREFIX (optional; shared when empty)
+ *   GITHUB_READ_TOKEN    (optional; fine-grained Contents: Read only — browser direct reads)
+ *   GITHUB_APP_ID / GITHUB_APP_INSTALLATION_ID / GITHUB_APP_PRIVATE_KEY
+ *                        (optional; preferred short-lived installation tokens for browser reads)
  *
  * Question-bank upload/download is shared for every githubSync user:
  *   <GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>
@@ -112,7 +115,8 @@ function doGet() {
     service: 'question-proxy',
     configured: key.length > 0,
     gitConfigured: githubDataReady_(git) && githubBackupReady_(git),
-    sharedConfigured: githubSharedReady_(git)
+    sharedConfigured: githubSharedReady_(git),
+    directReadConfigured: githubDirectReadReady_(git)
   });
 }
 
@@ -137,6 +141,7 @@ function handlePost_(e) {
   if (action === 'syncDataChecksDownload') return handleDataChecksDownload_(body);
   if (action === 'fetchSharedAsset') return handleFetchShared_(body);
   if (action === 'listSharedData') return handleListShared_(body);
+  if (action === 'issueSharedReadToken') return handleIssueSharedReadToken_(body);
   if (action === 'listAiBackups') return handleListAiBackups_(body);
   if (action === 'getAiBackup') return handleGetAiBackup_(body);
   if (action === 'listAiUsageRecords') return handleListAiUsageRecords_(body);
@@ -1572,6 +1577,46 @@ function handleDataChecksDownload_(body) {
   }
 }
 
+function handleIssueSharedReadToken_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = lookupRights_(username);
+  if (!username || !rights.known) return gitClientError_('feature_unavailable');
+  if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
+  var cfg = githubConfig_();
+  if (!githubDirectReadReady_(cfg)) return gitClientError_('github_not_configured');
+  var issued = null;
+  try {
+    issued = issueGithubDirectReadCredential_(cfg);
+  } catch (err) {
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+  if (!issued || !issued.token) return gitClientError_('github_not_configured');
+  writeLog_({
+    username: username,
+    action: 'issueSharedReadToken',
+    success: true,
+    metadata: {
+      tokenType: issued.tokenType,
+      expiresAt: issued.expiresAt || ''
+    }
+  }, false);
+  return {
+    ok: true,
+    token: issued.token,
+    tokenType: issued.tokenType,
+    expiresAt: issued.expiresAt,
+    expiresAtMs: issued.expiresAtMs,
+    owner: cfg.owner,
+    repo: cfg.repo,
+    branch: cfg.branch,
+    sharedPrefix: githubSharedPrefix_(cfg),
+    apiBase: 'https://api.github.com',
+    mockTests: rights.mockTests === true,
+    canReadDataChecks: canUseDataChecksSync_(username) === true
+  };
+}
+
 function handleFetchShared_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -2189,13 +2234,167 @@ function githubConfig_() {
   var stored = props_();
   return {
     token: String(stored.getProperty('GITHUB_TOKEN') || '').trim(),
+    readToken: String(stored.getProperty('GITHUB_READ_TOKEN') || '').trim(),
     owner: String(stored.getProperty('GITHUB_OWNER') || '').trim(),
     repo: String(stored.getProperty('GITHUB_REPO') || '').trim(),
     branch: String(stored.getProperty('GITHUB_BRANCH') || '').trim() || 'main',
     dataPath: String(stored.getProperty('GITHUB_DATA_PATH') || '').trim(),
     backupDir: String(stored.getProperty('GITHUB_AI_BACKUP_DIR') || '').trim(),
-    sharedPrefix: String(stored.getProperty('GITHUB_SHARED_PREFIX') || '').trim()
+    sharedPrefix: String(stored.getProperty('GITHUB_SHARED_PREFIX') || '').trim(),
+    appId: String(stored.getProperty('GITHUB_APP_ID') || '').trim(),
+    appInstallationId: String(stored.getProperty('GITHUB_APP_INSTALLATION_ID') || '').trim(),
+    appPrivateKey: githubAppPrivateKeyRaw_()
   };
+}
+
+function githubAppPrivateKeyRaw_() {
+  var raw = String(props_().getProperty('GITHUB_APP_PRIVATE_KEY') || '').trim();
+  if (!raw) return '';
+  if (raw.indexOf('\\n') !== -1) raw = raw.split('\\n').join('\n');
+  return raw;
+}
+
+function githubAppReady_(cfg) {
+  return !!(cfg
+    && cfg.appId
+    && /^\d+$/.test(String(cfg.appId))
+    && cfg.appInstallationId
+    && /^\d+$/.test(String(cfg.appInstallationId))
+    && cfg.appPrivateKey
+    && cfg.appPrivateKey.indexOf('PRIVATE KEY') !== -1
+    && githubIdentOk_(cfg.owner)
+    && githubIdentOk_(cfg.repo)
+    && githubBranchOk_(cfg.branch));
+}
+
+function githubReadPatReady_(cfg) {
+  return !!(cfg
+    && cfg.readToken
+    && cfg.readToken !== cfg.token
+    && githubIdentOk_(cfg.owner)
+    && githubIdentOk_(cfg.repo)
+    && githubBranchOk_(cfg.branch));
+}
+
+function githubDirectReadReady_(cfg) {
+  return githubAppReady_(cfg) || githubReadPatReady_(cfg);
+}
+
+function b64urlFromString_(text) {
+  return String(Utilities.base64EncodeWebSafe(String(text || ''))).replace(/=+$/g, '');
+}
+
+function b64urlFromBytes_(bytes) {
+  return String(Utilities.base64EncodeWebSafe(bytes)).replace(/=+$/g, '');
+}
+
+function githubAppJwt_(cfg) {
+  if (!githubAppReady_(cfg)) throw gitFail_('github_not_configured');
+  var now = Math.floor(Date.now() / 1000);
+  var header = b64urlFromString_(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  var payload = b64urlFromString_(JSON.stringify({
+    iat: now - 60,
+    exp: now + (9 * 60),
+    iss: String(cfg.appId)
+  }));
+  var signingInput = header + '.' + payload;
+  var signature;
+  try {
+    signature = Utilities.computeRsaSha256Signature(signingInput, cfg.appPrivateKey);
+  } catch (err) {
+    safeLog_(err);
+    throw gitFail_('github_error');
+  }
+  return signingInput + '.' + b64urlFromBytes_(signature);
+}
+
+function mintGithubInstallationToken_(cfg) {
+  if (!githubAppReady_(cfg)) throw gitFail_('github_not_configured');
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (ignore) { cache = null; }
+  var cacheKey = 'gh_install_read_v1';
+  if (cache) {
+    try {
+      var cached = cache.get(cacheKey);
+      if (cached) {
+        var parsed = JSON.parse(cached);
+        if (parsed && parsed.token && Number(parsed.expiresAtMs) > Date.now() + 120000) {
+          return {
+            token: String(parsed.token),
+            tokenType: 'installation',
+            expiresAt: String(parsed.expiresAt || ''),
+            expiresAtMs: Number(parsed.expiresAtMs)
+          };
+        }
+      }
+    } catch (ignoreCache) {}
+  }
+  var jwt = githubAppJwt_(cfg);
+  var response;
+  try {
+    response = UrlFetchApp.fetch(
+      'https://api.github.com/app/installations/' + encodeURIComponent(String(cfg.appInstallationId)) + '/access_tokens',
+      {
+        method: 'post',
+        muteHttpExceptions: true,
+        contentType: 'application/json; charset=utf-8',
+        payload: JSON.stringify({}),
+        headers: {
+          Authorization: 'Bearer ' + jwt,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'econ-database-proxy'
+        }
+      }
+    );
+  } catch (err) {
+    safeLog_(err);
+    throw gitFail_('github_error');
+  }
+  var status = response.getResponseCode();
+  var raw = response.getContentText() || '';
+  var body = null;
+  try { body = raw ? JSON.parse(raw) : null; } catch (ignore) { body = null; }
+  if (status < 200 || status >= 300 || !body || !body.token) {
+    safeGithubStatus_(status, body);
+    throw gitFail_('github_error');
+  }
+  var expiresAt = String(body.expires_at || '').trim();
+  var expiresAtMs = Date.parse(expiresAt);
+  if (!isFinite(expiresAtMs)) expiresAtMs = Date.now() + (50 * 60 * 1000);
+  var issued = {
+    token: String(body.token),
+    tokenType: 'installation',
+    expiresAt: expiresAt || new Date(expiresAtMs).toISOString(),
+    expiresAtMs: expiresAtMs
+  };
+  if (cache) {
+    var ttlSec = Math.max(60, Math.min(21600, Math.floor((expiresAtMs - Date.now()) / 1000) - 90));
+    try {
+      cache.put(cacheKey, JSON.stringify({
+        token: issued.token,
+        expiresAt: issued.expiresAt,
+        expiresAtMs: issued.expiresAtMs
+      }), ttlSec);
+    } catch (ignorePut) {}
+  }
+  return issued;
+}
+
+// Prefer a GitHub App installation token (about one hour). Fall back to a
+// dedicated read-only fine-grained PAT. Never return GITHUB_TOKEN (write).
+function issueGithubDirectReadCredential_(cfg) {
+  if (githubAppReady_(cfg)) return mintGithubInstallationToken_(cfg);
+  if (githubReadPatReady_(cfg)) {
+    var expiresAtMs = Date.now() + (15 * 60 * 1000);
+    return {
+      token: String(cfg.readToken),
+      tokenType: 'read_pat',
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      expiresAtMs: expiresAtMs
+    };
+  }
+  throw gitFail_('github_not_configured');
 }
 
 function githubDataReady_(cfg) {
@@ -2868,6 +3067,43 @@ function selfTestGitPaths() {
   if (githubPathOk_('a b.json')) throw new Error('path_space');
   if (!githubIdentOk_('example-user')) throw new Error('ident_ok');
   if (githubIdentOk_('owner/repo')) throw new Error('ident_slash');
+  if (githubReadPatReady_({
+    readToken: 'same',
+    token: 'same',
+    owner: 'example-user',
+    repo: 'example-repo',
+    branch: 'main'
+  })) throw new Error('read_pat_rejects_write_token');
+  if (!githubReadPatReady_({
+    readToken: 'read-only-token',
+    token: 'write-token',
+    owner: 'example-user',
+    repo: 'example-repo',
+    branch: 'main'
+  })) throw new Error('read_pat_ok');
+  if (githubAppReady_({
+    appId: '123',
+    appInstallationId: '456',
+    appPrivateKey: 'not-a-key',
+    owner: 'example-user',
+    repo: 'example-repo',
+    branch: 'main'
+  })) throw new Error('app_ready_rejects_bad_key');
+  if (b64urlFromString_('{}').indexOf('=') !== -1) throw new Error('b64url_padding');
+  var readCred = issueGithubDirectReadCredential_({
+    readToken: 'read-only-token',
+    token: 'write-token',
+    owner: 'example-user',
+    repo: 'example-repo',
+    branch: 'main',
+    appId: '',
+    appInstallationId: '',
+    appPrivateKey: ''
+  });
+  if (!readCred || readCred.token !== 'read-only-token' || readCred.tokenType !== 'read_pat') {
+    throw new Error('issue_read_pat');
+  }
+  if (readCred.token === 'write-token') throw new Error('issue_leaked_write');
   if (joinGithubPath_('ai-backups', '20260101-000000-000-generateQuestions-abcd1234.json') !== 'ai-backups/20260101-000000-000-generateQuestions-abcd1234.json') {
     throw new Error('join_path');
   }
@@ -3212,7 +3448,9 @@ function safeLog_(err) {
   var secrets = [
     props_().getProperty('POE_API_KEY'),
     props_().getProperty('OPENROUTER_API_KEY'),
-    props_().getProperty('GITHUB_TOKEN')
+    props_().getProperty('GITHUB_TOKEN'),
+    props_().getProperty('GITHUB_READ_TOKEN'),
+    props_().getProperty('GITHUB_APP_PRIVATE_KEY')
   ];
   secrets.forEach(function (secret) {
     var value = String(secret || '').trim();

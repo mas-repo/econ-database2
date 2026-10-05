@@ -75,7 +75,10 @@ class AuthManager {
         try {
             localStorage.removeItem('username');
             sessionStorage.removeItem('past_paper_permission'); // Clear permission cache
-        } catch (e) {}        
+        } catch (e) {}
+        if (typeof clearSharedReadSession === 'function') {
+            try { clearSharedReadSession(); } catch (ignore) {}
+        }
         this.currentUser = null;
         this.displayName = null;
         this.userGroup = null;

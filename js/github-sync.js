@@ -1,6 +1,6 @@
-// Git sync when the proxy sets githubSync. The browser only talks to the
-// Apps Script web app already used by AI出題. The token, owner, and repository
-// name stay in Script properties and are never read or stored here.
+// Git sync when the proxy sets githubSync. Uploads still go through Apps
+// Script with the server write token. Downloads prefer a short-lived read
+// credential (issueSharedReadToken) and fall back to syncDataDownload.
 // Auto-sync is a local preference only (localStorage).
 
 var GIT_AUTO_SYNC_KEY = 'econ_git_auto_sync';
@@ -263,10 +263,25 @@ async function downloadQuestionsFromGit(options) {
     await runGitJob(options.auto ? 'auto' : 'manual', async function () {
         setGitStatus('正在從 GitHub 載入…', '');
         try {
-            var data = await gitProxyRequest({
-                action: 'syncDataDownload',
-                username: gitUsername()
-            }, 180000);
+            var importedPayload = null;
+            var data = null;
+            if (typeof fetchSharedJsonDirectOrProxy === 'function') {
+                try {
+                    var direct = await fetchSharedJsonDirectOrProxy('data/database.json', 180000);
+                    if (direct && direct.data) {
+                        importedPayload = direct.data;
+                        data = { ok: true, data: direct.data, sha: direct.sha || '' };
+                    }
+                } catch (directErr) {
+                    importedPayload = null;
+                }
+            }
+            if (!importedPayload) {
+                data = await gitProxyRequest({
+                    action: 'syncDataDownload',
+                    username: gitUsername()
+                }, 180000);
+            }
             if (!data || data.ok !== true) {
                 var failed = new Error((data && data.error) || 'github_error');
                 failed.code = data && data.error ? data.error : 'github_error';

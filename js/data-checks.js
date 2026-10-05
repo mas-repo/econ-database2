@@ -64,8 +64,9 @@
 // Persistence
 // -----------
 // Source of truth across computers: shared/data/data-checks.json in
-// mas-repo/econ-database-data, via Apps Script syncDataChecksDownload /
-// syncDataChecksUpload (ken + githubSync). localStorage key
+// mas-repo/econ-database-data. Downloads prefer direct GitHub via
+// issueSharedReadToken; uploads stay on Apps Script syncDataChecksUpload
+// (ken + githubSync). localStorage key
 // econ_data_checks_v1:<username> is a session/cache. Auto-download is once
 // per session (or when cache is empty); 「下載」 forces a pull. Auto-upload
 // runs only after a real edit/add/delete. Missing remote file → keep
@@ -263,6 +264,16 @@
             var denied = new Error('feature_unavailable');
             denied.code = 'feature_unavailable';
             throw denied;
+        }
+        if (typeof fetchSharedJsonDirectOrProxy === 'function') {
+            try {
+                var direct = await fetchSharedJsonDirectOrProxy('data/data-checks.json', 60000);
+                if (direct && direct.data && Array.isArray(direct.data.checks)) {
+                    return normalizeChecks(direct.data.checks);
+                }
+            } catch (directErr) {
+                // Fall back to Apps Script syncDataChecksDownload.
+            }
         }
         if (typeof gitProxyRequest !== 'function') {
             var missing = new Error('network');

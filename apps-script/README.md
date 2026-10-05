@@ -104,7 +104,11 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 | `SPREADSHEET_ID` | only if the script is not bound | the id in the sheet URL |
 | `LOG_SHEET_NAME` | no | `UsageLog` |
 | `BACKUP_SHEET_NAME` | no | `GenerationBackup`. Do not point this at `UsageLog` or a data tab. If it matches the log tab name, the script uses `GenerationBackup` anyway. |
-| `GITHUB_TOKEN` | for Git sync | fine-grained PAT; Contents read and write on the private data repository only |
+| `GITHUB_TOKEN` | for Git sync / AI backups / write paths | fine-grained PAT; Contents **read and write** on the private data repository only. **Never sent to the browser.** |
+| `GITHUB_READ_TOKEN` | for direct browser reads (fallback) | separate fine-grained PAT; Contents **Read** only on the same private data repository. Issued to known users via `issueSharedReadToken`. Do not reuse `GITHUB_TOKEN`. |
+| `GITHUB_APP_ID` | preferred direct reads | numeric GitHub App id |
+| `GITHUB_APP_INSTALLATION_ID` | preferred direct reads | installation id on the data repository |
+| `GITHUB_APP_PRIVATE_KEY` | preferred direct reads | App private key PEM (Script property; literal `\n` allowed). Used only to mint ~1h installation tokens. |
 | `GITHUB_OWNER` | for Git sync | GitHub user or organization that owns the private data repository |
 | `GITHUB_REPO` | for Git sync | private repository name |
 | `GITHUB_BRANCH` | no | `main` when this property is empty |
@@ -135,7 +139,7 @@ In `econ-database/js/config.js`, set `POE_PROXY_WEB_APP_URL` to that `/exec` URL
 
 Reload the site and sign in. **AI出題** appears only when `ai` is true. **管理員模式** appears only when `admin` is true. The GitHub panel appears only when `githubSync` is true. Mock-test questions and the mock publisher filter appear only when `mockTests` is true. A failed check leaves those controls hidden and does not say why.
 
-Opening the `/exec` URL in a browser should return JSON like `{ "ok": true, "service": "question-proxy", "configured": true, "gitConfigured": false, "sharedConfigured": false }`. `configured` only means a Poe key is present. `gitConfigured` is true only when the token, owner, repository, data path, and backup directory are all non-empty and well formed. `sharedConfigured` is true when the token, owner, repository, branch, and shared prefix are well formed. An empty `GITHUB_SHARED_PREFIX` still counts as configured, because the script uses `shared`. The response does not list users and does not contain the token, owner, repository name, or the prefix.
+Opening the `/exec` URL in a browser should return JSON like `{ "ok": true, "service": "question-proxy", "configured": true, "gitConfigured": false, "sharedConfigured": false, "directReadConfigured": false }`. `configured` only means a Poe key is present. `gitConfigured` is true only when the write token, owner, repository, data path, and backup directory are all non-empty and well formed. `sharedConfigured` is true when the write token, owner, repository, branch, and shared prefix are well formed. `directReadConfigured` is true when either the GitHub App trio (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`) or `GITHUB_READ_TOKEN` is ready. An empty `GITHUB_SHARED_PREFIX` still counts as configured, because the script uses `shared`. The GET response does not list users and does not contain any token.
 
 ## GitHub sync
 
@@ -178,7 +182,41 @@ The private repository needs at least one commit on that branch (a README create
 
 ## Shared assets
 
-GitHub Pages cannot read a private repository. Requesting a private raw file without a token returns 404. Putting the token in the page would expose the whole private repository, so the page never does that. `fetchSharedAsset` and `listSharedData` use the Script properties token and return only the file, or a directory listing, to a known username.
+GitHub Pages cannot read a private repository without credentials. Large file bodies must not travel through the Apps Script `googleusercontent` echo path (intermittent 404s / truncated JSON). Layering:
+
+1. **Bulk reads (question bank, images, shared assets, data-checks download):** Apps Script validates the username, then `issueSharedReadToken` returns a **read-only** credential plus `owner` / `repo` / `branch` / `sharedPrefix`. The browser fetches from `api.github.com` directly. The token is kept only in memory (never `localStorage`), cleared on logout / `pagehide` / expiry. Unknown usernames get `feature_unavailable` and no token.
+2. **AI出題:** stays on Apps Script (`ai` right, Poe/OpenRouter, AI backups). Normal `ai` users do **not** receive write credentials.
+3. **Writes / githubSync / data-checks upload:** stay on Apps Script with `GITHUB_TOKEN` (admin / ken). The browser never receives that write token.
+
+### Choosing a read credential (hypotheses)
+
+| Option | Verdict |
+| --- | --- |
+| Hand out `GITHUB_TOKEN` (write PAT) | Rejected — would give normal users write access |
+| GitHub signed URLs | Not available for private Contents API |
+| **GitHub App installation token** (`GITHUB_APP_*`) | **Preferred** — ~1 hour, Contents: Read on the data repo only |
+| **`GITHUB_READ_TOKEN` fine-grained PAT (Contents: Read)** | Fallback when no App is configured — long-lived secret on the server; client treats it as a 15-minute session and re-requests |
+
+Residual risk: any repo-scoped read credential can read the whole private data repository (including `users/…` AI backups and `shared/data/data-checks.json`). Path allowlisting is enforced in the client and in Apps Script fallbacks; it is not a GitHub platform path ACL. Prefer the App installation token and keep AI writes on Apps Script. A future split of shared assets vs personal backups into separate repos would tighten this further.
+
+### Setup (direct read)
+
+**Preferred — GitHub App**
+
+1. Create a GitHub App with **Repository permissions → Contents: Read-only** (and Metadata: Read-only). No write permissions.
+2. Install it on `mas-repo/econ-database-data` only.
+3. Set Script properties `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM; you may store newlines as `\n`).
+4. Redeploy the web app after pasting the new `Code.gs`.
+
+**Fallback — read-only PAT**
+
+1. Create a fine-grained PAT with Contents: **Read** on the data repository only.
+2. Store it as `GITHUB_READ_TOKEN` (must differ from `GITHUB_TOKEN`).
+3. Property-only change applies immediately; still redeploy if `Code.gs` was updated.
+
+`issueSharedReadToken` — `{ "action": "issueSharedReadToken", "username" }` → `{ "ok": true, "token", "tokenType": "installation"|"read_pat", "expiresAt", "expiresAtMs", "owner", "repo", "branch", "sharedPrefix", "apiBase", "mockTests", "canReadDataChecks" }`. Requires a known username. Never returns `GITHUB_TOKEN`.
+
+`fetchSharedAsset` / `listSharedData` remain as fallbacks when direct issuance fails. They still use the server write token server-side and return file bodies through Apps Script.
 
 `GITHUB_SHARED_PREFIX` defaults to `shared` when the property is empty. It must not be `users` or a path under `users`. The client sends a path relative to that prefix. The script joins the two and refuses `..`, a leading slash, and any path whose first folder is not one of `data`, `diagrams`, `originals`, `papers`, or `build`.
 
@@ -192,21 +230,21 @@ Expected layout inside the private repository:
 - `shared/papers/past-papers/` — past-paper packs
 - `shared/build/` — classification JSON used by the import scripts
 
-`users/<username>/` holds personal AI出題 backups only and is not readable through these shared-asset actions. Question-bank sync writes the shared bank under `shared/data/…`, not under `users/`.
+`users/<username>/` holds personal AI出題 backups only and is not readable through the shared-asset Apps Script actions. Question-bank sync writes the shared bank under `shared/data/…`, not under `users/`.
 
 `fetchSharedAsset` returns `{ "ok": true, "path", "encoding", "mediaType", "bytes", "content" }`. Text files (`.json`, `.js`, `.jsonl`, `.txt`, `.md`) use `encoding: "utf8"`. Images and other allowed files use `encoding: "base64"`. The path in the response is the client-relative path, not a GitHub URL. Files larger than 9 MB return `payload_too_large`. The question bank and the images are under that cap. Some past-paper PDFs are larger; `listSharedData` still lists them, and they are read from the private checkout by the import scripts rather than streamed through the web app.
 
 `listSharedData` takes `path` (a directory such as `papers/mock-tests`, or empty for the shared root) and optional `recursive: true`. It returns `{ "ok": true, "path", "truncated", "entries": [{ "path", "type", "size" }] }` with at most 8000 entries. `type` is `file` or `dir`.
 
-Both actions require a known username (admin, AI editor, or restricted). They do not require `ai` or `githubSync`. Without `mockTests`, `data/database.json` is returned with mock-test rows removed, and `data/database.js`, `build/`, `diagrams/`, `papers/mock-tests/`, and numbered `originals/<digits>/` folders return `feature_unavailable`. `originals/dse/` and `papers/past-papers/` stay available. An unknown username gets `feature_unavailable` and does not receive the bank. A refused call does not say whether GitHub is configured. There is a per-username cap of 120 shared reads per minute (`rate_limited`). The page loads the bank once, then loads each diagram or original image when it is shown.
+Both list/fetch actions and `issueSharedReadToken` require a known username (admin, AI editor, or restricted). They do not require `ai` or `githubSync`. Without `mockTests`, `data/database.json` is returned/stripped with mock-test rows removed (Apps Script strip, or client-side strip on direct reads), and `data/database.js`, `build/`, `diagrams/`, `papers/mock-tests/`, and numbered `originals/<digits>/` folders return `feature_unavailable`. `originals/dse/` and `papers/past-papers/` stay available. An unknown username gets `feature_unavailable` and does not receive the bank or a read token. A refused call does not say whether GitHub is configured. There is a per-username cap of 120 shared reads per minute (`rate_limited`). The page loads the bank once, then loads each diagram or original image when it is shown.
 
-`sharedConfigured` on a GET of `/exec` is true when a shared read can be attempted. It does not reveal the prefix.
+`sharedConfigured` on a GET of `/exec` is true when a shared read can be attempted via Apps Script. `directReadConfigured` is true when App or `GITHUB_READ_TOKEN` credentials are ready. GET does not reveal the prefix or any token.
 
-Copy the files into a local checkout of the private repository with `econ-database/scripts/stage_shared_assets.py`, then commit them there. That script does not contain a token. After `Code.gs` changes, paste this file into the live Apps Script project and deploy a new version. Property-only edits, including `GITHUB_SHARED_PREFIX`, apply immediately.
+Copy the files into a local checkout of the private repository with `econ-database/scripts/stage_shared_assets.py`, then commit them there. That script does not contain a token. After `Code.gs` changes, paste this file into the live Apps Script project and deploy a new version. Property-only edits, including `GITHUB_SHARED_PREFIX` and `GITHUB_READ_TOKEN`, apply immediately; code changes do not until redeploy.
 
 The public site must not commit these assets. When publishing `econ-database/` to the public Pages repository `mas-repo/econ-database2`, do not restore `data/database.json`, `diagrams/`, `originals/`, `MockTests/`, or `PastPaper/` from an older public commit.
 
-The public question file is several megabytes, which is over the Contents API blob limit. Small files, including each AI backup, use the Contents API. The question bank uses the Git Data API when it is larger. The browser still only sees `ok` or `error`, and maybe a commit `sha` and the relative `path`.
+The public question file is several megabytes. Direct browser reads use the Contents API and, when needed, the Git blobs API. Apps Script fallback still uses Contents / Git Data APIs server-side.
 
 ### Model reply backup
 
