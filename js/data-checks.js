@@ -18,11 +18,13 @@
 //
 // How to add / edit / remove a check
 // ----------------------------------
-// Prefer the in-panel UI (標題、條件、例外、新增檢查). On open the panel shows
-// localStorage cache (or DEFAULT_DATA_CHECKS) and counts immediately, then
-// refreshes from shared/data/data-checks.json in the background. Mutating
-// controls stay disabled until that remote load finishes. Saves still upload
-// through the Apps Script GitHub proxy; localStorage is a cache.
+// Prefer the in-panel UI (標題、條件、例外、新增檢查、下載). On open the panel
+// shows localStorage cache (or DEFAULT_DATA_CHECKS) and counts immediately.
+// Automatic syncDataChecksDownload runs only on the first open in a session,
+// or when this browser has no usable cache; later opens reuse localStorage.
+// Use 「下載」 to pull the shared file manually. Mutating controls stay disabled
+// while a remote load is in flight. Saves upload only when the check list
+// actually changed.
 //
 // The DEFAULT_DATA_CHECKS list below remains the seed / fallback when the
 // remote file is missing. You can still edit that list in source:
@@ -61,12 +63,13 @@
 //
 // Persistence
 // -----------
-// Source of truth: shared/data/data-checks.json in mas-repo/econ-database-data,
-// read/written through Apps Script actions syncDataChecksDownload /
-// syncDataChecksUpload (same proxy/commit path as database.json; ken +
-// githubSync only). localStorage key econ_data_checks_v1:<username> is a
-// cache only. Missing remote file → DEFAULT_DATA_CHECKS (does not wipe the
-// bank). Question bank data is never written by this feature.
+// Source of truth across computers: shared/data/data-checks.json in
+// mas-repo/econ-database-data, via Apps Script syncDataChecksDownload /
+// syncDataChecksUpload (ken + githubSync). localStorage key
+// econ_data_checks_v1:<username> is a session/cache. Auto-download is once
+// per session (or when cache is empty); 「下載」 forces a pull. Auto-upload
+// runs only after a real edit/add/delete. Missing remote file → keep
+// cache/defaults (does not wipe the bank).
 //
 // Clicking a needs-handling ID clears the question filters, sets search scope
 // to 題目 ID, fills that id, switches to the 題目 tab, and runs filterQuestions
@@ -197,6 +200,10 @@
     var conditionRowSeq = 0;
     var mutationsLocked = false;
     var remoteLoadToken = 0;
+    // After the first auto remote fetch in this page session succeeds or
+    // completes, later opens skip syncDataChecksDownload unless cache is empty.
+    var sessionRemoteFetchDone = false;
+    var lastSyncedFingerprint = '';
 
     function currentUsername() {
         if (typeof gitUsername === 'function') {
@@ -403,8 +410,25 @@
         return payload.checks;
     }
 
+    function fingerprintChecks(checks) {
+        return JSON.stringify(normalizeChecks(checks));
+    }
+
+    function markChecksSynced(checks) {
+        lastSyncedFingerprint = fingerprintChecks(checks);
+    }
+
+    function hasUsableLocalCache() {
+        return !!readSavedChecks(currentUsername());
+    }
+
+    function shouldAutoDownloadOnOpen() {
+        if (!hasUsableLocalCache()) return true;
+        return !sessionRemoteFetchDone;
+    }
+
     async function loadActiveChecksFromSource() {
-        // Kept for compatibility; open path uses cache-first + background remote.
+        // Kept for compatibility; open path uses cache-first + optional remote.
         return loadChecksFromLocalCache();
     }
 
@@ -437,6 +461,8 @@
     function applyToolbarLock() {
         var addBtn = document.getElementById('data-checks-add');
         if (addBtn) addBtn.disabled = mutationsLocked;
+        var downloadBtn = document.getElementById('data-checks-download');
+        if (downloadBtn) downloadBtn.disabled = mutationsLocked;
     }
 
     function setMutationsLocked(locked) {
@@ -453,33 +479,52 @@
         console.error(message, error || null);
     }
 
-    async function refreshChecksFromRemoteInBackground(token) {
+    async function refreshChecksFromRemoteInBackground(token, options) {
+        options = options || {};
+        var isManual = options.manual === true;
         try {
             var remote = await downloadChecksFromRemote();
             if (token !== remoteLoadToken) return;
-            if (!overlay || overlay.hidden) {
-                setMutationsLocked(false);
-                return;
-            }
+            sessionRemoteFetchDone = true;
             activeChecks = remote;
             checksSource = REMOTE_SOURCE;
             writeSavedChecks(currentUsername(), activeChecks);
+            markChecksSynced(activeChecks);
             setMutationsLocked(false);
-            setChecksStatus('已從共用資料庫載入');
+            if (!overlay || overlay.hidden) return;
+            setChecksStatus(isManual ? '已下載共用設定' : '已從共用資料庫載入');
             renderFromCache();
         } catch (error) {
             if (token !== remoteLoadToken) return;
+            sessionRemoteFetchDone = true;
             logRemoteLoadError(error);
             setMutationsLocked(false);
             if (!overlay || overlay.hidden) return;
             var code = error && error.code ? error.code : '';
             if (code === 'github_not_found') {
+                markChecksSynced(activeChecks);
                 setChecksStatus('共用檔尚未建立；保留' + (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查'));
             } else {
-                setChecksStatus('同步失敗；保留' + (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查'));
+                setChecksStatus((isManual ? '下載失敗' : '同步失敗') + '；保留' + (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查'));
             }
             renderFromCache();
         }
+    }
+
+    function startRemoteDownload(options) {
+        options = options || {};
+        setMutationsLocked(true);
+        setChecksStatus(options.manual ? '正在下載共用設定…' : '正在同步共用設定…');
+        renderFromCache();
+        applyToolbarLock();
+        var token = ++remoteLoadToken;
+        refreshChecksFromRemoteInBackground(token, options);
+        return token;
+    }
+
+    async function manualDownloadChecks() {
+        if (!canSeeDataChecks() || mutationsLocked) return;
+        startRemoteDownload({ manual: true });
     }
 
     async function persistActiveChecks() {
@@ -487,6 +532,11 @@
         if (mutationsLocked) return false;
         activeChecks = normalizeChecks(activeChecks);
         writeSavedChecks(currentUsername(), activeChecks);
+        var fingerprint = fingerprintChecks(activeChecks);
+        if (fingerprint === lastSyncedFingerprint) {
+            setChecksStatus('沒有變更，略過上傳');
+            return true;
+        }
         if (checksBusy) return false;
         checksBusy = true;
         setChecksStatus('正在儲存到資料庫…');
@@ -494,6 +544,7 @@
             await uploadChecksToRemote(activeChecks);
             checksSource = REMOTE_SOURCE;
             writeSavedChecks(currentUsername(), activeChecks);
+            markChecksSynced(activeChecks);
             setChecksStatus('已儲存到共用資料庫');
             return true;
         } catch (error) {
@@ -725,6 +776,7 @@
             + '  </header>'
             + '  <div class="data-checks-toolbar">'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-add">＋ 新增檢查</button>'
+            + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-download">下載</button>'
             + '  </div>'
             + '  <div class="data-checks-body" id="data-checks-body"></div>'
             + '  <footer class="data-checks-footer">'
@@ -740,6 +792,9 @@
         overlay.querySelector('#data-checks-done').addEventListener('click', closeDataChecksPanel);
         overlay.querySelector('#data-checks-add').addEventListener('click', function () {
             addBlankCheck();
+        });
+        overlay.querySelector('#data-checks-download').addEventListener('click', function () {
+            manualDownloadChecks();
         });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
@@ -1254,16 +1309,18 @@
         editingCheckId = null;
         checksStatusText = '';
         loadChecksFromLocalCache();
-        setMutationsLocked(true);
-        setChecksStatus('正在同步共用設定…');
+        markChecksSynced(activeChecks);
 
-        var token = ++remoteLoadToken;
-        // Remote sync stays in the background; never block first paint on it.
-        refreshChecksFromRemoteInBackground(token);
+        var autoDownload = shouldAutoDownloadOnOpen();
+        if (autoDownload) {
+            startRemoteDownload({ manual: false });
+        } else {
+            setMutationsLocked(false);
+            setChecksStatus(checksSource === CACHE_SOURCE ? '使用本機快取' : '使用預設檢查');
+        }
 
         if (!Array.isArray(cachedQuestions)) {
             await loadQuestionsForChecks();
-            if (token !== remoteLoadToken) return;
             if (!overlay || overlay.hidden) return;
         }
         renderFromCache();
