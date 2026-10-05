@@ -5,7 +5,6 @@
 //
 // UI mirrors data-checks condition rows (包含/不包括 + field + value, AND).
 // Apply intersects with existing filters via window.advancedFilter.
-// 「篩選全部待處理」applies matching IDs through applyConditionsAsIdSet.
 //
 // Dependencies: ConditionMatch, question-list-filter.js, storage.
 
