@@ -108,7 +108,7 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 | `GITHUB_READ_TOKEN` | for direct browser reads (fallback) | separate fine-grained PAT; Contents **Read** only on the same private data repository. Issued to known users via `issueSharedReadToken`. Do not reuse `GITHUB_TOKEN`. |
 | `GITHUB_APP_ID` | preferred direct reads | numeric GitHub App id |
 | `GITHUB_APP_INSTALLATION_ID` | preferred direct reads | installation id on the data repository |
-| `GITHUB_APP_PRIVATE_KEY` | preferred direct reads | App private key PEM (Script property; literal `\n` allowed). Used only to mint ~1h installation tokens. |
+| `GITHUB_APP_PRIVATE_KEY` | preferred direct reads | App private key PEM. GitHub downloads are often `-----BEGIN RSA PRIVATE KEY-----` (PKCS#1); Apps Script signing needs PKCS#8 `-----BEGIN PRIVATE KEY-----`. The script converts PKCS#1 → PKCS#8 automatically. Literal `\n` in the property value is fine. |
 | `GITHUB_OWNER` | for Git sync | GitHub user or organization that owns the private data repository |
 | `GITHUB_REPO` | for Git sync | private repository name |
 | `GITHUB_BRANCH` | no | `main` when this property is empty |
@@ -205,8 +205,10 @@ Residual risk: any repo-scoped read credential can read the whole private data r
 
 1. Create a GitHub App with **Repository permissions → Contents: Read-only** (and Metadata: Read-only). No write permissions.
 2. Install it on `mas-repo/econ-database-data` only.
-3. Set Script properties `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM; you may store newlines as `\n`).
+3. Set Script properties `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`. Paste the PEM as downloaded from GitHub (PKCS#1 `RSA PRIVATE KEY` is OK — the script rewrites it to PKCS#8 for `Utilities.computeRsaSha256Signature`). You may store newlines as `\n`.
 4. Redeploy the web app after pasting the new `Code.gs`.
+
+If `issueSharedReadToken` fails, the client-safe errors are `github_app_jwt` (PEM/signing) or `github_app_install` (installation token HTTP failure). UsageLog metadata may include `httpStatus`. Secrets are never returned.
 
 **Fallback — read-only PAT**
 
@@ -214,7 +216,7 @@ Residual risk: any repo-scoped read credential can read the whole private data r
 2. Store it as `GITHUB_READ_TOKEN` (must differ from `GITHUB_TOKEN`).
 3. Property-only change applies immediately; still redeploy if `Code.gs` was updated.
 
-`issueSharedReadToken` — `{ "action": "issueSharedReadToken", "username" }` → `{ "ok": true, "token", "tokenType": "installation"|"read_pat", "expiresAt", "expiresAtMs", "owner", "repo", "branch", "sharedPrefix", "apiBase", "mockTests", "canReadDataChecks" }`. Requires a known username. Never returns `GITHUB_TOKEN`.
+`issueSharedReadToken` — `{ "action": "issueSharedReadToken", "username" }` → `{ "ok": true, "token", "tokenType": "installation"|"read_pat", "expiresAt", "expiresAtMs", "owner", "repo", "branch", "sharedPrefix", "apiBase", "mockTests", "canReadDataChecks" }`. Requires a known username. Never returns `GITHUB_TOKEN`. Failures: `github_app_jwt`, `github_app_install`, `github_not_configured`, `feature_unavailable`, `rate_limited`.
 
 `fetchSharedAsset` / `listSharedData` remain as fallbacks when direct issuance fails. They still use the server write token server-side and return file bodies through Apps Script.
 

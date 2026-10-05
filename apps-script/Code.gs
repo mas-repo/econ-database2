@@ -1589,7 +1589,18 @@ function handleIssueSharedReadToken_(body) {
     issued = issueGithubDirectReadCredential_(cfg);
   } catch (err) {
     safeLog_(err);
-    return gitClientError_(err && err.code ? err.code : 'github_error');
+    var failCode = err && err.code ? err.code : 'github_error';
+    var meta = { error: failCode };
+    if (err && typeof err.httpStatus === 'number') meta.httpStatus = err.httpStatus;
+    writeLog_({
+      username: username,
+      action: 'issueSharedReadToken',
+      success: false,
+      metadata: meta
+    }, true);
+    console.error('issueSharedReadToken failed: ' + failCode
+      + (meta.httpStatus ? (' http_' + meta.httpStatus) : ''));
+    return gitClientError_(failCode);
   }
   if (!issued || !issued.token) return gitClientError_('github_not_configured');
   writeLog_({
@@ -2251,7 +2262,86 @@ function githubAppPrivateKeyRaw_() {
   var raw = String(props_().getProperty('GITHUB_APP_PRIVATE_KEY') || '').trim();
   if (!raw) return '';
   if (raw.indexOf('\\n') !== -1) raw = raw.split('\\n').join('\n');
-  return raw;
+  raw = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return normalizeGithubAppPrivateKeyPem_(raw);
+}
+
+// Utilities.computeRsaSha256Signature expects PKCS#8 ("BEGIN PRIVATE KEY").
+// GitHub App downloads are often PKCS#1 ("BEGIN RSA PRIVATE KEY").
+function normalizeGithubAppPrivateKeyPem_(pem) {
+  var text = String(pem || '').trim();
+  if (!text) return '';
+  if (text.indexOf('\\n') !== -1) text = text.split('\\n').join('\n');
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (/-----BEGIN PRIVATE KEY-----/.test(text) && !/-----BEGIN RSA PRIVATE KEY-----/.test(text)) {
+    return text;
+  }
+  if (!/-----BEGIN RSA PRIVATE KEY-----/.test(text)) {
+    return /PRIVATE KEY/.test(text) ? text : '';
+  }
+  var body = text
+    .replace(/-----BEGIN RSA PRIVATE KEY-----/g, '')
+    .replace(/-----END RSA PRIVATE KEY-----/g, '')
+    .replace(/\s+/g, '');
+  if (!body) return '';
+  var pkcs1;
+  try {
+    pkcs1 = gasBytesToJs_(Utilities.base64Decode(body));
+  } catch (err) {
+    return '';
+  }
+  if (!pkcs1.length) return '';
+  var pkcs8;
+  try {
+    pkcs8 = wrapRsaPkcs1ToPkcs8_(pkcs1);
+  } catch (wrapErr) {
+    return '';
+  }
+  return encodePemBlock_('PRIVATE KEY', pkcs8);
+}
+
+function gasBytesToJs_(bytes) {
+  var out = [];
+  for (var i = 0; i < bytes.length; i++) {
+    var v = bytes[i];
+    out.push(v < 0 ? v + 256 : Number(v));
+  }
+  return out;
+}
+
+function asn1Tlv_(tag, content) {
+  var len = content.length;
+  var header = [tag];
+  if (len < 0x80) {
+    header.push(len);
+  } else if (len < 0x100) {
+    header.push(0x81, len);
+  } else if (len < 0x10000) {
+    header.push(0x82, (len >> 8) & 0xff, len & 0xff);
+  } else if (len < 0x1000000) {
+    header.push(0x83, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff);
+  } else {
+    throw new Error('asn1_len');
+  }
+  return header.concat(content);
+}
+
+// PrivateKeyInfo { version 0, rsaEncryption, OCTET STRING(RSAPrivateKey) }
+function wrapRsaPkcs1ToPkcs8_(pkcs1) {
+  var algId = [
+    0x30, 0x0d,
+    0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
+    0x05, 0x00
+  ];
+  var version = [0x02, 0x01, 0x00];
+  var privateKeyOctet = asn1Tlv_(0x04, pkcs1);
+  return asn1Tlv_(0x30, version.concat(algId, privateKeyOctet));
+}
+
+function encodePemBlock_(label, jsBytes) {
+  var b64 = Utilities.base64Encode(jsBytes);
+  var lines = String(b64).match(/.{1,64}/g) || [];
+  return '-----BEGIN ' + label + '-----\n' + lines.join('\n') + '\n-----END ' + label + '-----';
 }
 
 function githubAppReady_(cfg) {
@@ -2261,7 +2351,7 @@ function githubAppReady_(cfg) {
     && cfg.appInstallationId
     && /^\d+$/.test(String(cfg.appInstallationId))
     && cfg.appPrivateKey
-    && cfg.appPrivateKey.indexOf('PRIVATE KEY') !== -1
+    && /-----BEGIN PRIVATE KEY-----/.test(String(cfg.appPrivateKey))
     && githubIdentOk_(cfg.owner)
     && githubIdentOk_(cfg.repo)
     && githubBranchOk_(cfg.branch));
@@ -2303,7 +2393,12 @@ function githubAppJwt_(cfg) {
     signature = Utilities.computeRsaSha256Signature(signingInput, cfg.appPrivateKey);
   } catch (err) {
     safeLog_(err);
-    throw gitFail_('github_error');
+    console.error('github_app_jwt signing failed');
+    throw gitFail_('github_app_jwt');
+  }
+  if (!signature || !signature.length) {
+    console.error('github_app_jwt empty signature');
+    throw gitFail_('github_app_jwt');
   }
   return signingInput + '.' + b64urlFromBytes_(signature);
 }
@@ -2349,7 +2444,8 @@ function mintGithubInstallationToken_(cfg) {
     );
   } catch (err) {
     safeLog_(err);
-    throw gitFail_('github_error');
+    console.error('github_app_install fetch failed');
+    throw gitFail_('github_app_install');
   }
   var status = response.getResponseCode();
   var raw = response.getContentText() || '';
@@ -2357,7 +2453,8 @@ function mintGithubInstallationToken_(cfg) {
   try { body = raw ? JSON.parse(raw) : null; } catch (ignore) { body = null; }
   if (status < 200 || status >= 300 || !body || !body.token) {
     safeGithubStatus_(status, body);
-    throw gitFail_('github_error');
+    console.error('github_app_install http_' + status);
+    throw gitFail_('github_app_install', status);
   }
   var expiresAt = String(body.expires_at || '').trim();
   var expiresAtMs = Date.parse(expiresAt);
@@ -2759,9 +2856,10 @@ function extractQuestions_(data) {
   return { ok: true, questions: questions };
 }
 
-function gitFail_(code) {
+function gitFail_(code, httpStatus) {
   var err = new Error(code || 'github_error');
   err.code = code || 'github_error';
+  if (typeof httpStatus === 'number' && isFinite(httpStatus)) err.httpStatus = httpStatus;
   return err;
 }
 
@@ -2771,6 +2869,8 @@ function gitClientError_(code) {
     github_not_configured: true,
     github_not_found: true,
     github_error: true,
+    github_app_jwt: true,
+    github_app_install: true,
     bad_request: true,
     payload_too_large: true,
     rate_limited: true,
@@ -3089,6 +3189,23 @@ function selfTestGitPaths() {
     repo: 'example-repo',
     branch: 'main'
   })) throw new Error('app_ready_rejects_bad_key');
+  // Minimal PKCS#1 body (not a real key) — only checks PEM wrap shape.
+  var fakePkcs1 = '-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----';
+  var normalizedPem = normalizeGithubAppPrivateKeyPem_(fakePkcs1);
+  if (!normalizedPem || normalizedPem.indexOf('BEGIN PRIVATE KEY') === -1) {
+    throw new Error('pkcs1_to_pkcs8');
+  }
+  if (normalizedPem.indexOf('BEGIN RSA PRIVATE KEY') !== -1) throw new Error('pkcs1_left_over');
+  var alreadyPkcs8 = '-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----';
+  if (normalizeGithubAppPrivateKeyPem_(alreadyPkcs8) !== alreadyPkcs8) {
+    throw new Error('pkcs8_passthrough');
+  }
+  if (gitClientError_('github_app_jwt').error !== 'github_app_jwt') throw new Error('client_error_jwt');
+  if (gitClientError_('github_app_install').error !== 'github_app_install') throw new Error('client_error_install');
+  var failInstall = gitFail_('github_app_install', 401);
+  if (failInstall.code !== 'github_app_install' || failInstall.httpStatus !== 401) {
+    throw new Error('git_fail_status');
+  }
   if (b64urlFromString_('{}').indexOf('=') !== -1) throw new Error('b64url_padding');
   var readCred = issueGithubDirectReadCredential_({
     readToken: 'read-only-token',
