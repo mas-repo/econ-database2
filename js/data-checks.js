@@ -34,11 +34,14 @@
 //   id: 'stable-slug',
 //   name: 'Short Traditional Chinese label',
 //   conditions: [
-//     // Stored as type + value (same meaning as the editor checkboxes):
-//     //   包含+字串 → textContains,  不包括+字串 → textNotContains,
-//     //   包含+概念 → conceptPresent, 不包括+概念 → conceptAbsent
-//     { type: 'textContains', value: '機會成本' },
-//     { type: 'conceptAbsent', value: '機會成本' }
+//     // Preferred shape (saved by the editor):
+//     //   { include: true|false, field: '<real field id>', value: '…' }
+//     // field ids are the bank / filter properties, e.g. text, concepts,
+//     // graphType, tableType, AristochapterClassification, patterns, …
+//     // Legacy type-only rows still load:
+//     //   textContains / textNotContains / conceptPresent / conceptAbsent
+//     { include: true, field: 'text', value: '機會成本' },
+//     { include: false, field: 'concepts', value: '機會成本' }
 //   ],
 //   // Question IDs (same format as question.id), e.g. 'DSE-2026-P1-01'.
 //   // An exception still matches the conditions, but is excluded from the
@@ -48,9 +51,10 @@
 //
 // Condition editor
 // ----------------
-// Each condition row has two checkbox pairs (exactly one checked in each pair):
-//   「包含」/「不包括」 and 「字串」/「概念」, plus a value box.
-// Old saved type fields (and include/field if present) map onto those checkboxes.
+// Each condition row: 「包含」/「不包括」 (exactly one), a field <select> of
+// real filterable question fields, and a value box. Category fields offer
+// autocomplete from values present in the loaded bank. 字串 (question text)
+// is free text (no autocomplete).
 //
 // Persistence
 // -----------
@@ -62,8 +66,9 @@
 // to 題目 ID, fills that id, switches to the 題目 tab, and runs filterQuestions
 // — the same filter path the rest of the app uses.
 //
-// Concepts are matched with the same exact string includes() the filters use.
-// Question text is taken from questionTextChi, questionTextEng, and plainText.
+// Concepts and other category fields use the same exact-value match the
+// filters use (array includes / scalar equality). Question text (字串) is a
+// substring of questionTextChi, questionTextEng, and plainText.
 //
 // Dependencies: auth / accessRights (visibility), IndexedDBStorage.getQuestions
 // (data), filters.js clearFilters / filterQuestions, tabs switchTab. Does not
@@ -100,17 +105,76 @@
 
     var DATA_CHECKS_USERNAME = 'ken';
     var STORAGE_PREFIX = 'econ_data_checks_v1:';
-    var CONDITION_TYPE_BY_CHOICE = {
-        'include|text': 'textContains',
-        'exclude|text': 'textNotContains',
-        'include|concept': 'conceptPresent',
-        'exclude|concept': 'conceptAbsent'
-    };
-    var CONDITION_CHOICE_BY_TYPE = {
+    // Real filterable fields from the question bank / filter UI.
+    // id is what we store on the condition; prop is the question property when needed.
+    var CONDITION_FIELDS = [
+        { id: 'text', label: '字串', kind: 'text', autocomplete: false },
+        { id: 'concepts', label: '概念', kind: 'array', prop: 'concepts', autocomplete: true },
+        { id: 'patterns', label: '題型', kind: 'array', prop: 'patterns', autocomplete: true },
+        { id: 'stemPatterns', label: '題幹模式', kind: 'array', prop: 'stemPatterns', autocomplete: true },
+        { id: 'curriculumClassification', label: '課程分類', kind: 'array', prop: 'curriculumClassification', autocomplete: true },
+        { id: 'AristochapterClassification', label: 'Chapters', kind: 'array', prop: 'AristochapterClassification', autocomplete: true },
+        { id: 'graphType', label: '圖表類型', kind: 'scalar', prop: 'graphType', autocomplete: true },
+        { id: 'tableType', label: '表格類型', kind: 'scalar', prop: 'tableType', autocomplete: true },
+        { id: 'calculationType', label: '計算類型', kind: 'scalar', prop: 'calculationType', autocomplete: true },
+        { id: 'multipleSelectionType', label: '複選類型', kind: 'scalar', prop: 'multipleSelectionType', autocomplete: true },
+        { id: 'questionType', label: '題目類型', kind: 'scalar', prop: 'questionType', autocomplete: true },
+        { id: 'examination', label: '考試', kind: 'scalar', prop: 'examination', autocomplete: true },
+        { id: 'year', label: '年份', kind: 'scalar', prop: 'year', autocomplete: true },
+        { id: 'paper', label: '卷別', kind: 'scalar', prop: 'paper', autocomplete: true },
+        { id: 'section', label: 'Section', kind: 'scalar', prop: 'section', autocomplete: true },
+        { id: 'publisher', label: '出版商', kind: 'scalar', prop: 'publisher', autocomplete: true },
+        { id: 'feature', label: '特徵', kind: 'feature', autocomplete: true }
+    ];
+    var CONDITION_FIELD_BY_ID = {};
+    CONDITION_FIELDS.forEach(function (def) {
+        CONDITION_FIELD_BY_ID[def.id] = def;
+    });
+    var LEGACY_TYPE_TO_CHOICE = {
         textContains: { include: true, field: 'text' },
         textNotContains: { include: false, field: 'text' },
-        conceptPresent: { include: true, field: 'concept' },
-        conceptAbsent: { include: false, field: 'concept' }
+        conceptPresent: { include: true, field: 'concepts' },
+        conceptAbsent: { include: false, field: 'concepts' }
+    };
+    var FIELD_ALIASES = {
+        text: 'text',
+        string: 'text',
+        '字串': 'text',
+        concept: 'concepts',
+        concepts: 'concepts',
+        '概念': 'concepts',
+        patterns: 'patterns',
+        stempatterns: 'stemPatterns',
+        stemPatterns: 'stemPatterns',
+        curriculum: 'curriculumClassification',
+        curriculumclassification: 'curriculumClassification',
+        curriculumClassification: 'curriculumClassification',
+        chapter: 'AristochapterClassification',
+        chapters: 'AristochapterClassification',
+        aristochapterclassification: 'AristochapterClassification',
+        AristochapterClassification: 'AristochapterClassification',
+        graph: 'graphType',
+        graphtype: 'graphType',
+        graphType: 'graphType',
+        table: 'tableType',
+        tabletype: 'tableType',
+        tableType: 'tableType',
+        calculation: 'calculationType',
+        calculationtype: 'calculationType',
+        calculationType: 'calculationType',
+        multipleselection: 'multipleSelectionType',
+        multipleselectiontype: 'multipleSelectionType',
+        multipleSelectionType: 'multipleSelectionType',
+        qtype: 'questionType',
+        questiontype: 'questionType',
+        questionType: 'questionType',
+        exam: 'examination',
+        examination: 'examination',
+        year: 'year',
+        paper: 'paper',
+        section: 'section',
+        publisher: 'publisher',
+        feature: 'feature'
     };
 
     var overlay = null;
@@ -118,6 +182,7 @@
     var editingCheckId = null;
     var cachedQuestions = null;
     var activeChecks = null;
+    var conditionRowSeq = 0;
 
     function currentUsername() {
         if (typeof gitUsername === 'function') {
@@ -142,16 +207,31 @@
         return JSON.parse(JSON.stringify(list || []));
     }
 
+    function resolveFieldId(rawField) {
+        var key = String(rawField == null ? '' : rawField).trim();
+        if (!key) return '';
+        if (CONDITION_FIELD_BY_ID[key]) return key;
+        if (FIELD_ALIASES[key]) return FIELD_ALIASES[key];
+        var lower = key.toLowerCase();
+        if (FIELD_ALIASES[lower]) return FIELD_ALIASES[lower];
+        return '';
+    }
+
+    function legacyTypeFor(include, field) {
+        if (field === 'text') return include ? 'textContains' : 'textNotContains';
+        if (field === 'concepts') return include ? 'conceptPresent' : 'conceptAbsent';
+        return '';
+    }
+
     function conditionChoicesFromRaw(raw) {
         if (!raw || typeof raw !== 'object') return null;
         var type = String(raw.type || '').trim();
-        if (CONDITION_CHOICE_BY_TYPE[type]) {
+        if (LEGACY_TYPE_TO_CHOICE[type]) {
             return {
-                include: CONDITION_CHOICE_BY_TYPE[type].include,
-                field: CONDITION_CHOICE_BY_TYPE[type].field
+                include: LEGACY_TYPE_TO_CHOICE[type].include,
+                field: LEGACY_TYPE_TO_CHOICE[type].field
             };
         }
-        // Newer / alternate saved shape: include + field (text|concept).
         var include;
         if (typeof raw.include === 'boolean') {
             include = raw.include;
@@ -162,30 +242,27 @@
         } else {
             include = null;
         }
-        var field = String(raw.field || raw.match || raw.target || '').trim().toLowerCase();
-        if (field === 'string' || field === 'text' || field === '字串') field = 'text';
-        if (field === 'concept' || field === '概念') field = 'concept';
-        if (include === null || (field !== 'text' && field !== 'concept')) return null;
+        var field = resolveFieldId(raw.field || raw.match || raw.target || '');
+        // Older dual-checkbox saves used field: 'concept'.
+        if (!field && (raw.field === 'concept' || raw.field === '概念')) {
+            field = 'concepts';
+        }
+        if (include === null || !field || !CONDITION_FIELD_BY_ID[field]) return null;
         return { include: include, field: field };
-    }
-
-    function typeFromChoices(include, field) {
-        var key = (include ? 'include' : 'exclude') + '|' + field;
-        return CONDITION_TYPE_BY_CHOICE[key] || null;
     }
 
     function normalizeCondition(raw) {
         if (!raw || typeof raw !== 'object') return null;
         var choices = conditionChoicesFromRaw(raw);
         if (!choices) return null;
-        var type = typeFromChoices(choices.include, choices.field);
-        if (!type) return null;
-        return {
-            type: type,
+        var out = {
             include: choices.include,
             field: choices.field,
             value: String(raw.value == null ? '' : raw.value)
         };
+        var legacy = legacyTypeFor(choices.include, choices.field);
+        if (legacy) out.type = legacy;
+        return out;
     }
 
     function normalizeCheck(raw, index) {
@@ -269,28 +346,63 @@
         }).join('\n');
     }
 
-    function hasConcept(question, concept) {
-        if (!question || !Array.isArray(question.concepts)) return false;
-        return question.concepts.includes(concept);
+    function featureIsOn(question, featureName) {
+        if (typeof questionFeatureOn === 'function') {
+            return !!questionFeatureOn(question, featureName);
+        }
+        // Same semantics as stats-filters.js questionFeatureOn.
+        if (featureName === '含圖表') {
+            return !!(question.graphType && question.graphType !== '' && question.graphType !== '-' && question.graphType !== '沒有圖');
+        }
+        if (featureName === '有內嵌圖') return !!(question.inlineDiagrams && String(question.inlineDiagrams).trim());
+        if (featureName === '含表格') {
+            return !!(question.tableType && question.tableType !== '' && question.tableType !== '-' && question.tableType !== '沒有表格');
+        }
+        if (featureName === '複選') {
+            return !!(question.multipleSelectionType && question.multipleSelectionType !== '' && question.multipleSelectionType !== '-' &&
+                question.multipleSelectionType !== '並非複選型' && question.multipleSelectionType !== '不適用');
+        }
+        if (featureName === '含計算') {
+            return !!(question.calculationType && question.calculationType !== '' && question.calculationType !== '-' && question.calculationType !== '沒有計算');
+        }
+        if (featureName === '跨課題') {
+            return !!(question.curriculumClassification && Array.isArray(question.curriculumClassification) && question.curriculumClassification.length > 1);
+        }
+        if (featureName === '跨章節') {
+            return !!(question.AristochapterClassification && Array.isArray(question.AristochapterClassification) && question.AristochapterClassification.length > 1);
+        }
+        if (featureName === '已刪除') return !!(question.answerMC && String(question.answerMC).trim() === '*');
+        if (featureName === 'Out syl') return !!(question.outSyl && String(question.outSyl).trim().toUpperCase() === 'Y');
+        return false;
+    }
+
+    function questionHasFieldValue(question, fieldId, value) {
+        var def = CONDITION_FIELD_BY_ID[fieldId];
+        if (!def || !question) return false;
+        var needle = String(value == null ? '' : value);
+        if (def.kind === 'text') {
+            return questionText(question).indexOf(needle) !== -1;
+        }
+        if (def.kind === 'array') {
+            var list = question[def.prop];
+            if (!Array.isArray(list)) return false;
+            return list.includes(needle);
+        }
+        if (def.kind === 'scalar') {
+            if (question[def.prop] === undefined || question[def.prop] === null) return false;
+            return String(question[def.prop]).trim() === needle;
+        }
+        if (def.kind === 'feature') {
+            return featureIsOn(question, needle);
+        }
+        return false;
     }
 
     function matchesCondition(question, condition) {
         var normalized = normalizeCondition(condition);
         if (!normalized) return false;
-        var value = String(normalized.value == null ? '' : normalized.value);
-        if (normalized.type === 'textContains') {
-            return questionText(question).indexOf(value) !== -1;
-        }
-        if (normalized.type === 'textNotContains') {
-            return questionText(question).indexOf(value) === -1;
-        }
-        if (normalized.type === 'conceptPresent') {
-            return hasConcept(question, value);
-        }
-        if (normalized.type === 'conceptAbsent') {
-            return !hasConcept(question, value);
-        }
-        return false;
+        var present = questionHasFieldValue(question, normalized.field, normalized.value);
+        return normalized.include ? present : !present;
     }
 
     function matchesCheck(question, check) {
@@ -300,6 +412,52 @@
             if (!matchesCondition(question, conditions[i])) return false;
         }
         return true;
+    }
+
+    function collectFieldValues(fieldId) {
+        var def = CONDITION_FIELD_BY_ID[fieldId];
+        if (!def || !def.autocomplete) return [];
+        var set = {};
+        if (def.kind === 'feature' && typeof FEATURE_ITEMS !== 'undefined' && Array.isArray(FEATURE_ITEMS)) {
+            FEATURE_ITEMS.forEach(function (item) {
+                var text = String(item == null ? '' : item).trim();
+                if (text) set[text] = true;
+            });
+        }
+        if (def.kind === 'array' && def.prop === 'curriculumClassification' &&
+            typeof CURRICULUM_ITEMS !== 'undefined' && Array.isArray(CURRICULUM_ITEMS)) {
+            CURRICULUM_ITEMS.forEach(function (item) {
+                var text = String(item == null ? '' : item).trim();
+                if (text) set[text] = true;
+            });
+        }
+        (cachedQuestions || []).forEach(function (question) {
+            if (!question) return;
+            if (def.kind === 'array') {
+                var list = question[def.prop];
+                if (!Array.isArray(list)) return;
+                list.forEach(function (item) {
+                    var text = String(item == null ? '' : item).trim();
+                    if (text) set[text] = true;
+                });
+                return;
+            }
+            if (def.kind === 'scalar') {
+                if (question[def.prop] === undefined || question[def.prop] === null) return;
+                var scalar = String(question[def.prop]).trim();
+                if (!scalar) return;
+                if (def.prop !== 'section' && scalar === '-') return;
+                set[scalar] = true;
+            }
+        });
+        return Object.keys(set).sort(function (a, b) {
+            return a.localeCompare(b, 'zh-HK');
+        });
+    }
+
+    function fieldLabel(fieldId) {
+        var def = CONDITION_FIELD_BY_ID[fieldId];
+        return def ? def.label : fieldId;
     }
 
     function exceptionSet(check) {
@@ -464,9 +622,9 @@
                 enforceExclusivePair(includeBox, 'data-dc-include');
                 return;
             }
-            var fieldBox = event.target.closest('input[data-dc-field]');
-            if (fieldBox) {
-                enforceExclusivePair(fieldBox, 'data-dc-field');
+            var fieldSelect = event.target.closest('select[data-dc-field]');
+            if (fieldSelect) {
+                refreshConditionAutocomplete(fieldSelect.closest('[data-dc-cond-row]'));
             }
         });
         return overlay;
@@ -476,9 +634,49 @@
         return ((check && check.conditions) || []).map(function (condition) {
             var choices = conditionChoicesFromRaw(condition) || { include: true, field: 'text' };
             var includeLabel = choices.include ? '包含' : '不包括';
-            var fieldLabel = choices.field === 'concept' ? '概念' : '字串';
-            return includeLabel + fieldLabel + '「' + condition.value + '」';
+            return includeLabel + fieldLabel(choices.field) + '「' + condition.value + '」';
         }).join(' 且 ');
+    }
+
+    function fieldSelectHtml(selectedField) {
+        return CONDITION_FIELDS.map(function (def) {
+            var sel = def.id === selectedField ? ' selected' : '';
+            return '<option value="' + escapeAttr(def.id) + '"' + sel + '>' + escapeHtml(def.label) + '</option>';
+        }).join('');
+    }
+
+    function datalistHtml(listId, fieldId) {
+        var def = CONDITION_FIELD_BY_ID[fieldId];
+        if (!def || !def.autocomplete) {
+            return '<datalist id="' + escapeAttr(listId) + '"></datalist>';
+        }
+        var options = collectFieldValues(fieldId).map(function (value) {
+            return '<option value="' + escapeAttr(value) + '"></option>';
+        }).join('');
+        return '<datalist id="' + escapeAttr(listId) + '">' + options + '</datalist>';
+    }
+
+    function refreshConditionAutocomplete(condRow) {
+        if (!condRow) return;
+        var fieldSelect = condRow.querySelector('select[data-dc-field]');
+        var valueInput = condRow.querySelector('[data-dc-cond-value]');
+        var list = condRow.querySelector('datalist');
+        if (!fieldSelect || !valueInput || !list) return;
+        var fieldId = resolveFieldId(fieldSelect.value) || 'text';
+        var def = CONDITION_FIELD_BY_ID[fieldId];
+        list.innerHTML = '';
+        if (!def || !def.autocomplete) {
+            valueInput.removeAttribute('list');
+            valueInput.placeholder = '字串（題文自由輸入）';
+            return;
+        }
+        valueInput.setAttribute('list', list.id);
+        valueInput.placeholder = '從已載入題庫選擇或輸入';
+        collectFieldValues(fieldId).forEach(function (value) {
+            var opt = document.createElement('option');
+            opt.value = value;
+            list.appendChild(opt);
+        });
     }
 
     function conditionRowHtml(condition) {
@@ -486,8 +684,12 @@
         var value = condition && condition.value != null ? condition.value : '';
         var includeChecked = choices.include ? ' checked' : '';
         var excludeChecked = choices.include ? '' : ' checked';
-        var textChecked = choices.field === 'concept' ? '' : ' checked';
-        var conceptChecked = choices.field === 'concept' ? ' checked' : '';
+        var fieldId = choices.field || 'text';
+        var def = CONDITION_FIELD_BY_ID[fieldId] || CONDITION_FIELD_BY_ID.text;
+        conditionRowSeq += 1;
+        var listId = 'dc-ac-' + conditionRowSeq;
+        var listAttr = def.autocomplete ? (' list="' + escapeAttr(listId) + '"') : '';
+        var placeholder = def.autocomplete ? '從已載入題庫選擇或輸入' : '字串（題文自由輸入）';
         return ''
             + '<div class="data-checks-cond-row" data-dc-cond-row="1">'
             + '  <div class="data-checks-cond-pairs">'
@@ -495,12 +697,15 @@
             + '      <label class="data-checks-check"><input type="checkbox" data-dc-include value="include"' + includeChecked + '>包含</label>'
             + '      <label class="data-checks-check"><input type="checkbox" data-dc-include value="exclude"' + excludeChecked + '>不包括</label>'
             + '    </div>'
-            + '    <div class="data-checks-cond-pair" role="group" aria-label="字串或概念">'
-            + '      <label class="data-checks-check"><input type="checkbox" data-dc-field value="text"' + textChecked + '>字串</label>'
-            + '      <label class="data-checks-check"><input type="checkbox" data-dc-field value="concept"' + conceptChecked + '>概念</label>'
-            + '    </div>'
+            + '    <label class="data-checks-field-select">'
+            + '      <span class="data-checks-field-select-label">欄位</span>'
+            + '      <select data-dc-field aria-label="條件欄位">' + fieldSelectHtml(fieldId) + '</select>'
+            + '    </label>'
             + '  </div>'
-            + '  <input type="text" data-dc-cond-value value="' + escapeAttr(value) + '" placeholder="字串或概念名稱" aria-label="條件值">'
+            + '  <div class="data-checks-cond-value-wrap">'
+            + '    <input type="text" data-dc-cond-value value="' + escapeAttr(value) + '" placeholder="' + escapeAttr(placeholder) + '"' + listAttr + ' aria-label="條件值" autocomplete="off">'
+            + datalistHtml(listId, fieldId)
+            + '  </div>'
             + '  <button type="button" class="btn btn-secondary btn-sm" data-dc-remove-cond title="移除條件">✕</button>'
             + '</div>';
     }
@@ -525,9 +730,9 @@
 
     function readConditionChoices(condRow) {
         var includeBox = condRow.querySelector('input[data-dc-include]:checked');
-        var fieldBox = condRow.querySelector('input[data-dc-field]:checked');
+        var fieldSelect = condRow.querySelector('select[data-dc-field]');
         var include = !(includeBox && includeBox.value === 'exclude');
-        var field = (fieldBox && fieldBox.value === 'concept') ? 'concept' : 'text';
+        var field = resolveFieldId(fieldSelect && fieldSelect.value) || 'text';
         return { include: include, field: field };
     }
 
@@ -557,7 +762,7 @@
         var check = {
             id: newCheckId(),
             name: '新檢查',
-            conditions: [{ type: 'textContains', value: '' }],
+            conditions: [{ include: true, field: 'text', value: '', type: 'textContains' }],
             exceptions: []
         };
         activeChecks.push(check);
@@ -717,7 +922,7 @@
             + '  </label>'
             + '  <div class="data-checks-field">'
             + '    <div class="data-checks-field-head">'
-            + '      <span>條件（全部 AND；每列選 包含/不包括 與 字串/概念）</span>'
+            + '      <span>條件（全部 AND；每列選 包含/不包括、欄位、值）</span>'
             + '      <button type="button" class="btn btn-outline-primary btn-sm" data-dc-add-cond="' + escapeAttr(check.id) + '">＋ 條件</button>'
             + '    </div>'
             + '    <div class="data-checks-cond-list">' + conditionsHtml + '</div>'
@@ -959,12 +1164,22 @@
             + '  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }'
             + '.data-checks-cond-list { display: grid; gap: 10px; }'
             + '.data-checks-cond-row {'
-            + '  display: grid; grid-template-columns: minmax(220px, auto) 1fr auto;'
+            + '  display: grid; grid-template-columns: minmax(260px, 1.1fr) minmax(140px, 1fr) auto;'
             + '  gap: 8px; align-items: center; padding: 8px; border: 1px solid #e7eef5;'
             + '  border-radius: 10px; background: #f8fafc;'
             + '}'
-            + '.data-checks-cond-pairs { display: grid; gap: 6px; }'
+            + '.data-checks-cond-pairs { display: grid; gap: 8px; }'
             + '.data-checks-cond-pair { display: flex; flex-wrap: wrap; gap: 8px 12px; }'
+            + '.data-checks-field-select {'
+            + '  display: grid; gap: 4px; margin: 0; font-size: 12px; color: var(--text-light);'
+            + '}'
+            + '.data-checks-field-select-label { font-weight: 700; color: var(--primary-color); }'
+            + '.data-checks-field-select select {'
+            + '  width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid #d7e3ef;'
+            + '  border-radius: 8px; font: inherit; color: inherit; background: #fff;'
+            + '}'
+            + '.data-checks-cond-value-wrap { min-width: 0; }'
+            + '.data-checks-cond-value-wrap input { width: 100%; }'
             + '.data-checks-check {'
             + '  display: inline-flex; align-items: center; gap: 4px; margin: 0;'
             + '  font-size: 13px; font-weight: 600; color: var(--primary-color); cursor: pointer;'
@@ -1011,9 +1226,12 @@
     window.openDataChecksPanel = openDataChecksPanel;
     window.closeDataChecksPanel = closeDataChecksPanel;
     window.__DATA_CHECKS_DEFAULTS__ = DEFAULT_DATA_CHECKS;
+    window.__DATA_CHECKS_FIELDS__ = CONDITION_FIELDS;
     window.__evaluateDataCheck__ = evaluateCheck;
     window.__dataChecksShowQuestionById__ = showQuestionById;
     window.__dataChecksLoadActive__ = loadActiveChecks;
+    window.__normalizeDataCheckCondition__ = normalizeCondition;
+    window.__dataChecksConditionRowHtml__ = conditionRowHtml;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initDataChecksFeature);
