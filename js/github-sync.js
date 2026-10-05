@@ -24,6 +24,7 @@ var GIT_ERROR_TEXT = {
     network: '無法連線到同步服務',
     server_error: '同步服務發生錯誤',
     schema_too_new: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
+    schema_version_stale: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
     schema_unreadable: '無法安全載入較新格式的題庫，請先更新網頁'
 };
 
@@ -58,7 +59,7 @@ function gitErrorMessage(code) {
 }
 
 function gitFailureText(error) {
-    if (error && error.code === 'schema_too_new') {
+    if (error && (error.code === 'schema_too_new' || error.code === 'schema_version_stale')) {
         if (typeof schemaNewerUploadMessage === 'function') {
             return schemaNewerUploadMessage(error.cloudSchemaVersion);
         }
@@ -280,11 +281,21 @@ async function uploadQuestionsToGit(options) {
             if (!data || data.ok !== true) {
                 var failed = new Error((data && data.error) || 'github_error');
                 failed.code = data && data.error ? data.error : 'github_error';
+                if (data && typeof data.clientSchemaVersion === 'number') {
+                    failed.clientSchemaVersion = data.clientSchemaVersion;
+                }
+                if (data && typeof data.cloudSchemaVersion === 'number') {
+                    failed.cloudSchemaVersion = data.cloudSchemaVersion;
+                }
                 throw failed;
             }
             var count = exportData.questionCount;
+            var writtenSchema = (typeof data.schemaVersion === 'number')
+                ? data.schemaVersion
+                : (typeof readSchemaVersion === 'function' ? readSchemaVersion(exportData) : 0);
             console.log('[GitHub upload] ' + new Date().toISOString() + ' succeeded (' + count + ' questions)');
             var message = '已上傳 ' + count + ' 題到 GitHub';
+            if (writtenSchema > 0) message += '（格式版本 ' + writtenSchema + '）';
             setGitStatus(message, 'ok');
             if (typeof showNotification === 'function') showNotification(message, 'success');
         } catch (error) {
@@ -351,7 +362,11 @@ async function downloadQuestionsFromGit(options) {
             } finally {
                 gitSyncState.suppressAuto = false;
             }
+            var schemaVersion = (typeof data.schemaVersion === 'number')
+                ? data.schemaVersion
+                : (typeof readSchemaVersion === 'function' ? readSchemaVersion(data.data) : 0);
             var message = '已從 GitHub 載入 ' + imported + ' 題';
+            if (schemaVersion > 0) message += '（格式版本 ' + schemaVersion + '）';
             setGitStatus(message, 'ok');
             if (!options.quiet) {
                 if (typeof showNotification === 'function') showNotification(message, 'success');

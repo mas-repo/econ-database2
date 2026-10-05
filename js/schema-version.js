@@ -9,8 +9,9 @@
 //
 // Upload: local SCHEMA_VERSION < cloud schemaVersion → block (no overwrite).
 // Load/download/import: cloud/file > local → notify user to update the app.
-// Apps Script does not yet enforce this server-side; client checks own the
-// admin sync path. Do not put write PATs in the browser.
+// Apps Script handleGitUpload_ also rejects with schema_version_stale when the
+// client's declared schemaVersion is older than the cloud bank (defense in
+// depth with the client check). Do not put write PATs in the browser.
 
 (function (global) {
     'use strict';

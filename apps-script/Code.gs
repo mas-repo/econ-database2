@@ -103,8 +103,8 @@
  *     GitHub App install token preferred (mintGithubInstallationToken_);
  *     else GITHUB_READ_TOKEN (issueGithubDirectReadCredential_)
  * Admin Git sync (shared bank write/read via server GITHUB_TOKEN):
- *   syncDataUpload   → handleGitUpload_
- *   syncDataDownload → handleGitDownload_
+ *   syncDataUpload   → handleGitUpload_  (rejects schema_version_stale)
+ *   syncDataDownload → handleGitDownload_ (returns schemaVersion)
  * Data-checks sync (ken + githubSync; shared/data/data-checks.json):
  *   syncDataChecksUpload   → handleDataChecksUpload_
  *   syncDataChecksDownload → handleDataChecksDownload_
@@ -1399,19 +1399,15 @@ var AI_BACKUP_CONTENT_CHUNK_CHARS_ = 40000;
 var AI_USAGE_RECORD_USERS_ = ['ryan', 'user57'];
 
 // Shared question-bank upload for githubSync users.
+// Rejects when the client's schemaVersion is older than the cloud bank's.
 function handleGitUpload_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
   var cfg = githubConfig_();
   if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  var payload = coerceJson_(body && body.data);
+  var clientSchemaVersion = readBankSchemaVersion_(payload);
   var text;
-  try {
-    text = questionPayloadText_(coerceJson_(body && body.data));
-  } catch (err) {
-    return gitClientError_(err && err.code ? err.code : 'bad_request');
-  }
-  var bytes = utf8Length_(text);
-  if (bytes > GITHUB_DATA_MAX_BYTES_) return gitClientError_('payload_too_large');
   var dataPath = githubSharedBankPath_(cfg);
   if (!dataPath) return gitClientError_('github_error');
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
@@ -1423,8 +1419,65 @@ function handleGitUpload_(body) {
       return gitClientError_('rate_limited');
     }
     held = true;
+    var cloudData = null;
+    try {
+      var existing = githubReadText_(cfg, dataPath);
+      try {
+        cloudData = JSON.parse(existing && existing.text);
+      } catch (ignoreParse) {
+        cloudData = null;
+      }
+    } catch (readErr) {
+      if (!(readErr && readErr.code === 'github_not_found')) {
+        throw readErr;
+      }
+      cloudData = null;
+    }
+    var cloudSchemaVersion = readBankSchemaVersion_(cloudData);
+    if (clientSchemaVersion < cloudSchemaVersion) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      writeLog_({
+        username: username,
+        action: 'syncDataUpload',
+        success: false,
+        metadata: {
+          error: 'schema_version_stale',
+          clientSchemaVersion: clientSchemaVersion,
+          cloudSchemaVersion: cloudSchemaVersion
+        }
+      }, true);
+      return gitClientError_('schema_version_stale', {
+        clientSchemaVersion: clientSchemaVersion,
+        cloudSchemaVersion: cloudSchemaVersion
+      });
+    }
+    try {
+      text = questionPayloadText_(payload, cloudData);
+    } catch (err) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return gitClientError_(err && err.code ? err.code : 'bad_request');
+    }
+    var bytes = utf8Length_(text);
+    if (bytes > GITHUB_DATA_MAX_BYTES_) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return gitClientError_('payload_too_large');
+    }
     var count = 0;
-    try { count = JSON.parse(text).questionCount; } catch (ignore) { count = 0; }
+    var writtenSchemaVersion = 0;
+    try {
+      var writtenPayload = JSON.parse(text);
+      count = writtenPayload.questionCount;
+      writtenSchemaVersion = readBankSchemaVersion_(writtenPayload);
+    } catch (ignore) {
+      count = 0;
+      writtenSchemaVersion = 0;
+    }
     var written = githubWriteText_(cfg, dataPath, text, 'Update question data (' + count + ')');
     lock.releaseLock();
     held = false;
@@ -1432,9 +1485,17 @@ function handleGitUpload_(body) {
       username: username,
       action: 'syncDataUpload',
       success: true,
-      metadata: { questionCount: count, bytes: bytes }
+      metadata: {
+        questionCount: count,
+        bytes: bytes,
+        schemaVersion: writtenSchemaVersion
+      }
     }, true);
-    return gitOk_({ sha: written.sha, path: dataPath });
+    return gitOk_({
+      sha: written.sha,
+      path: dataPath,
+      schemaVersion: writtenSchemaVersion
+    });
   } catch (err) {
     if (held) {
       try { lock.releaseLock(); } catch (ignore) {}
@@ -1474,9 +1535,17 @@ function handleGitDownload_(body) {
       username: username,
       action: 'syncDataDownload',
       success: true,
-      metadata: { bytes: String(read.text || '').length }
+      metadata: {
+        bytes: String(read.text || '').length,
+        schemaVersion: readBankSchemaVersion_(parsed)
+      }
     }, true);
-    return gitOk_({ sha: read.sha, path: dataPath, data: parsed });
+    return gitOk_({
+      sha: read.sha,
+      path: dataPath,
+      data: parsed,
+      schemaVersion: readBankSchemaVersion_(parsed)
+    });
   } catch (err) {
     safeLog_(err);
     var code = err && err.code ? err.code : 'github_error';
@@ -2900,15 +2969,43 @@ function coerceJson_(data) {
   }
 }
 
-function questionPayloadText_(data) {
+// Top-level bank field shared with the public site client (camelCase).
+// Missing or invalid values are treated as 0 (oldest compatible).
+function readBankSchemaVersion_(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+  var raw = data.schemaVersion;
+  if (raw == null || raw === '') return 0;
+  var number = Number(raw);
+  if (!isFinite(number) || number < 0) return 0;
+  return Math.floor(number);
+}
+
+// Rewrite the shared bank JSON for upload. Preserves schemaVersion and other
+// unknown top-level fields from the client (and from cloud when the client
+// omitted them) so an upload never "helps" by stripping newer keys.
+function questionPayloadText_(data, cloudData) {
   var extracted = extractQuestions_(data);
   if (!extracted.ok) throw gitFail_(extracted.error);
-  return JSON.stringify({
-    version: '1.0',
-    exportDate: new Date().toISOString(),
-    questionCount: extracted.questions.length,
-    questions: extracted.questions
-  });
+  var out = {};
+  function copyTopLevel_(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+    var keys = Object.keys(source);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (key === 'questions' || key === 'questionCount' || key === 'exportDate') continue;
+      out[key] = source[key];
+    }
+  }
+  copyTopLevel_(cloudData);
+  copyTopLevel_(data);
+  if (typeof out.version !== 'string' || !String(out.version).trim()) out.version = '1.0';
+  if (Object.prototype.hasOwnProperty.call(out, 'schemaVersion')) {
+    out.schemaVersion = readBankSchemaVersion_(out);
+  }
+  out.exportDate = new Date().toISOString();
+  out.questionCount = extracted.questions.length;
+  out.questions = extracted.questions;
+  return JSON.stringify(out);
 }
 
 function extractQuestions_(data) {
@@ -2931,7 +3028,7 @@ function gitFail_(code, httpStatus) {
   return err;
 }
 
-function gitClientError_(code) {
+function gitClientError_(code, extra) {
   var allowed = {
     feature_unavailable: true,
     github_not_configured: true,
@@ -2942,9 +3039,19 @@ function gitClientError_(code) {
     bad_request: true,
     payload_too_large: true,
     rate_limited: true,
-    server_error: true
+    server_error: true,
+    schema_version_stale: true
   };
-  return { ok: false, error: allowed[code] ? code : 'github_error' };
+  var out = { ok: false, error: allowed[code] ? code : 'github_error' };
+  if (extra && typeof extra === 'object') {
+    if (typeof extra.clientSchemaVersion === 'number' && isFinite(extra.clientSchemaVersion)) {
+      out.clientSchemaVersion = Math.floor(extra.clientSchemaVersion);
+    }
+    if (typeof extra.cloudSchemaVersion === 'number' && isFinite(extra.cloudSchemaVersion)) {
+      out.cloudSchemaVersion = Math.floor(extra.cloudSchemaVersion);
+    }
+  }
+  return out;
 }
 
 function gitOk_(extra) {
@@ -2954,6 +3061,10 @@ function gitOk_(extra) {
   if (sha) out.sha = sha;
   if (extra.path && githubPathOk_(extra.path)) out.path = extra.path;
   if (Object.prototype.hasOwnProperty.call(extra, 'data')) out.data = extra.data;
+  // schemaVersion is a non-secret bank metadata field returned on upload/download.
+  if (typeof extra.schemaVersion === 'number' && isFinite(extra.schemaVersion) && extra.schemaVersion >= 0) {
+    out.schemaVersion = Math.floor(extra.schemaVersion);
+  }
   return out;
 }
 
@@ -3481,6 +3592,41 @@ function selfTestGitPaths() {
   } catch (err) {
     if (!err || err.code !== 'bad_request') throw err;
   }
+  if (readBankSchemaVersion_(null) !== 0) throw new Error('schema_missing');
+  if (readBankSchemaVersion_({}) !== 0) throw new Error('schema_empty');
+  if (readBankSchemaVersion_({ schemaVersion: 2 }) !== 2) throw new Error('schema_int');
+  if (readBankSchemaVersion_({ schemaVersion: '3' }) !== 3) throw new Error('schema_string');
+  if (readBankSchemaVersion_({ schemaVersion: -1 }) !== 0) throw new Error('schema_negative');
+  if (gitClientError_('schema_version_stale').error !== 'schema_version_stale') {
+    throw new Error('schema_error_code');
+  }
+  var stale = gitClientError_('schema_version_stale', {
+    clientSchemaVersion: 1,
+    cloudSchemaVersion: 2
+  });
+  if (stale.clientSchemaVersion !== 1 || stale.cloudSchemaVersion !== 2) {
+    throw new Error('schema_error_meta');
+  }
+  var rewritten = JSON.parse(questionPayloadText_({
+    version: '1.0',
+    schemaVersion: 2,
+    extraKeep: true,
+    questions: [{ id: 'x' }]
+  }, {
+    schemaVersion: 1,
+    cloudOnly: 'keep-me',
+    questions: [{ id: 'old' }]
+  }));
+  if (rewritten.schemaVersion !== 2) throw new Error('schema_write_client');
+  if (rewritten.cloudOnly !== 'keep-me') throw new Error('schema_write_cloud_field');
+  if (rewritten.extraKeep !== true) throw new Error('schema_write_client_field');
+  if (!rewritten.questions || rewritten.questions[0].id !== 'x') throw new Error('schema_write_questions');
+  var okWithSchema = gitOk_({
+    sha: '0123456789abcdef0123456789abcdef01234567',
+    path: 'shared/data/database.json',
+    schemaVersion: 2
+  });
+  if (okWithSchema.schemaVersion !== 2) throw new Error('schema_ok_passthrough');
   if (clipChars_('甲乙丙', 2) !== '甲乙') throw new Error('clip_chars');
   if (githubSharedPrefix_({ sharedPrefix: '' }) !== 'shared') throw new Error('shared_prefix_default');
   if (githubSharedPrefix_({ sharedPrefix: 'users' })) throw new Error('shared_prefix_users');

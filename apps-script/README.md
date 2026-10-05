@@ -2,7 +2,7 @@
 
 The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), `provider` (`poe` | `openrouter`), and a model id to this Apps Script web app. The script calls Poe (`https://api.poe.com/v1/chat/completions`) or OpenRouter (`https://openrouter.ai/api/v1/chat/completions`) and appends a row to the spreadsheet. The browser never receives the server API key. Users may send their own `poeApiKey` or `openRouterApiKey` from localStorage (settings modal). Script property `POE_API_KEY` is a shared Poe fallback **only for the admin role**; optional `OPENROUTER_API_KEY` is the same for OpenRouter. Other AI users must supply their own browser key or calls return `missing_api_key`. The public repository does not contain the allowlist or any key.
 
-**After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores `testModel`, the model allowlist, and the backup tab.
+**After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores `schema_version_stale` upload gating, `testModel`, the model allowlist, and the backup tab.
 
 Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
 
@@ -156,13 +156,19 @@ Opening the `/exec` URL in a browser should return JSON like `{ "ok": true, "ser
 
 Only `githubSync` (the admin role) sees **自動同步**, **上傳到 GitHub**, and **從 GitHub 載入**. AI editors and restricted users do not see that panel. The checkbox is stored only in that browser’s `localStorage`. It is not sent to the server.
 
-- **上傳到 GitHub** sends the current question bank to `syncDataUpload`. The **browser** first reads the cloud bank and refuses the upload when local `SCHEMA_VERSION` is lower than cloud `schemaVersion` (see site `README.md` / `js/schema-version.js`). Apps Script does not yet re-check `schemaVersion` in `handleGitUpload_`.
-- **從 GitHub 載入** calls `syncDataDownload` (or direct shared read) and replaces the browser’s IndexedDB copy. If cloud `schemaVersion` is newer than the page, the client shows an update warning.
+- **上傳到 GitHub** sends the current question bank to `syncDataUpload`. The **browser** first reads the cloud bank and refuses the upload when local `SCHEMA_VERSION` is lower than cloud `schemaVersion` (see site `README.md` / `js/schema-version.js`). **Apps Script also enforces** the same rule in `handleGitUpload_`: reject when the payload’s `schemaVersion` (omit/invalid → 0) is less than the cloud file’s, returning `{ "ok": false, "error": "schema_version_stale", "clientSchemaVersion", "cloudSchemaVersion" }`. The write path preserves `schemaVersion` and other unknown top-level keys (never strips unknowns to “fix” an old client).
+- **從 GitHub 載入** calls `syncDataDownload` (or direct shared read) and replaces the browser’s IndexedDB copy. Success responses include `schemaVersion`. If cloud `schemaVersion` is newer than the page, the client shows an update warning.
 - Ken’s admin **資料檢查** panel uses `syncDataChecksDownload` / `syncDataChecksUpload` for `shared/data/data-checks.json` (same proxy; not the question bank). The 題目-tab **進階篩選** modal does not use these actions and must not write that shared file (browser-local only).
 - With **自動同步** on, opening the page tries to load the private copy. Saving, deleting, importing, or exporting a question uploads the current bank. Clearing the database does not upload by itself.
 - Reloading the page loads questions only from the private repository `mas-repo/econ-database-data` through the Apps Script proxy. If that read fails, the page stays without questions and does not use a local copy.
 
 Both actions require `githubSync` before any GitHub read or write. A refused call returns `feature_unavailable` and does not say whether GitHub is configured.
+
+### Shared bank `schemaVersion` (server)
+
+Top-level field name (camelCase, integer): **`schemaVersion`**. Client constant: `SCHEMA_VERSION` in `js/constants.js`. Separate from the export string field `version` (e.g. `"1.0"`). Missing or invalid values are treated as **0** (oldest compatible).
+
+**econ-database-data follow-up:** stamp the live private file `shared/data/database.json` once with `"schemaVersion": 1`. Until that stamp lands, cloud version is 0 and any current client may upload. After the stamp, older clients that omit the field (effective 0) are blocked with `schema_version_stale`. This public repo does not write the private data file.
 
 ### Token
 
@@ -294,7 +300,7 @@ The script creates a tab named `UsageLog` (or `LOG_SHEET_NAME`) with:
 - `login` — once per username about every 30 minutes, after someone signs in on the site.
 - `generateQuestions` — success or failure, with model, mode id, `source` (`filter` or `paste`), counts, duration, and the length of the 出題指示 (`instructionChars`, plus `instructionProvidedChars` for the raw client length). The instruction text and the question text are not written to this tab. The reply itself goes to `GenerationBackup` and, when configured, to the private repository.
 - `testModel` — the **測試** button. Success means the model returned the expected short ping (`正常`). The metadata has the model, duration, and a short `replyPreview`. It requires `ai`. It does not count toward `POE_DAILY_LIMIT`. It has its own cooldown of `POE_MIN_INTERVAL_SECONDS`, separate from generation. A successful reply is also written to `GenerationBackup` and, when configured, to the private repository.
-- `syncDataUpload` / `syncDataDownload` — success or failure when `githubSync` is true. The log stores a byte count or an error code, not the question text and not the token.
+- `syncDataUpload` / `syncDataDownload` — success or failure when `githubSync` is true. The log stores a byte count, optional `schemaVersion`, or an error code (including `schema_version_stale` with client/cloud versions), not the question text and not the token.
 
 Protect the `UsageLog` tab (**Data → Protect sheets and ranges**) so casual editors cannot clear it. The web app still appends rows because it runs as the deploying account.
 

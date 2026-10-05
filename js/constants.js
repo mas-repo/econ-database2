@@ -5,12 +5,13 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.05.10';
+const APP_VERSION = '2026.10.05.11';
 console.log('Question bank version:', APP_VERSION);
 
 // Integer stamped on shared bank JSON as schemaVersion. Bump only when the
 // data shape changes so an older writer would drop fields. Missing field on
 // cloud/file payloads is treated as 0 (see js/schema-version.js).
+// Must stay aligned with Apps Script readBankSchemaVersion_ / upload gate.
 const SCHEMA_VERSION = 1;
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)
