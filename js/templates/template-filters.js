@@ -55,6 +55,7 @@ function renderFiltersTemplate() {
         <!-- Row 2: Panel toggle + reset -->
         <div class="btn-group">
             <button id="toggle-filters-btn" class="btn btn-secondary btn-sm" onclick="toggleFiltersPanel()">▶️ 顯示篩選條件</button>
+            <button type="button" id="advanced-filter-btn" class="btn btn-outline-primary btn-sm" onclick="openAdvancedFilterModal()">進階篩選</button>
             <button class="btn btn-clear-filter btn-sm" onclick="clearFilters()">🔄 重置篩選條件</button>
         </div>
 

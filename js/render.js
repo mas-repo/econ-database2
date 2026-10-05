@@ -88,7 +88,9 @@ async function renderQuestions() {
         triState: triStateFilters,
         percentageFilter: window.percentageFilter,
         marksFilter: window.marksFilter,
-        questionNumberFilter: window.questionNumberFilter
+        questionNumberFilter: window.questionNumberFilter,
+        idSetFilter: window.idSetFilter,
+        advancedFilter: window.advancedFilter
     };
 
     let questions = await storage.getQuestions(filters);
@@ -458,7 +460,9 @@ async function copyFilteredQuestions() {
         triState: triStateFilters,
         percentageFilter: window.percentageFilter,
         marksFilter: window.marksFilter,
-        questionNumberFilter: window.questionNumberFilter
+        questionNumberFilter: window.questionNumberFilter,
+        idSetFilter: window.idSetFilter,
+        advancedFilter: window.advancedFilter
     };
 
     let questions = await storage.getQuestions(filters);
