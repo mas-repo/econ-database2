@@ -61,7 +61,7 @@ The button **AI出題** is hidden until Apps Script returns `ai: true` for the s
 
 `js/data-checks.js` holds admin-only features (not part of the normal question-list UI).
 
-**過往紀錄 (cross-device):** Successful generations still save in this browser (`IndexedDB` / `localStorage`). When GitHub AI backups are configured, opening the modal also calls `listAiBackups` (auth: `ai`, not `githubSync`) and merges that user's private `users/<username>/<GITHUB_AI_BACKUP_DIR>/` replies into the same list (deduped). Each request returns 30 backups, newest first; the modal can open older pages. Search matches only the page on screen. Remote failures stay non-blocking. Details: `apps-script/README.md`.
+**過往紀錄 (cross-device):** Successful generations still save in this browser (`IndexedDB` / `localStorage`). When GitHub AI backups are configured, opening the modal also calls `listAiBackups` (auth: `ai`, not `githubSync`) and merges that user's private `users/<username>/<GITHUB_AI_BACKUP_DIR>/` replies into the same list (deduped). List pages are lean (preview only); opening a row loads the full reply with `getAiBackup`, including chunked reads for very long text. Long `generateQuestions` replies may also arrive with `contentViaBackup` so the browser fetches the backup instead of parsing an oversized web-app body. Each request returns 30 backups, newest first; the modal can open older pages. Search matches only the page on screen. Remote failures stay non-blocking. Incomplete runs still stay in 使用紀錄. Details: `apps-script/README.md`.
 
 ## GitHub sync buttons (admin only)
 

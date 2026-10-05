@@ -34,6 +34,8 @@
  * fixed folders in AI_USAGE_RECORD_USERS_ and ignores any other name in the request.
  * listAiBackups and listAiUsageRecords each return one page of AI_BACKUP_LIST_MAX_
  * generateQuestions files, newest first. Pass after / afterName to continue.
+ * Those list responses are lean (metadata + contentPreview only). Full reply
+ * text is loaded with getAiBackup, which can return the body in chunks.
  * The request still cannot choose other users.
  *
  * Shared diagrams, the question bank, and paper packs live under the same prefix.
@@ -220,6 +222,114 @@ function requestId_(value) {
   return id;
 }
 
+function payloadJsonChars_(obj) {
+  try {
+    return JSON.stringify(obj).length;
+  } catch (err) {
+    return CONTENT_SERVICE_INLINE_MAX_CHARS_ + 1;
+  }
+}
+
+// Drop full reply text from a successful generate payload when the JSON would
+// be too large for the Apps Script / googleusercontent echo path. The client
+// then loads the Git backup (backupName / requestId / listAiBackups).
+function finalizeGeneratePayload_(result, backupName, requestId) {
+  if (!result || result.ok !== true) return result;
+  var id = requestId_(requestId || result.requestId);
+  if (id) result.requestId = id;
+  if (backupName) {
+    result.backupName = String(backupName);
+    result.gitBackup = true;
+  }
+  var content = String(result.content == null ? '' : result.content);
+  if (content) result.contentChars = content.length;
+  else if (typeof result.contentChars !== 'number') result.contentChars = 0;
+  // Already deferred on an earlier return path.
+  if (!content && result.contentViaBackup === true) {
+    result.gitBackup = !!result.backupName || result.gitBackup === true;
+    return result;
+  }
+  if (payloadJsonChars_(result) <= CONTENT_SERVICE_INLINE_MAX_CHARS_) {
+    result.contentViaBackup = false;
+    return result;
+  }
+  // Only omit the body when the client can fetch it from Git by name.
+  if (!result.backupName) {
+    result.contentViaBackup = false;
+    return result;
+  }
+  result.content = '';
+  result.contentViaBackup = true;
+  result.gitBackup = true;
+  return result;
+}
+
+function leanAiBackupItem_(item) {
+  if (!item || typeof item !== 'object') return item;
+  var content = String(item.content == null ? '' : item.content);
+  return {
+    name: String(item.name || ''),
+    action: String(item.action || ''),
+    model: item.model,
+    createdAt: item.createdAt,
+    sentCount: item.sentCount,
+    filteredCount: item.filteredCount,
+    durationMs: item.durationMs,
+    source: item.source,
+    referenceSource: item.referenceSource,
+    modeId: item.modeId,
+    modeName: item.modeName,
+    instruction: item.instruction,
+    requestId: item.requestId,
+    referenceIds: item.referenceIds || [],
+    content: '',
+    contentChars: content.length,
+    contentPreview: clipChars_(content, AI_BACKUP_LIST_PREVIEW_CHARS_),
+    lean: true
+  };
+}
+
+function aiBackupContentSlice_(text, offset, limit) {
+  var full = String(text == null ? '' : text);
+  var start = nonNegativeInt_(offset, 0);
+  if (start > full.length) start = full.length;
+  var size = positiveInt_(limit, AI_BACKUP_CONTENT_CHUNK_CHARS_);
+  if (size > AI_BACKUP_CONTENT_CHUNK_CHARS_) size = AI_BACKUP_CONTENT_CHUNK_CHARS_;
+  var slice = full.slice(start, start + size);
+  // Avoid splitting a surrogate pair at either edge of the chunk.
+  if (slice.length && start > 0) {
+    var first = slice.charCodeAt(0);
+    if (first >= 0xDC00 && first <= 0xDFFF) {
+      start += 1;
+      slice = full.slice(start, start + size);
+    }
+  }
+  if (slice.length) {
+    var last = slice.charCodeAt(slice.length - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) slice = slice.slice(0, -1);
+  }
+  return {
+    content: slice,
+    contentOffset: start,
+    contentChars: full.length,
+    contentComplete: start + slice.length >= full.length
+  };
+}
+
+function resolveAiBackupOwner_(requester, body) {
+  var username = normalizeUsername_(requester);
+  if (!username) return '';
+  var ownerRaw = body && (body.owner != null ? body.owner : body.targetUser);
+  if (ownerRaw == null || String(ownerRaw).trim() === '') return username;
+  var owner = normalizeUsername_(ownerRaw);
+  if (!owner) return '';
+  if (owner === username) return username;
+  var rights = lookupRights_(username);
+  if (!rights || rights.admin !== true) return '';
+  if (!aiUsageOwnerAllowed_(owner) || owner === username) return '';
+  return owner;
+}
+
 function handleGenerate_(body) {
   // Budget is the 6-minute web-app cap, measured from entry so a slow model
   // call can still return after the reply is saved.
@@ -293,12 +403,15 @@ function handleGenerate_(body) {
     var completion = requestCompletion_(apiKey, model, buildPrompt_(packed.questions, filteredCount, packed.truncated, instructionMeta.text, source), POE_SYSTEM_PROMPT_, provider);
     var durationMs = Date.now() - started;
     var gitBackup = false;
+    var backupName = '';
     var requestId = requestId_(body && body.requestId);
-    // Leave time to answer. A backup written after the cap kills the return,
-    // and the browser then has to read that same personal backup back.
-    if (executionMsLeft_(invokedAt) > 45000) {
+    var replyChars = String(completion.content || '').length;
+    // Long replies must hit Git before the ContentService echo. Prefer backup
+    // when the payload would otherwise exceed the inline JSON budget.
+    var backupMsNeeded = replyChars > (CONTENT_SERVICE_INLINE_MAX_CHARS_ / 2) ? 8000 : 45000;
+    if (executionMsLeft_(invokedAt) > backupMsNeeded) {
       try {
-        gitBackup = writeGitAiBackup_({
+        backupName = writeGitAiBackup_({
           action: 'generateQuestions',
           username: username,
           model: completion.model || model,
@@ -312,7 +425,8 @@ function handleGenerate_(body) {
           instruction: instructionMeta.text,
           referenceIds: referenceIds,
           requestId: requestId
-        }) === true;
+        }) || '';
+        gitBackup = !!backupName;
       } catch (backupErr) {
         safeLog_(backupErr);
       }
@@ -327,9 +441,12 @@ function handleGenerate_(body) {
       logged: false,
       backedUp: false,
       durationMs: durationMs,
-      gitBackup: gitBackup
+      gitBackup: gitBackup,
+      requestId: requestId
     };
-    if (executionMsLeft_(invokedAt) <= 25000) return result;
+    if (executionMsLeft_(invokedAt) <= 25000) {
+      return finalizeGeneratePayload_(result, backupName, requestId);
+    }
     var generateMeta = {
       model: result.model,
       requestedModel: model,
@@ -385,7 +502,8 @@ function handleGenerate_(body) {
       content: completion.content,
       metadata: backupMeta
     });
-    return result;
+    // Sheet logging can add fields; re-check the inline budget before return.
+    return finalizeGeneratePayload_(result, backupName, requestId);
   } catch (err) {
     releaseIntervalSlot_(username);
     var code = classifyFetchError_(err);
@@ -457,14 +575,16 @@ function handleTest_(body) {
     var durationMs = Date.now() - started;
     var passed = testReplyOk_(completion.content);
     var gitBackup = false;
+    var backupName = '';
     try {
-      gitBackup = writeGitAiBackup_({
+      backupName = writeGitAiBackup_({
         action: 'testModel',
         username: username,
         model: completion.model || model,
         content: completion.content,
         durationMs: durationMs
-      }) === true;
+      }) || '';
+      gitBackup = !!backupName;
     } catch (backupErr) {
       safeLog_(backupErr);
     }
@@ -1216,6 +1336,12 @@ var SHARED_READS_PER_MINUTE_ = 120;
 // Page size for listAiBackups and listAiUsageRecords (matches client HISTORY_LIMIT).
 // Newest first. A request cannot raise this cap or name another user's folder.
 var AI_BACKUP_LIST_MAX_ = 30;
+// Keep generateQuestions / list JSON under the Apps Script googleusercontent
+// echo path. Larger replies are stored in the Git backup and returned lean;
+// the browser loads the full text with getAiBackup (optionally chunked).
+var CONTENT_SERVICE_INLINE_MAX_CHARS_ = 48000;
+var AI_BACKUP_LIST_PREVIEW_CHARS_ = 180;
+var AI_BACKUP_CONTENT_CHUNK_CHARS_ = 40000;
 
 // Personal AI backup folders an admin may read via listAiUsageRecords.
 // Not a role allowlist. Callers still need ALLOWED_ADMIN_HASHES.
@@ -1722,7 +1848,7 @@ function collectGenerateBackups_(cfg, username, limit, afterName) {
     var item = parseAiBackupJson_(read && read.text, name);
     if (!item || item.action !== 'generateQuestions') continue;
     if (backups.length < cap) {
-      backups.push(item);
+      backups.push(leanAiBackupItem_(item));
     } else {
       hasMore = true;
       break;
@@ -1764,18 +1890,39 @@ function handleListAiBackups_(body) {
 
 function handleGetAiBackup_(body) {
   var username = normalizeUsername_(body.username);
-  if (!username || !lookupRights_(username).ai) return gitClientError_('feature_unavailable');
+  if (!username) return gitClientError_('feature_unavailable');
+  var rights = lookupRights_(username);
+  if (!rights) return gitClientError_('feature_unavailable');
+  var owner = resolveAiBackupOwner_(username, body);
+  if (!owner) return gitClientError_('bad_request');
+  // Own folder needs ai. Admin usage-record reads of another fixed folder
+  // only need admin (same gate as listAiUsageRecords).
+  if (owner !== username) {
+    if (rights.admin !== true) return gitClientError_('feature_unavailable');
+  } else if (!rights.ai) {
+    return gitClientError_('feature_unavailable');
+  }
   if (!takeSharedReadSlot_(username)) return gitClientError_('rate_limited');
   var cfg = githubConfig_();
   if (!githubBackupReady_(cfg)) return gitClientError_('github_not_found');
   var name = String(body.name || body.file || '').trim();
-  var full = resolveUserAiBackupPath_(cfg, username, name);
+  var full = resolveUserAiBackupPath_(cfg, owner, name);
   if (!full) return gitClientError_('bad_request');
   try {
     var read = githubReadText_(cfg, full);
     var item = parseAiBackupJson_(read && read.text, name);
     if (!item) return gitClientError_('github_error');
-    return { ok: true, backup: item };
+    var offset = body && body.offset != null ? body.offset : 0;
+    var limit = body && body.limit != null ? body.limit : AI_BACKUP_CONTENT_CHUNK_CHARS_;
+    var sliced = aiBackupContentSlice_(item.content, offset, limit);
+    item.content = sliced.content;
+    return {
+      ok: true,
+      backup: item,
+      contentChars: sliced.contentChars,
+      contentOffset: sliced.contentOffset,
+      contentComplete: sliced.contentComplete === true
+    };
   } catch (err) {
     safeLog_(err);
     return gitClientError_(err && err.code ? err.code : 'github_error');
@@ -1806,23 +1953,10 @@ function usageRecordFromBackup_(item, owner) {
   if (!item || item.action !== 'generateQuestions') return null;
   var name = normalizeUsername_(owner);
   if (!aiUsageOwnerAllowed_(name)) return null;
-  return {
-    username: name,
-    name: String(item.name || ''),
-    action: 'generateQuestions',
-    model: item.model,
-    createdAt: item.createdAt,
-    sentCount: item.sentCount,
-    filteredCount: item.filteredCount,
-    durationMs: item.durationMs,
-    source: item.source,
-    referenceSource: item.referenceSource,
-    modeId: item.modeId,
-    modeName: item.modeName,
-    instruction: item.instruction,
-    content: item.content,
-    referenceIds: item.referenceIds || []
-  };
+  var lean = leanAiBackupItem_(item);
+  lean.username = name;
+  lean.name = String(item.name || lean.name || '');
+  return lean;
 }
 
 function usageCursor_(body, requester) {
@@ -1998,16 +2132,16 @@ function referenceIdsForBackup_(body, packed, source) {
 
 function writeGitAiBackup_(info) {
   var cfg = githubConfig_();
-  if (!githubBackupReady_(cfg)) return false;
+  if (!githubBackupReady_(cfg)) return '';
   var action = backupFileAction_(info.action);
   var tz = Session.getScriptTimeZone() || 'Asia/Hong_Kong';
   var stamp = Utilities.formatDate(new Date(), tz, 'yyyyMMdd-HHmmss-SSS');
   var nonce = String(Utilities.getUuid() || '').replace(/-/g, '').slice(0, 8).toLowerCase();
   if (!/^[0-9a-f]{8}$/.test(nonce)) nonce = '00000000';
   var backupDir = githubUserBackupDir_(cfg, info && info.username);
-  if (!backupDir) return false;
+  if (!backupDir) return '';
   var path = joinGithubPath_(backupDir, stamp + '-' + action + '-' + nonce + '.json');
-  if (!path) return false;
+  if (!path) return '';
   var reply = clipChars_(String(info.content || ''), GITHUB_REPLY_MAX_CHARS_);
   var refSource = action === 'generateQuestions' ? referenceSource_(info.source) : '';
   var modeId = action === 'generateQuestions' ? resolveModeId_(info.modeId) : '';
@@ -2039,13 +2173,13 @@ function writeGitAiBackup_(info) {
   }
   var text = JSON.stringify(payload);
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return false;
+  if (!lock.tryLock(20000)) return '';
   try {
     githubWriteText_(cfg, path, text, 'Backup model reply');
-    return true;
+    return stamp + '-' + action + '-' + nonce + '.json';
   } catch (err) {
     safeLog_(err);
-    return false;
+    return '';
   } finally {
     lock.releaseLock();
   }
@@ -2853,11 +2987,45 @@ function selfTestGitPaths() {
   if (!usageRow || usageRow.username !== 'ryan' || !usageRow.referenceIds || usageRow.referenceIds.join('|') !== '2026-P1-01') {
     throw new Error('usage_row');
   }
+  if (usageRow.content) throw new Error('usage_row_full_content');
+  if (usageRow.lean !== true || usageRow.contentPreview !== 'stem' || usageRow.contentChars !== 4) {
+    throw new Error('usage_row_lean');
+  }
   if (usageRow.poeApiKey || JSON.stringify(usageRow).indexOf('secret-key') !== -1) throw new Error('usage_row_secret');
   if (usageRecordFromBackup_(usageRow, 'woody')) throw new Error('usage_row_woody');
   if (usageRecordFromBackup_(usageRow, 'user57') && usageRecordFromBackup_(usageRow, 'user57').username !== 'user57') {
     throw new Error('usage_row_user57');
   }
+  var bigReply = '';
+  while (bigReply.length < CONTENT_SERVICE_INLINE_MAX_CHARS_ + 100) bigReply += '題目內容測試字串';
+  var slim = finalizeGeneratePayload_({
+    ok: true,
+    content: bigReply,
+    model: 'm',
+    sentCount: 1,
+    filteredCount: 1,
+    gitBackup: true
+  }, '20260101-000000-000-generateQuestions-abcd1234.json', 'abc12345xy');
+  if (!slim.contentViaBackup || slim.content || !slim.backupName || slim.requestId !== 'abc12345xy') {
+    throw new Error('finalize_defer');
+  }
+  if (slim.contentChars !== bigReply.length) throw new Error('finalize_chars');
+  var inline = finalizeGeneratePayload_({
+    ok: true,
+    content: '短回覆',
+    model: 'm',
+    sentCount: 1,
+    filteredCount: 1
+  }, '', 'abc12345xy');
+  if (inline.contentViaBackup || inline.content !== '短回覆') throw new Error('finalize_inline');
+  var sliced = aiBackupContentSlice_('abcdefghij', 3, 4);
+  if (sliced.content !== 'defg' || sliced.contentOffset !== 3 || sliced.contentChars !== 10 || sliced.contentComplete !== false) {
+    throw new Error('backup_slice_mid');
+  }
+  var slicedEnd = aiBackupContentSlice_('abcdefghij', 8, 40);
+  if (slicedEnd.content !== 'ij' || slicedEnd.contentComplete !== true) throw new Error('backup_slice_end');
+  if (resolveAiBackupOwner_('ryan', {}) !== 'ryan') throw new Error('backup_owner_self');
+  if (resolveAiBackupOwner_('', { owner: 'user57' }) !== '') throw new Error('backup_owner_blank');
   var leaked = gitOk_({
     sha: 'nope',
     path: '../x',

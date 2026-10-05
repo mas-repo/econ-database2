@@ -159,11 +159,14 @@
         var id = name
             ? ('remote:' + name)
             : ('remote:' + username + ':' + String(createdAt || Date.now()));
+        var lean = backup.lean === true || !content;
         return {
             id: id,
             username: username,
             createdAt: createdAt || Date.now(),
             content: content,
+            contentPreview: String(backup.contentPreview || ''),
+            contentChars: Number(backup.contentChars) || content.length || 0,
             model: String(backup.model || ''),
             modeId: String(backup.modeId || ''),
             modeName: String(backup.modeName || ''),
@@ -179,7 +182,7 @@
             filterSummary: '',
             durationMs: Number(backup.durationMs) || 0,
             remoteName: name,
-            lean: !content
+            lean: lean
         };
     }
 
@@ -298,20 +301,56 @@
     }
 
 
+    Poe.fetchAiBackupContent = async function fetchAiBackupContent(name, options) {
+        options = options || {};
+        var username = Poe.currentUsername();
+        if (!username || !name) return null;
+        var offset = 0;
+        var parts = [];
+        var meta = null;
+        var chunkLimit = Poe.BACKUP_CONTENT_CHUNK_CHARS || 40000;
+        var guard = 0;
+        while (guard < 40) {
+            guard += 1;
+            if (options.control && options.control.cancelled) return null;
+            var payload = {
+                action: 'getAiBackup',
+                username: username,
+                name: name,
+                offset: offset,
+                limit: chunkLimit
+            };
+            if (options.owner) payload.owner = options.owner;
+            var data = await Poe.proxyRequest(payload, options.timeoutMs || 90000, options.control || null);
+            if (!data || data.ok !== true || !data.backup) return null;
+            if (!meta) meta = data.backup;
+            parts.push(String(data.backup.content == null ? '' : data.backup.content));
+            var chunkLen = String(data.backup.content == null ? '' : data.backup.content).length;
+            var nextOffset = (Number(data.contentOffset) || offset) + chunkLen;
+            if (data.contentComplete === true || chunkLen === 0) break;
+            if (nextOffset <= offset) break;
+            offset = nextOffset;
+        }
+        if (!meta) return null;
+        meta.content = parts.join('');
+        meta.name = String(meta.name || name);
+        return meta;
+    }
+
     Poe.fillLeanRemoteRecord = async function fillLeanRemoteRecord(record) {
         if (!record || !record.lean || record.content || !record.remoteName) return record;
         var username = Poe.currentUsername();
         if (!username) return record;
         try {
-            var data = await Poe.proxyRequest({
-                action: 'getAiBackup',
-                username: username,
-                name: record.remoteName
-            }, 90000, null);
-            if (!data || data.ok !== true || !data.backup) return record;
-            var filled = Poe.mapRemoteBackup(data.backup, username);
+            var owner = record.owner || record.username || '';
+            var options = { timeoutMs: 90000, control: null };
+            if (owner && owner !== username) options.owner = owner;
+            var filledBackup = await Poe.fetchAiBackupContent(record.remoteName, options);
+            var filled = filledBackup ? Poe.mapRemoteBackup(filledBackup, owner || username) : null;
             if (!filled || !filled.content) return record;
             record.content = filled.content;
+            record.contentChars = filled.contentChars || filled.content.length;
+            record.contentPreview = filled.contentPreview || record.contentPreview || '';
             if (!record.model && filled.model) record.model = filled.model;
             if (!record.modeId && filled.modeId) record.modeId = filled.modeId;
             if (!record.modeName && filled.modeName) record.modeName = filled.modeName;
@@ -323,7 +362,9 @@
             if ((!record.referenceIds || !record.referenceIds.length) && filled.referenceIds && filled.referenceIds.length) {
                 record.referenceIds = filled.referenceIds.slice();
             }
+            if (!record.requestId && filled.requestId) record.requestId = filled.requestId;
             record.lean = false;
+            record.incomplete = false;
             try { await Poe.saveGeneration(record); } catch (error) {}
         } catch (error) {
             // Keep the lean row selectable after a later retry.

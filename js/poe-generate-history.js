@@ -30,9 +30,14 @@
         if (record && record.incomplete && !String(content || '').trim()) {
             return '（出題未完成，尚無回覆文字）';
         }
-        var line = String(content || '').split('\n').map(function (item) { return item.trim(); }).filter(Boolean)[0] || '（沒有內容）';
+        var source = String(content || '').trim()
+            || String(record && record.contentPreview || '').trim();
+        var line = source.split('\n').map(function (item) { return item.trim(); }).filter(Boolean)[0] || '（沒有內容）';
         line = line.replace(/^#{1,6}\s+/, '');
         if (record && record.incomplete) line = '未完成 · ' + line;
+        if (record && record.lean && !String(content || '').trim() && source) {
+            line = '備份 · ' + line;
+        }
         return Poe.clipPreview(line, 42);
     }
 

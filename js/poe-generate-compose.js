@@ -1020,6 +1020,33 @@
         })[0] || null;
     }
 
+    Poe.selectUsageRecord = async function selectUsageRecord(record) {
+        if (!record) return;
+        Poe.poeUi.usageActiveId = record.id;
+        Poe.renderUsage();
+        if (record.lean && !record.content && record.remoteName) {
+            var detail = document.getElementById('poe-usage-detail');
+            if (detail) {
+                detail.textContent = '';
+                detail.hidden = false;
+                detail.classList.add('is-empty');
+                detail.classList.remove('has-paper');
+                var idle = document.createElement('div');
+                idle.className = 'poe-idle';
+                var lead = document.createElement('p');
+                lead.className = 'poe-lead';
+                lead.textContent = '正在載入這筆使用紀錄的完整回覆…';
+                idle.appendChild(lead);
+                detail.appendChild(idle);
+                Poe.setUsageStageChrome({ label: '出題結果', enlarge: false, hasPaper: false });
+            }
+            await Poe.fillLeanRemoteRecord(record);
+            if (!Poe.isPoeGenerateModalOpen()) return;
+            if (Poe.poeUi.usageActiveId !== record.id) return;
+            Poe.renderUsage();
+        }
+    }
+
     Poe.enlargeUsageResult = function enlargeUsageResult() {
         var record = Poe.currentUsageRecord();
         if (!record || !record.content) return;
@@ -1126,7 +1153,7 @@
             time.textContent = Poe.formatTime(record.createdAt);
             var preview = document.createElement('span');
             preview.className = 'poe-history-preview';
-            Poe.setInlineMarkdown(preview, Poe.previewText(record.content));
+            Poe.setInlineMarkdown(preview, Poe.previewText(record.content, record));
             var meta = document.createElement('span');
             meta.className = 'poe-history-meta';
             var metaBits = [];
@@ -1140,8 +1167,7 @@
             open.appendChild(preview);
             open.appendChild(meta);
             open.addEventListener('click', function () {
-                Poe.poeUi.usageActiveId = record.id;
-                Poe.renderUsage();
+                Poe.selectUsageRecord(record);
             });
             row.appendChild(open);
             list.appendChild(row);

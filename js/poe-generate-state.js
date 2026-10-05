@@ -74,6 +74,8 @@ var PoeGenerate = {};
     // Connection-style failures only. Auth, rate limits, and cancellations do not retry.
     Poe.PROXY_RETRY_MAX = 3;
     Poe.PROXY_RETRY_BASE_MS = 1200;
+    // Matches AI_BACKUP_CONTENT_CHUNK_CHARS_ when loading a long backup body.
+    Poe.BACKUP_CONTENT_CHUNK_CHARS = 40000;
     Poe.ERROR_TEXT = {
         feature_unavailable: '此功能暫不可用。',
         proxy_not_configured: '出題服務尚未完成設定。',

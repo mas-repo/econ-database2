@@ -177,7 +177,9 @@
             }
             var match = Poe.pickRecoveredBackup(page.records || [], attempt);
             if (!match) continue;
-            if (!match.content && match.remoteName) match = await Poe.fillLeanRemoteRecord(match);
+            if (!match.content && match.remoteName) {
+                match = await Poe.fillLeanRemoteRecord(match);
+            }
             if (!match || !String(match.content || '').trim()) continue;
             if (match.username && match.username !== username) continue;
             if (!(attempt.requestId && match.requestId === attempt.requestId) && !Poe.backupMatchesAttempt(match, attempt)) continue;
@@ -386,7 +388,7 @@
                 requestId: requestId,
                 referenceIds: referenceIds
             }), Poe.GENERATE_WAIT_MS, Poe.poeUi.control);
-            if (!data || data.ok !== true || !data.content) {
+            if (!data || data.ok !== true) {
                 var code = data && data.error ? data.error : 'server_error';
                 if (code === 'feature_unavailable') Poe.hideGenerateButton();
                 draft.content = '';
@@ -397,6 +399,42 @@
                     Poe.showError(code);
                     Poe.focusApiKeyFieldIfMissing(code);
                     Poe.setStatus('');
+                }
+                return;
+            }
+            var content = String(data.content || '');
+            var needsBackupFetch = data.contentViaBackup === true
+                || (!content && (data.backupName || data.gitBackup || data.requestId));
+            if (needsBackupFetch) {
+                if (Poe.isPoeGenerateModalOpen()) {
+                    Poe.setLoadingTitle('回覆較長，正在取回完整內容…');
+                    Poe.setStatus('回覆較長，正在從備份取回完整內容…');
+                }
+                if (data.backupName) {
+                    try {
+                        var named = await Poe.fetchAiBackupContent(data.backupName, {
+                            control: Poe.poeUi.control,
+                            timeoutMs: 90000
+                        });
+                        if (named && named.content) content = String(named.content);
+                    } catch (backupFetchErr) {
+                        content = content || '';
+                    }
+                }
+                if (!String(content || '').trim()) {
+                    try { await baselinePromise; } catch (ignore) {}
+                    var viaList = await Poe.recoverSavedGeneration(attempt);
+                    if (viaList && viaList.content) content = String(viaList.content);
+                }
+            }
+            if (!String(content || '').trim()) {
+                draft.content = '';
+                draft.incomplete = true;
+                draft.durationMs = Date.now() - startedAt;
+                await Poe.persistGenerationRecord(draft);
+                if (Poe.isPoeGenerateModalOpen()) {
+                    Poe.showError('bad_response');
+                    Poe.setStatus('這次出題未完成，已留在使用紀錄。可稍後在「使用紀錄」查看是否已取回內容。');
                 }
                 return;
             }
@@ -418,10 +456,11 @@
                 pastedReferences: pastedReferences,
                 singleQuestion: singleQuestion,
                 incomplete: false,
-                content: String(data.content),
+                content: content,
                 durationMs: data.durationMs || (Date.now() - startedAt)
             });
-            await Poe.presentGenerationRecord(record, false, data);
+            if (data.backupName) record.remoteName = data.backupName;
+            await Poe.presentGenerationRecord(record, needsBackupFetch, data);
         } catch (error) {
             var failCode = error && error.code ? error.code : 'network';
             if (failCode === 'cancelled') {
