@@ -18,10 +18,11 @@
 //
 // How to add / edit / remove a check
 // ----------------------------------
-// Prefer the in-panel UI (標題、條件、例外、新增檢查). Edits are saved to the
-// private data repo (same Apps Script GitHub proxy as the question bank) at
-// shared/data/data-checks.json, and cached in localStorage for this browser.
-// The repo file is the source of truth across computers.
+// Prefer the in-panel UI (標題、條件、例外、新增檢查). On open the panel shows
+// localStorage cache (or DEFAULT_DATA_CHECKS) and counts immediately, then
+// refreshes from shared/data/data-checks.json in the background. Mutating
+// controls stay disabled until that remote load finishes. Saves still upload
+// through the Apps Script GitHub proxy; localStorage is a cache.
 //
 // The DEFAULT_DATA_CHECKS list below remains the seed / fallback when the
 // remote file is missing. You can still edit that list in source:
@@ -194,6 +195,8 @@
     var cachedQuestions = null;
     var activeChecks = null;
     var conditionRowSeq = 0;
+    var mutationsLocked = false;
+    var remoteLoadToken = 0;
 
     function currentUsername() {
         if (typeof gitUsername === 'function') {
@@ -401,34 +404,25 @@
     }
 
     async function loadActiveChecksFromSource() {
+        // Kept for compatibility; open path uses cache-first + background remote.
+        return loadChecksFromLocalCache();
+    }
+
+    function loadChecksFromLocalCache() {
         if (!canSeeDataChecks()) {
             activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
             checksSource = DEFAULT_SOURCE;
             return activeChecks;
         }
-        try {
-            var remote = await downloadChecksFromRemote();
-            activeChecks = remote;
-            checksSource = REMOTE_SOURCE;
-            writeSavedChecks(currentUsername(), activeChecks);
-            return activeChecks;
-        } catch (error) {
-            var code = error && error.code ? error.code : '';
-            if (code === 'github_not_found') {
-                activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
-                checksSource = DEFAULT_SOURCE;
-                return activeChecks;
-            }
-            var cached = readSavedChecks(currentUsername());
-            if (cached) {
-                activeChecks = cached;
-                checksSource = CACHE_SOURCE;
-                return activeChecks;
-            }
+        var saved = readSavedChecks(currentUsername());
+        if (saved) {
+            activeChecks = saved;
+            checksSource = CACHE_SOURCE;
+        } else {
             activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
             checksSource = DEFAULT_SOURCE;
-            return activeChecks;
         }
+        return activeChecks;
     }
 
     function loadActiveChecks() {
@@ -436,14 +430,61 @@
             activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
             return activeChecks;
         }
-        if (Array.isArray(activeChecks) && activeChecks.length) return activeChecks;
-        var saved = readSavedChecks(currentUsername());
-        activeChecks = saved ? saved : cloneChecks(DEFAULT_DATA_CHECKS);
-        return activeChecks;
+        if (Array.isArray(activeChecks)) return activeChecks;
+        return loadChecksFromLocalCache();
+    }
+
+    function applyToolbarLock() {
+        var addBtn = document.getElementById('data-checks-add');
+        if (addBtn) addBtn.disabled = mutationsLocked;
+    }
+
+    function setMutationsLocked(locked) {
+        mutationsLocked = !!locked;
+        if (mutationsLocked) editingCheckId = null;
+        applyToolbarLock();
+    }
+
+    function logRemoteLoadError(error) {
+        var code = (error && error.code) ? String(error.code) : 'unknown';
+        var detail = error && error.message ? String(error.message) : '';
+        var message = '[資料檢查] syncDataChecksDownload failed (error code: ' + code + ')';
+        if (detail && detail !== code) message += ' — ' + detail;
+        console.error(message, error || null);
+    }
+
+    async function refreshChecksFromRemoteInBackground(token) {
+        try {
+            var remote = await downloadChecksFromRemote();
+            if (token !== remoteLoadToken) return;
+            if (!overlay || overlay.hidden) {
+                setMutationsLocked(false);
+                return;
+            }
+            activeChecks = remote;
+            checksSource = REMOTE_SOURCE;
+            writeSavedChecks(currentUsername(), activeChecks);
+            setMutationsLocked(false);
+            setChecksStatus('已從共用資料庫載入');
+            renderFromCache();
+        } catch (error) {
+            if (token !== remoteLoadToken) return;
+            logRemoteLoadError(error);
+            setMutationsLocked(false);
+            if (!overlay || overlay.hidden) return;
+            var code = error && error.code ? error.code : '';
+            if (code === 'github_not_found') {
+                setChecksStatus('共用檔尚未建立；保留' + (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查'));
+            } else {
+                setChecksStatus('同步失敗；保留' + (checksSource === CACHE_SOURCE ? '本機快取' : '預設檢查'));
+            }
+            renderFromCache();
+        }
     }
 
     async function persistActiveChecks() {
         if (!canSeeDataChecks()) return false;
+        if (mutationsLocked) return false;
         activeChecks = normalizeChecks(activeChecks);
         writeSavedChecks(currentUsername(), activeChecks);
         if (checksBusy) return false;
@@ -684,7 +725,6 @@
             + '  </header>'
             + '  <div class="data-checks-toolbar">'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-add">＋ 新增檢查</button>'
-            + '    <button type="button" class="btn btn-secondary btn-sm" id="data-checks-reset-defaults">還原預設檢查</button>'
             + '  </div>'
             + '  <div class="data-checks-body" id="data-checks-body"></div>'
             + '  <footer class="data-checks-footer">'
@@ -701,9 +741,6 @@
         overlay.querySelector('#data-checks-add').addEventListener('click', function () {
             addBlankCheck();
         });
-        overlay.querySelector('#data-checks-reset-defaults').addEventListener('click', function () {
-            resetToDefaults();
-        });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
                 event.preventDefault();
@@ -719,33 +756,39 @@
             }
             var editBtn = event.target.closest('[data-dc-edit]');
             if (editBtn) {
+                if (mutationsLocked) return;
                 editingCheckId = editBtn.getAttribute('data-dc-edit');
                 renderFromCache();
                 return;
             }
             var cancelBtn = event.target.closest('[data-dc-cancel]');
             if (cancelBtn) {
+                if (mutationsLocked) return;
                 editingCheckId = null;
                 renderFromCache();
                 return;
             }
             var saveBtn = event.target.closest('[data-dc-save]');
             if (saveBtn) {
+                if (mutationsLocked) return;
                 saveEditedCheck(saveBtn.getAttribute('data-dc-save'));
                 return;
             }
             var deleteBtn = event.target.closest('[data-dc-delete]');
             if (deleteBtn) {
+                if (mutationsLocked) return;
                 deleteCheck(deleteBtn.getAttribute('data-dc-delete'));
                 return;
             }
             var addCond = event.target.closest('[data-dc-add-cond]');
             if (addCond) {
+                if (mutationsLocked) return;
                 addConditionRow(addCond.getAttribute('data-dc-add-cond'));
                 return;
             }
             var removeCond = event.target.closest('[data-dc-remove-cond]');
             if (removeCond) {
+                if (mutationsLocked) return;
                 removeConditionRow(removeCond);
             }
         });
@@ -888,7 +931,7 @@
     }
 
     async function addBlankCheck() {
-        if (!canSeeDataChecks()) return;
+        if (!canSeeDataChecks() || mutationsLocked) return;
         loadActiveChecks();
         var check = {
             id: newCheckId(),
@@ -903,20 +946,8 @@
         renderFromCache();
     }
 
-    async function resetToDefaults() {
-        if (!canSeeDataChecks()) return;
-        if (!window.confirm('還原為程式內建的預設檢查？目前已儲存的標題、條件、例外與新增檢查都會被取代。')) {
-            return;
-        }
-        activeChecks = cloneChecks(DEFAULT_DATA_CHECKS);
-        editingCheckId = null;
-        renderFromCache();
-        await persistActiveChecks();
-        renderFromCache();
-    }
-
     async function deleteCheck(checkId) {
-        if (!canSeeDataChecks()) return;
+        if (!canSeeDataChecks() || mutationsLocked) return;
         loadActiveChecks();
         var next = activeChecks.filter(function (check) { return check.id !== checkId; });
         if (next.length === activeChecks.length) return;
@@ -959,7 +990,7 @@
     }
 
     async function saveEditedCheck(checkId) {
-        if (!canSeeDataChecks()) return;
+        if (!canSeeDataChecks() || mutationsLocked) return;
         loadActiveChecks();
         var edited = readEditorForm(checkId);
         if (!edited) return;
@@ -1082,7 +1113,9 @@
         if (!results.length) {
             var empty = document.createElement('p');
             empty.className = 'data-checks-empty';
-            empty.textContent = '尚未設定任何檢查。按上方「新增檢查」，或還原預設檢查。';
+            empty.textContent = mutationsLocked
+                ? '尚未設定任何檢查（同步中…）。'
+                : '尚未設定任何檢查。按上方「新增檢查」。';
             body.appendChild(empty);
         } else {
             results.forEach(function (result) {
@@ -1118,9 +1151,13 @@
 
                     var actions = document.createElement('div');
                     actions.className = 'data-checks-row-actions';
-                    actions.innerHTML = ''
-                        + '<button type="button" class="btn btn-outline-primary btn-sm" data-dc-edit="' + escapeAttr(check.id) + '">編輯</button>'
-                        + '<button type="button" class="btn btn-secondary btn-sm" data-dc-delete="' + escapeAttr(check.id) + '">刪除</button>';
+                    if (mutationsLocked) {
+                        actions.innerHTML = '<span class="data-checks-syncing">同步中，暫不可編輯</span>';
+                    } else {
+                        actions.innerHTML = ''
+                            + '<button type="button" class="btn btn-outline-primary btn-sm" data-dc-edit="' + escapeAttr(check.id) + '">編輯</button>'
+                            + '<button type="button" class="btn btn-secondary btn-sm" data-dc-delete="' + escapeAttr(check.id) + '">刪除</button>';
+                    }
                     row.appendChild(actions);
 
                     var details = document.createElement('details');
@@ -1214,17 +1251,23 @@
         ensureOverlay();
         overlay.hidden = false;
         document.body.classList.add('data-checks-open');
-        var body = document.getElementById('data-checks-body');
-        if (body) {
-            body.innerHTML = '<p class="data-checks-empty">正在載入檢查設定與題目…</p>';
-        }
+        editingCheckId = null;
         checksStatusText = '';
-        await loadActiveChecksFromSource();
-        if (checksSource === REMOTE_SOURCE) setChecksStatus('已從共用資料庫載入');
-        else if (checksSource === CACHE_SOURCE) setChecksStatus('無法連線；顯示本機快取');
-        else setChecksStatus('共用檔尚未建立；使用預設檢查');
-        await loadQuestionsForChecks();
+        loadChecksFromLocalCache();
+        setMutationsLocked(true);
+        setChecksStatus('正在同步共用設定…');
+
+        var token = ++remoteLoadToken;
+        // Remote sync stays in the background; never block first paint on it.
+        refreshChecksFromRemoteInBackground(token);
+
+        if (!Array.isArray(cachedQuestions)) {
+            await loadQuestionsForChecks();
+            if (token !== remoteLoadToken) return;
+            if (!overlay || overlay.hidden) return;
+        }
         renderFromCache();
+        applyToolbarLock();
         var closeBtn = overlay.querySelector('.data-checks-close');
         if (closeBtn) closeBtn.focus();
     }
@@ -1279,7 +1322,8 @@
             + '.data-checks-count.is-exceptions { background: #f8fafc; color: var(--text-light); }'
             + '.data-checks-count strong { font-size: 15px; font-weight: 800; }'
             + '.data-checks-row-summary { margin: 8px 0 0; color: var(--text-light); font-size: 13px; line-height: 1.55; }'
-            + '.data-checks-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }'
+            + '.data-checks-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }'
+            + '.data-checks-syncing { color: var(--text-light); font-size: 13px; }'
             + '.data-checks-ids { margin-top: 10px; border-top: 1px solid #eef3f8; padding-top: 8px; }'
             + '.data-checks-ids summary { cursor: pointer; color: var(--secondary-color); font-size: 13px; font-weight: 700; }'
             + '.data-checks-id-list {'
