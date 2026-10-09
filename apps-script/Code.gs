@@ -37,6 +37,9 @@
  * 回報問題 (any known user; admin list):
  *   <GITHUB_SHARED_PREFIX>/data/issue-reports.json
  *   e.g. shared/data/issue-reports.json
+ * 分題提案 staging (propose never writes bank; approve patches database.json):
+ *   <GITHUB_SHARED_PREFIX>/data/question-parts-proposals.json
+ *   e.g. shared/data/question-parts-proposals.json
  * Personal preferences (known user; getUserSettings / saveUserSettings):
  *   users/<username>/settings.json
  * Model-reply (AI出題) backups stay personal:
@@ -123,6 +126,11 @@
  *   listIssueReports          → handleListIssueReports_  (admin)
  *   updateIssueReportStatus   → handleUpdateIssueReportStatus_ (admin)
  *   bulkUpdateIssueReportStatus → handleBulkUpdateIssueReportStatus_ (admin)
+ * 分題提案 staging (shared/data/question-parts-proposals.json):
+ *   listQuestionPartsProposals      → handleListQuestionPartsProposals_   (admin)
+ *   proposeQuestionParts            → handleProposeQuestionParts_         (admin|githubSync)
+ *   approveQuestionPartsProposal    → handleApproveQuestionPartsProposal_ (admin; bank patch)
+ *   rejectQuestionPartsProposal     → handleRejectQuestionPartsProposal_  (admin)
  * Personal user settings (users/<username>/settings.json; known user; not bank SCHEMA):
  *   getUserSettings  → handleGetUserSettings_
  *   saveUserSettings → handleSaveUserSettings_
@@ -226,6 +234,10 @@ function handlePost_(e) {
   if (action === 'listIssueReports') return handleListIssueReports_(body);
   if (action === 'updateIssueReportStatus') return handleUpdateIssueReportStatus_(body);
   if (action === 'bulkUpdateIssueReportStatus') return handleBulkUpdateIssueReportStatus_(body);
+  if (action === 'listQuestionPartsProposals') return handleListQuestionPartsProposals_(body);
+  if (action === 'proposeQuestionParts') return handleProposeQuestionParts_(body);
+  if (action === 'approveQuestionPartsProposal') return handleApproveQuestionPartsProposal_(body);
+  if (action === 'rejectQuestionPartsProposal') return handleRejectQuestionPartsProposal_(body);
   if (action === 'getUserSettings') return handleGetUserSettings_(body);
   if (action === 'saveUserSettings') return handleSaveUserSettings_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
@@ -1782,6 +1794,617 @@ function handleBulkUpdateIssueReportStatus_(body) {
   return {
     ok: true,
     updated: Array.isArray(saved.reports) ? saved.reports : [],
+    sha: saved.sha,
+    path: saved.path
+  };
+}
+
+// === 分題提案 staging (shared/data/question-parts-proposals.json) ===
+// Agents / bulk fillers propose questionParts here. Only approve patches the
+// shared bank (database.json). Propose never touches the bank. Pending-only
+// file: approve and reject both remove the staging row.
+
+var QUESTION_PARTS_PROPOSALS_REL_PATH_ = 'data/question-parts-proposals.json';
+var QUESTION_PARTS_PROPOSALS_MAX_BYTES_ = 2000000;
+var QUESTION_PARTS_PROPOSALS_MAX_ITEMS_ = 5000;
+var QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_ = 1;
+var PARTS_PROPOSAL_PERFORMANCE_ = {
+  '優異': true,
+  '優良': true,
+  '良好': true,
+  '令人滿意': true,
+  '尚可': true,
+  '欠佳': true
+};
+var PARTS_PROPOSAL_SUM_TOLERANCE_ = 0.001;
+
+function githubSharedQuestionPartsProposalsPath_(cfg) {
+  var prefix = githubSharedPrefix_(cfg);
+  if (!prefix) return '';
+  return joinGithubPath_(prefix, QUESTION_PARTS_PROPOSALS_REL_PATH_);
+}
+
+function emptyQuestionPartsProposalsStore_() {
+  return {
+    schemaVersion: QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_,
+    updatedAt: '',
+    proposals: []
+  };
+}
+
+function readQuestionPartsProposalsStore_(cfg) {
+  var path = githubSharedQuestionPartsProposalsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  try {
+    var read = githubReadText_(cfg, path);
+    var parsed;
+    try {
+      parsed = JSON.parse(read.text);
+    } catch (ignore) {
+      throw gitFail_('github_error');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw gitFail_('github_error');
+    }
+    if (!Array.isArray(parsed.proposals)) parsed.proposals = [];
+    if (typeof parsed.schemaVersion !== 'number') {
+      parsed.schemaVersion = QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_;
+    }
+    return { store: parsed, sha: read.sha || '', path: path, existed: true };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return {
+        store: emptyQuestionPartsProposalsStore_(),
+        sha: '',
+        path: path,
+        existed: false
+      };
+    }
+    throw err;
+  }
+}
+
+function writeQuestionPartsProposalsStore_(cfg, store, message) {
+  var path = githubSharedQuestionPartsProposalsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  store.schemaVersion = QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_;
+  store.updatedAt = new Date().toISOString();
+  if (!Array.isArray(store.proposals)) store.proposals = [];
+  var text = JSON.stringify(store);
+  if (utf8Length_(text) > QUESTION_PARTS_PROPOSALS_MAX_BYTES_) {
+    throw gitFail_('payload_too_large');
+  }
+  var written = githubWriteText_(cfg, path, text, message || 'Update question-parts proposals');
+  return { sha: written.sha, path: path, store: store };
+}
+
+function normalizeProposalPart_(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  var label = String(raw.label == null ? (raw.id == null ? '' : raw.id) : raw.label).trim();
+  var marksRaw = raw.marks;
+  var marks = null;
+  if (marksRaw !== null && marksRaw !== undefined && String(marksRaw).trim() !== '') {
+    var num = Number(String(marksRaw).trim());
+    if (isFinite(num)) marks = num;
+  }
+  var performance = String(raw.performance == null ? '' : raw.performance).trim();
+  if (performance && !PARTS_PROPOSAL_PERFORMANCE_[performance]) performance = '';
+  if (!label && marks === null && !performance) return null;
+  return { label: label, marks: marks, performance: performance };
+}
+
+function normalizeProposalParts_(raw) {
+  if (!Array.isArray(raw)) return [];
+  var out = [];
+  for (var i = 0; i < raw.length; i++) {
+    var part = normalizeProposalPart_(raw[i]);
+    if (part) out.push(part);
+  }
+  return out;
+}
+
+function validateProposalPartsSum_(parts, totalMarks, questionId) {
+  var idLabel = String(questionId || '').trim() || '（無編號）';
+  if (!parts.length) {
+    return {
+      ok: false,
+      error: 'validation_failed',
+      message: '題目「' + idLabel + '」提案沒有有效分題。'
+    };
+  }
+  var missing = [];
+  var sum = 0;
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].marks === null || parts[i].marks === undefined) {
+      missing.push(parts[i].label || String(i + 1));
+    } else {
+      sum += Number(parts[i].marks);
+    }
+  }
+  if (missing.length) {
+    return {
+      ok: false,
+      error: 'validation_failed',
+      message: '題目「' + idLabel + '」有分題但缺少分數（' + missing.join('、') + '）。'
+    };
+  }
+  if (totalMarks === null || totalMarks === undefined || String(totalMarks).trim() === '') {
+    return {
+      ok: false,
+      error: 'validation_failed',
+      message: '題目「' + idLabel + '」的總分無效；有分題時總分必須是數字。'
+    };
+  }
+  var total = Number(totalMarks);
+  if (!isFinite(total)) {
+    return {
+      ok: false,
+      error: 'validation_failed',
+      message: '題目「' + idLabel + '」的總分無效；有分題時總分必須是數字。'
+    };
+  }
+  if (Math.abs(sum - total) > PARTS_PROPOSAL_SUM_TOLERANCE_) {
+    return {
+      ok: false,
+      error: 'validation_failed',
+      message: '題目「' + idLabel + '」分題分數合計為 ' + String(sum)
+        + '，與總分 ' + String(total) + ' 不符。'
+    };
+  }
+  return { ok: true, sum: sum, total: total };
+}
+
+function bankQuestionHasFilledParts_(question) {
+  if (!question || typeof question !== 'object') return false;
+  if (String(question.partsStatus || '').trim().toLowerCase() === 'filled') return true;
+  return Array.isArray(question.questionParts) && question.questionParts.length > 0;
+}
+
+function publicPartsProposalView_(row) {
+  if (!row) return null;
+  return {
+    id: String(row.id || ''),
+    questionId: String(row.questionId || ''),
+    questionParts: normalizeProposalParts_(row.questionParts),
+    partsStatus: 'filled',
+    note: String(row.note || ''),
+    source: String(row.source || ''),
+    proposedBy: String(row.proposedBy || ''),
+    proposedAt: String(row.proposedAt || '')
+  };
+}
+
+function findPartsProposal_(store, proposalId, questionId) {
+  var list = Array.isArray(store && store.proposals) ? store.proposals : [];
+  var pid = String(proposalId || '').trim();
+  var qid = String(questionId || '').trim();
+  var i;
+  if (pid) {
+    for (i = 0; i < list.length; i++) {
+      if (String(list[i] && list[i].id || '') === pid) {
+        return { proposal: list[i], index: i };
+      }
+    }
+  }
+  if (qid) {
+    for (i = 0; i < list.length; i++) {
+      if (String(list[i] && list[i].questionId || '') === qid) {
+        return { proposal: list[i], index: i };
+      }
+    }
+  }
+  return null;
+}
+
+function removePartsProposalAt_(store, index) {
+  var list = Array.isArray(store.proposals) ? store.proposals : [];
+  if (index < 0 || index >= list.length) return null;
+  var removed = list[index];
+  list.splice(index, 1);
+  store.proposals = list;
+  return removed;
+}
+
+function readSharedBankForPartsApprove_(cfg) {
+  var path = githubSharedBankPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  var read = githubReadText_(cfg, path);
+  var parsed;
+  try {
+    parsed = JSON.parse(read.text);
+  } catch (ignore) {
+    throw gitFail_('github_error');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw gitFail_('github_error');
+  }
+  if (!Array.isArray(parsed.questions)) parsed.questions = [];
+  return { bank: parsed, sha: read.sha || '', path: path };
+}
+
+function writeSharedBankForPartsApprove_(cfg, bank, message) {
+  var path = githubSharedBankPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  bank.exportDate = new Date().toISOString();
+  bank.questionCount = Array.isArray(bank.questions) ? bank.questions.length : 0;
+  var text = JSON.stringify(bank);
+  if (utf8Length_(text) > GITHUB_DATA_MAX_BYTES_) throw gitFail_('payload_too_large');
+  var written = githubWriteText_(cfg, path, text, message || 'Approve question parts proposal');
+  return { sha: written.sha, path: path };
+}
+
+function findBankQuestionIndex_(bank, questionId) {
+  var qid = String(questionId || '').trim();
+  var list = bank && Array.isArray(bank.questions) ? bank.questions : [];
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i] && list[i].id || '') === qid) return i;
+  }
+  return -1;
+}
+
+function publicBankPartsSnapshot_(question) {
+  if (!question) return null;
+  return {
+    questionId: String(question.id || ''),
+    marks: question.marks,
+    partsStatus: String(question.partsStatus || ''),
+    questionParts: normalizeProposalParts_(question.questionParts)
+  };
+}
+
+function handleListQuestionPartsProposals_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  try {
+    var loaded = readQuestionPartsProposalsStore_(cfg);
+    var rows = (loaded.store.proposals || []).map(publicPartsProposalView_).filter(Boolean);
+    rows.sort(function (a, b) {
+      return String(b.proposedAt || '').localeCompare(String(a.proposedAt || ''));
+    });
+    if (rows.length > 500) rows = rows.slice(0, 500);
+    return {
+      ok: true,
+      rows: rows,
+      path: loaded.path,
+      sha: loaded.sha,
+      schemaVersion: QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_
+    };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return {
+        ok: true,
+        rows: [],
+        path: githubSharedQuestionPartsProposalsPath_(cfg),
+        sha: '',
+        schemaVersion: QUESTION_PARTS_PROPOSALS_SCHEMA_VERSION_
+      };
+    }
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+}
+
+// Propose: admin or githubSync (automation / Econ data fillers). Never writes database.json.
+// Upserts one pending proposal per questionId.
+function handleProposeQuestionParts_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = lookupRights_(username);
+  if (!username || !(rights.admin || rights.githubSync)) {
+    return { ok: false, error: 'feature_unavailable' };
+  }
+
+  var incoming = [];
+  if (Array.isArray(body.proposals)) {
+    incoming = body.proposals;
+  } else if (body.questionId || body.questionParts) {
+    incoming = [body];
+  }
+  if (!incoming.length) return { ok: false, error: 'bad_request' };
+  if (incoming.length > 200) incoming = incoming.slice(0, 200);
+
+  var prepared = [];
+  var i;
+  for (i = 0; i < incoming.length; i++) {
+    var item = incoming[i];
+    if (!item || typeof item !== 'object') continue;
+    var questionId = String(item.questionId || '').trim();
+    if (!questionId || questionId.length > 80) continue;
+    var parts = normalizeProposalParts_(item.questionParts);
+    if (!parts.length) continue;
+    var note = String(item.note == null ? '' : item.note).trim();
+    if (note.length > 2000) note = note.slice(0, 2000);
+    var source = String(item.source == null ? '' : item.source).trim();
+    if (source.length > 200) source = source.slice(0, 200);
+    prepared.push({
+      questionId: questionId,
+      questionParts: parts,
+      partsStatus: 'filled',
+      note: note,
+      source: source
+    });
+  }
+  if (!prepared.length) return { ok: false, error: 'bad_request' };
+
+  var saved = mutateQuestionPartsProposalsStore_(username, 'Propose question parts (' + prepared.length + ')', function (store) {
+    var list = Array.isArray(store.proposals) ? store.proposals : [];
+    var existingByQid = {};
+    var j;
+    for (j = 0; j < list.length; j++) {
+      var existingQid = String(list[j] && list[j].questionId || '');
+      if (existingQid && existingByQid[existingQid] == null) {
+        existingByQid[existingQid] = list[j];
+      }
+    }
+    var replacing = {};
+    for (j = 0; j < prepared.length; j++) replacing[prepared[j].questionId] = true;
+    var kept = [];
+    for (j = 0; j < list.length; j++) {
+      var keepQid = String(list[j] && list[j].questionId || '');
+      if (replacing[keepQid]) continue;
+      kept.push(list[j]);
+    }
+    var upserted = [];
+    var nowIso = new Date().toISOString();
+    for (j = prepared.length - 1; j >= 0; j--) {
+      var row = prepared[j];
+      var prior = existingByQid[row.questionId];
+      var record = {
+        id: prior && prior.id
+          ? String(prior.id)
+          : ('qp_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16)),
+        questionId: row.questionId,
+        questionParts: row.questionParts,
+        partsStatus: 'filled',
+        note: row.note,
+        source: row.source,
+        proposedBy: username,
+        proposedAt: nowIso
+      };
+      kept.unshift(record);
+      upserted.unshift(publicPartsProposalView_(record));
+    }
+    if (kept.length > QUESTION_PARTS_PROPOSALS_MAX_ITEMS_) {
+      kept = kept.slice(0, QUESTION_PARTS_PROPOSALS_MAX_ITEMS_);
+    }
+    store.proposals = kept;
+    return { ok: true, proposals: upserted };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  writeLog_({
+    username: username,
+    action: 'proposeQuestionParts',
+    success: true,
+    metadata: { count: prepared.length }
+  }, true);
+  return {
+    ok: true,
+    proposals: Array.isArray(saved.proposals) ? saved.proposals : [],
+    sha: saved.sha,
+    path: saved.path
+  };
+}
+
+function mutateQuestionPartsProposalsStore_(username, message, mutator) {
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(25000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var loaded = readQuestionPartsProposalsStore_(cfg);
+    var result = mutator(loaded.store);
+    if (!result || result.ok === false) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return result && result.error ? gitClientError_(result.error) : gitClientError_('bad_request');
+    }
+    var written = writeQuestionPartsProposalsStore_(cfg, loaded.store, message);
+    lock.releaseLock();
+    held = false;
+    return {
+      ok: true,
+      sha: written.sha,
+      path: written.path,
+      proposals: result.proposals || null,
+      proposal: result.proposal || null
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    if (code === 'github_not_found') return gitClientError_('github_not_found');
+    return gitClientError_('github_error');
+  }
+}
+
+function handleApproveQuestionPartsProposal_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var proposalId = String(body.proposalId || body.id || '').trim();
+  var questionIdHint = String(body.questionId || '').trim();
+  var confirmOverwrite = body.confirmOverwrite === true
+    || body.confirmOverwrite === 'true'
+    || body.confirmOverwrite === 1;
+  if (!proposalId && !questionIdHint) return { ok: false, error: 'bad_request' };
+
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+    return gitClientError_('github_not_configured');
+  }
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(25000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+
+    var loadedProposals = readQuestionPartsProposalsStore_(cfg);
+    var found = findPartsProposal_(loadedProposals.store, proposalId, questionIdHint);
+    if (!found) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return { ok: false, error: 'not_found' };
+    }
+    var proposal = found.proposal;
+    var questionId = String(proposal.questionId || '').trim();
+    var parts = normalizeProposalParts_(proposal.questionParts);
+    if (!questionId || !parts.length) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return { ok: false, error: 'bad_request' };
+    }
+
+    var loadedBank = readSharedBankForPartsApprove_(cfg);
+    var qIndex = findBankQuestionIndex_(loadedBank.bank, questionId);
+    if (qIndex < 0) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return { ok: false, error: 'not_found', message: '題庫找不到題目 ' + questionId };
+    }
+    var live = loadedBank.bank.questions[qIndex];
+    var currentSnap = publicBankPartsSnapshot_(live);
+    var proposedSnap = {
+      questionId: questionId,
+      marks: live.marks,
+      partsStatus: 'filled',
+      questionParts: parts
+    };
+
+    if (bankQuestionHasFilledParts_(live) && !confirmOverwrite) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return {
+        ok: true,
+        needsConfirm: true,
+        proposalId: String(proposal.id || ''),
+        questionId: questionId,
+        current: currentSnap,
+        proposed: proposedSnap,
+        message: '題目已有分題資料。若要覆寫，請確認後再通過。'
+      };
+    }
+
+    var sumCheck = validateProposalPartsSum_(parts, live.marks, questionId);
+    if (!sumCheck.ok) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return {
+        ok: false,
+        error: sumCheck.error || 'validation_failed',
+        message: sumCheck.message || ''
+      };
+    }
+
+    live.questionParts = parts;
+    live.partsStatus = 'filled';
+    loadedBank.bank.questions[qIndex] = live;
+
+    var bankWritten = writeSharedBankForPartsApprove_(
+      cfg,
+      loadedBank.bank,
+      'Approve question parts for ' + questionId
+    );
+
+    removePartsProposalAt_(loadedProposals.store, found.index);
+    var proposalsWritten = writeQuestionPartsProposalsStore_(
+      cfg,
+      loadedProposals.store,
+      'Remove approved question-parts proposal ' + String(proposal.id || questionId)
+    );
+
+    lock.releaseLock();
+    held = false;
+    writeLog_({
+      username: username,
+      action: 'approveQuestionPartsProposal',
+      success: true,
+      metadata: {
+        questionId: questionId,
+        proposalId: String(proposal.id || ''),
+        overwrite: confirmOverwrite === true,
+        partsCount: parts.length
+      }
+    }, true);
+    return {
+      ok: true,
+      needsConfirm: false,
+      questionId: questionId,
+      proposalId: String(proposal.id || ''),
+      question: publicBankPartsSnapshot_(live),
+      bankSha: bankWritten.sha,
+      bankPath: bankWritten.path,
+      proposalsSha: proposalsWritten.sha,
+      proposalsPath: proposalsWritten.path
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    if (code === 'github_not_found') return gitClientError_('github_not_found');
+    return gitClientError_('github_error');
+  }
+}
+
+function handleRejectQuestionPartsProposal_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var proposalId = String(body.proposalId || body.id || '').trim();
+  var questionId = String(body.questionId || '').trim();
+  if (!proposalId && !questionId) return { ok: false, error: 'bad_request' };
+
+  var saved = mutateQuestionPartsProposalsStore_(
+    username,
+    'Reject question-parts proposal ' + (proposalId || questionId),
+    function (store) {
+      var found = findPartsProposal_(store, proposalId, questionId);
+      if (!found) return { ok: false, error: 'not_found' };
+      var removed = removePartsProposalAt_(store, found.index);
+      return { ok: true, proposal: publicPartsProposalView_(removed) };
+    }
+  );
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  writeLog_({
+    username: username,
+    action: 'rejectQuestionPartsProposal',
+    success: true,
+    metadata: {
+      proposalId: saved.proposal && saved.proposal.id,
+      questionId: saved.proposal && saved.proposal.questionId
+    }
+  }, true);
+  return {
+    ok: true,
+    proposal: saved.proposal,
     sha: saved.sha,
     path: saved.path
   };
