@@ -65,7 +65,6 @@ const ARROW_MAP = {
     'curriculum-options': 'curriculum-arrow',
     'feature-options': 'feature-arrow',
     'part-performance-options': 'part-performance-arrow',
-    'chapter-options': 'chapter-arrow',
     'year-options': 'year-arrow',
     
     // Standard Filters
@@ -159,7 +158,7 @@ function closeAllDropdowns() {
         clearFilterDropdownPosition(d);
     });
 
-    ['curriculum', 'chapter', 'feature', 'partPerformance', 'year'].forEach(type => {
+    ['curriculum', 'feature', 'partPerformance', 'year'].forEach(type => {
         const sectionId = type === 'partPerformance' ? 'part-performance-options' : `${type}-options`;
         const section = document.getElementById(sectionId);
         if (section) {
@@ -179,31 +178,6 @@ function closeAllDropdowns() {
 }
 
 /**
- * Helper: Applies tooltips to Chapter options based on constants.js.
- * Chapter titles come from CHAPTER_DESCRIPTIONS.
- */
-function applyChapterTooltips() {
-    const container = document.getElementById('chapter-options');
-    if (!container) return;
-
-    container.classList.remove('hide-chapter-names');
-
-    if (typeof CHAPTER_DESCRIPTIONS === 'undefined') return;
-
-    const items = container.querySelectorAll('[data-value]');
-    items.forEach(item => {
-        const rawVal = item.getAttribute('data-value');
-        if (!rawVal) return;
-
-        const paddedVal = rawVal.toString().padStart(2, '0');
-        const description = CHAPTER_DESCRIPTIONS[paddedVal];
-        if (description) {
-            item.setAttribute('title', `${paddedVal}: ${description}`);
-        }
-    });
-}
-
-/**
  * Master Toggle Function
  */
 function toggleDropdown(dropdownId) {
@@ -219,14 +193,10 @@ function toggleDropdown(dropdownId) {
     closeAllDropdowns();
 
     if (!wasOpen) {
-        const gridFilters = ['curriculum-options', 'feature-options', 'part-performance-options', 'chapter-options', 'year-options'];
+        const gridFilters = ['curriculum-options', 'feature-options', 'part-performance-options', 'year-options'];
 
         if (gridFilters.includes(dropdownId)) {
             target.style.display = 'grid';
-            
-            if (dropdownId === 'chapter-options') {
-                applyChapterTooltips();
-            }
         } else {
             target.style.display = ''; 
             target.classList.add('active');
@@ -282,7 +252,6 @@ window.addEventListener('resize', function () {
         'curriculum-options',
         'feature-options',
         'part-performance-options',
-        'chapter-options',
         'year-options'
     ];
     openIds.forEach(function (id) {
@@ -368,8 +337,9 @@ window.filterByTag = async function(category, value) {
 function updateFilterIndicators() {
     // graph/table/calculation/multipleSelection/concepts/patterns/stemPatterns
     // use modal trigger badges (filter-modal.js) instead of dot indicators.
+    // chapter uses mf-badge-chapter (filter-modal.js) instead of a dot indicator.
     const triStateTypes = [
-        'publisher', 'exam', 'qtype', 'curriculum', 'chapter', 'feature', 'partPerformance', 'year',
+        'publisher', 'exam', 'qtype', 'curriculum', 'feature', 'partPerformance', 'year',
         'section', 'paper', 'ai'
     ];
     
@@ -818,7 +788,7 @@ async function updateDynamicDropdowns() {
 
 async function populateDynamicFilters() {
     await updateDynamicDropdowns();
-    applyChapterTooltips();
+    if (typeof updateChapterFilterBadge === 'function') updateChapterFilterBadge();
 }
 
 function yearFilterLabel(year) {
@@ -980,18 +950,12 @@ window.toggleYearDecade = function(decade) {
 
 window.clearChapterFilter = function() {
     window.triStateFilters.chapter = {};
-    const container = document.getElementById('chapter-options');
-    if (container) {
-        container.querySelectorAll('.tri-state-checkbox, .tri-state-label').forEach(el => {
-            el.classList.remove('checked', 'excluded');
-        });
-    }
-    
+    if (!window.filterLogic) window.filterLogic = { curriculum: 'OR', chapter: 'OR' };
+    window.filterLogic.chapter = 'OR';
     const toggle = document.getElementById('chapter-logic-toggle');
-    if (toggle) {
-        toggle.checked = false;
-        window.filterLogic.chapter = 'OR';
-    }
+    if (toggle) toggle.checked = false;
+    if (typeof renderChapterModalList === 'function') renderChapterModalList();
+    if (typeof updateChapterFilterBadge === 'function') updateChapterFilterBadge();
     filterQuestions();
 };
 
@@ -1007,7 +971,7 @@ function clearFilters() {
     const qnumSection = document.getElementById('qnum-options');
     if (qnumSection) qnumSection.style.display = 'none';
 
-    const collapsibleTypes = ['curriculum', 'chapter', 'feature', 'year'];
+    const collapsibleTypes = ['curriculum', 'feature', 'year'];
     collapsibleTypes.forEach(type => {
         const section = document.getElementById(`${type}-options`);
         if (section) section.style.display = 'none';
@@ -1075,11 +1039,9 @@ function clearFilters() {
         if (window.filterLogic) window.filterLogic.curriculum = 'OR';
     }
 
+    if (window.filterLogic) window.filterLogic.chapter = 'OR';
     const chapToggle = document.getElementById('chapter-logic-toggle');
-    if (chapToggle) {
-        chapToggle.checked = false; 
-        if (window.filterLogic) window.filterLogic.chapter = 'OR';
-    }
+    if (chapToggle) chapToggle.checked = false;
 
     clearPercentageFilter();    
     clearMarksFilter();

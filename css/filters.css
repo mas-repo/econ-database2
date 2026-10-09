@@ -382,16 +382,6 @@
     display: grid !important;
 }
 
-/* ============================================
-   Chapter Dropdown (number + full chapter name)
-   ============================================ */
-
-#chapter-options.chapter-grid-width {
-    width: 100%;
-    min-width: min(380px, calc(100vw - 16px));
-    max-width: calc(100vw - 16px);
-}
-
 /* When JS flips a wide panel to the trigger's right edge (far-right columns). */
 .custom-grid-dropdown.dropdown-align-end,
 .dropdown-content.dropdown-align-end,
@@ -400,55 +390,11 @@
     right: 0;
 }
 
-#chapter-list {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 4px;
-}
-
-#chapter-options .chapter-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    text-align: left;
-    padding: 6px 8px;
-    overflow: hidden;
-}
-
-#chapter-options .ch-num {
-    flex-shrink: 0;
-    font-weight: 700;
-}
-
-#chapter-options .ch-name {
-    flex: 1;
-    min-width: 0;
-    font-weight: 400;
-    font-size: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
 /* Hide mock-only controls when the proxy did not grant mockTests. */
 [data-mock-only="1"][hidden] {
     display: none !important;
 }
 
-/* Compact mode: number-only chapter list */
-#chapter-options.hide-chapter-names {
-    min-width: 0;
-}
-#chapter-options.hide-chapter-names .ch-name {
-    display: none !important;
-}
-#chapter-options.hide-chapter-names #chapter-list {
-    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-}
-#chapter-options.hide-chapter-names .chapter-item {
-    justify-content: center;
-    padding: 8px 0;
-}
 
 /* ============================================
    Year Dropdown (grouped by decade)
@@ -521,7 +467,6 @@
    Shared Button Styles for Chapter & Year items
    ============================================ */
 
-#chapter-options .tri-state-checkbox,
 #year-options .tri-state-checkbox {
     padding: 6px 4px;
     text-align: center;
@@ -536,37 +481,29 @@
 }
 
 /* Hide the default pseudo-element checkbox */
-#chapter-options .tri-state-checkbox::before,
 #year-options .tri-state-checkbox::before {
     display: none;
 }
 
 /* Active States */
-#chapter-options .tri-state-checkbox.checked,
 #year-options .tri-state-checkbox.checked {
     background: var(--secondary-color);
     color: white;
     border-color: var(--secondary-color);
 }
 
-#chapter-options .tri-state-checkbox.excluded,
 #year-options .tri-state-checkbox.excluded {
     background: var(--danger-color);
     color: white;
     border-color: var(--danger-color);
 }
 
-#chapter-options .tri-state-checkbox:hover,
 #year-options .tri-state-checkbox:hover {
     transform: translateY(-2px);
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
 /* Keep name text colour consistent with state */
-#chapter-options .tri-state-checkbox.checked .ch-name,
-#chapter-options .tri-state-checkbox.excluded .ch-name {
-    color: white;
-}
 
 /* ============================================
    Range Slider Styles
@@ -799,6 +736,56 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
+/* Chapters modal: wider 2-col grid so 29 named chapters fit without clipping */
+.mf-dialog.mf-chapter-dialog {
+    max-width: min(720px, 100%);
+}
+
+.mf-chapter-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px 10px;
+    flex-wrap: wrap;
+}
+
+.mf-chapter-toolbar .mf-chapter-search {
+    flex: 1;
+    min-width: 160px;
+    margin: 0;
+}
+
+.mf-chapter-list {
+    padding-top: 0;
+}
+
+.mf-chapter-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.mf-option.mf-chapter-option {
+    margin-bottom: 0;
+    gap: 6px;
+}
+
+.mf-chapter-num {
+    flex-shrink: 0;
+    font-weight: 700;
+}
+
+.mf-chapter-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 400;
+    color: #445566;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .mf-header {
     display: flex;
     align-items: center;
@@ -991,19 +978,8 @@
         margin-top: 5px;
     }
     
-    /* Chapters: not enough space — fall back to number-only grid */
-    #chapter-options.chapter-grid-width {
-        min-width: 0;
-    }
-    #chapter-options .ch-name {
-        display: none;
-    }
-    #chapter-list {
-        grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-    }
-    #chapter-options .chapter-item {
-        justify-content: center;
-        padding: 8px 0;
+    .mf-chapter-grid {
+        grid-template-columns: 1fr;
     }
 
     /* Years: slightly tighter grid */

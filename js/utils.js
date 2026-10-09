@@ -78,34 +78,11 @@ function formatDateTimeZhHk(iso) {
     }
 }
 
-// Populate chapter filter options dynamically
-// Dependencies: constants.js (CHAPTER_RANGE, CHAPTER_DESCRIPTIONS)
+// Chapters open as a centered modal (filter-modal.js). Keep this stub so
+// main.js boot still calls a no-op-safe entry; badge refresh only.
+// Dependencies: filter-modal.js (updateChapterFilterBadge)
 function populateChapterFilter() {
-    const container = document.getElementById('chapter-list');
-
-    if (!container) {
-        console.warn('Element #chapter-list not found. Make sure HTML is updated.');
-        return;
-    }
-
-    let html = '';
-    for (let i = CHAPTER_RANGE.min; i <= CHAPTER_RANGE.max; i++) {
-        const chNumber = String(i).padStart(2, '0');
-        const chName = (typeof CHAPTER_DESCRIPTIONS !== 'undefined' && CHAPTER_DESCRIPTIONS[chNumber])
-            ? CHAPTER_DESCRIPTIONS[chNumber]
-            : '';
-
-        html += `
-            <div class="tri-state-checkbox chapter-item" 
-                 data-filter="chapter" 
-                 data-value="${chNumber}" 
-                 onclick="toggleTriState(this)"
-                 ${chName ? `title="${escapeHTML(chNumber + ': ' + chName)}"` : ''}>
-                <span class="ch-num">${chNumber}</span>${chName ? `<span class="ch-name">${escapeHTML(chName)}</span>` : ''}
-            </div>`;
-    }
-
-    container.innerHTML = html;
+    if (typeof updateChapterFilterBadge === 'function') updateChapterFilterBadge();
 }
 
 // Populate curriculum filter options dynamically
