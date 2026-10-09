@@ -253,11 +253,6 @@
         var host = document.querySelector('header div[style*="flex-wrap"]') ||
             document.querySelector('header');
         if (!host) return null;
-        // Drop ghost nodes left by the old retire-by-rename path
-        // (#ai-explain-feedback-admin-btn-retired). Standalone AI button stays.
-        document.querySelectorAll('#ai-explain-feedback-admin-btn-retired').forEach(function (node) {
-            node.remove();
-        });
         var button = document.getElementById('feedback-hub-admin-btn');
         if (button) {
             if (button.dataset.bound !== '1') {
@@ -275,8 +270,7 @@
         button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback 同問題回報');
         button.dataset.bound = '1';
         button.addEventListener('click', openFeedbackHub);
-        var anchor = document.getElementById('ai-explain-feedback-admin-btn')
-            || document.getElementById('data-checks-btn')
+        var anchor = document.getElementById('data-checks-btn')
             || document.getElementById('admin-mode-btn');
         if (anchor && anchor.parentNode === host) {
             host.insertBefore(button, anchor.nextSibling);
@@ -608,10 +602,6 @@
     function initReportIssueFeature() {
         bindEscape();
         refreshHubButton();
-        // Purge any leftover retired AI header duplicates from older builds.
-        if (global.AiExplanation && typeof AiExplanation.setAdminUiDelegated === 'function') {
-            AiExplanation.setAdminUiDelegated(false);
-        }
     }
 
     global.ReportIssue = {

@@ -1,8 +1,7 @@
 // AI解釋 — per-question explanations (generate / list / vote / feedback).
 // Gate: accessRights.ai (same as AI出題; CSS class body.poe-ai-allowed).
 // Persist: shared/data/ai-explanations.json via Apps Script + direct read.
-// Standalone「AI解釋 Feedback」header button + admin overlay;「回饋／回報」hub
-// is a separate ReportIssue control (do not retire/rename the AI button).
+// Admin AI Feedback UI lives in ReportIssue「回饋／回報」hub (AI tab).
 // Depends: PoeGenerate (proxyRequest, withProviderAndApiKey, settings),
 // shared-assets (fetchSharedJsonDirectOrProxy), access-rights, render.
 
@@ -42,7 +41,6 @@
 
     var overlay = null;
     var feedbackOverlay = null;
-    var adminOverlay = null;
     var escapeHandlerBound = false;
 
     function hasAiAccess() {
@@ -50,13 +48,6 @@
             ? currentAccessRights()
             : (global.accessRights || null);
         return !!(rights && rights.ai === true);
-    }
-
-    function hasAdminAccess() {
-        var rights = (typeof currentAccessRights === 'function')
-            ? currentAccessRights()
-            : (global.accessRights || null);
-        return !!(rights && rights.admin === true);
     }
 
     function username() {
@@ -480,10 +471,6 @@
                 closeFeedbackPrompt();
                 return;
             }
-            if (adminOverlay && !adminOverlay.hidden) {
-                closeAdminFeedback();
-                return;
-            }
             if (overlay && !overlay.hidden) closeModal();
         }, true);
     }
@@ -899,13 +886,9 @@
         }
     }
 
-    // --- Admin feedback browser ---
-    // Standalone「AI解釋 Feedback」header button. ReportIssue's「回饋／回報」hub
-    // is a separate control; do not rename/retire this button (renaming broke
-    // getElementById guards and left duplicate visible nodes because .btn
-    // display beats the UA [hidden] rule).
-
-    function purgeDuplicateAiAdminButtons(keep) {
+    // --- Legacy standalone admin header button (removed) ---
+    // Admins use ReportIssue「回饋／回報」→ AI解釋 Feedback tab instead.
+    function removeLegacyAiAdminHeaderButtons() {
         var host = document.querySelector('header');
         if (!host) return;
         var nodes = host.querySelectorAll('button');
@@ -914,168 +897,21 @@
             var id = node.id || '';
             var label = (node.getAttribute('aria-label') || '').trim();
             var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-            var isAiAdmin = id === 'ai-explain-feedback-admin-btn'
+            var isLegacy = id === 'ai-explain-feedback-admin-btn'
                 || id === 'ai-explain-feedback-admin-btn-retired'
                 || label === '瀏覽 AI解釋 Feedback'
                 || text === 'AI解釋 Feedback';
-            if (!isAiAdmin) continue;
-            if (keep && node === keep) continue;
+            if (!isLegacy) continue;
+            // Never remove the hub button (different label / id).
+            if (id === 'feedback-hub-admin-btn') continue;
             node.remove();
         }
+        var leftover = document.getElementById('ai-explain-admin-overlay');
+        if (leftover) leftover.remove();
     }
 
-    // Kept for callers that still invoke it (ReportIssue init). No longer hides
-    // or retires the standalone header button.
-    function setAdminUiDelegated(_flag) {
-        purgeDuplicateAiAdminButtons(document.getElementById('ai-explain-feedback-admin-btn'));
-        refreshAdminButton();
-    }
-
-    function ensureAdminButton() {
-        var host = document.querySelector('header div[style*="flex-wrap"]') ||
-            document.querySelector('header');
-        if (!host) return null;
-        var button = document.getElementById('ai-explain-feedback-admin-btn');
-        if (button) {
-            purgeDuplicateAiAdminButtons(button);
-            if (button.dataset.bound !== '1') {
-                button.dataset.bound = '1';
-                button.addEventListener('click', openAdminFeedback);
-            }
-            return button;
-        }
-        purgeDuplicateAiAdminButtons(null);
-        button = document.createElement('button');
-        button.type = 'button';
-        button.id = 'ai-explain-feedback-admin-btn';
-        button.className = 'btn btn-outline-primary header-toolbar-btn';
-        button.hidden = true;
-        button.textContent = 'AI解釋 Feedback';
-        button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback');
-        button.dataset.bound = '1';
-        button.addEventListener('click', openAdminFeedback);
-        var anchor = document.getElementById('feedback-hub-admin-btn')
-            || document.getElementById('data-checks-btn')
-            || document.getElementById('admin-mode-btn');
-        if (anchor && anchor.parentNode === host) {
-            host.insertBefore(button, anchor.nextSibling);
-        } else {
-            host.appendChild(button);
-        }
-        return button;
-    }
-
-    function refreshAdminButton() {
-        var button = ensureAdminButton();
-        if (!button) return;
-        var allowed = hasAdminAccess();
-        button.hidden = !allowed;
-        if (!allowed) closeAdminFeedback();
-    }
-
-    function ensureAdminOverlay() {
-        if (adminOverlay) return adminOverlay;
-        adminOverlay = document.createElement('div');
-        adminOverlay.id = 'ai-explain-admin-overlay';
-        adminOverlay.className = 'ai-explain-overlay';
-        adminOverlay.hidden = true;
-        adminOverlay.innerHTML = ''
-            + '<div class="ai-explain-dialog ai-explain-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-admin-title">'
-            + '  <header class="ai-explain-header">'
-            + '    <div>'
-            + '      <h2 id="ai-admin-title">AI解釋 Feedback</h2>'
-            + '      <p class="ai-explain-subtitle">使用者對解釋的文字回饋與投票摘要（最新在前）。</p>'
-            + '    </div>'
-            + '    <button type="button" class="ai-explain-close" aria-label="關閉">×</button>'
-            + '  </header>'
-            + '  <div class="ai-explain-admin-toolbar">'
-            + '    <button type="button" class="btn btn-outline-primary btn-sm" id="ai-admin-refresh">重新載入</button>'
-            + '  </div>'
-            + '  <p class="ai-explain-status" id="ai-admin-status" hidden></p>'
-            + '  <div class="ai-explain-admin-list" id="ai-admin-list"></div>'
-            + '  <footer class="ai-explain-footer">'
-            + '    <button type="button" class="btn btn-secondary" id="ai-admin-done">關閉</button>'
-            + '  </footer>'
-            + '</div>';
-        document.body.appendChild(adminOverlay);
-        adminOverlay.addEventListener('click', function (event) {
-            if (event.target === adminOverlay) closeAdminFeedback();
-        });
-        adminOverlay.querySelector('.ai-explain-close').addEventListener('click', closeAdminFeedback);
-        adminOverlay.querySelector('#ai-admin-done').addEventListener('click', closeAdminFeedback);
-        adminOverlay.querySelector('#ai-admin-refresh').addEventListener('click', function () {
-            loadAdminFeedback(true);
-        });
-        return adminOverlay;
-    }
-
-    function closeAdminFeedback() {
-        if (!adminOverlay) return;
-        adminOverlay.hidden = true;
-    }
-
-    async function openAdminFeedback() {
-        if (!hasAdminAccess()) return;
-        ensureAdminOverlay();
-        bindEscape();
-        adminOverlay.hidden = false;
-        await loadAdminFeedback(true);
-    }
-
-    async function loadAdminFeedback() {
-        var list = document.getElementById('ai-admin-list');
-        var st = document.getElementById('ai-admin-status');
-        if (list) list.innerHTML = '<p class="ai-explain-empty">載入中…</p>';
-        if (st) {
-            st.hidden = true;
-            st.textContent = '';
-        }
-        try {
-            var data = await proxyAction({ action: 'listAiExplanationFeedback' }, 60000);
-            if (!data || data.ok !== true) {
-                if (list) list.innerHTML = '';
-                if (st) {
-                    st.hidden = false;
-                    st.textContent = errorMessage(data && data.error);
-                    st.className = 'ai-explain-status is-error';
-                }
-                return;
-            }
-            var rows = Array.isArray(data.rows) ? data.rows : [];
-            if (!rows.length) {
-                if (list) list.innerHTML = '<p class="ai-explain-empty">尚未有 Feedback。</p>';
-                return;
-            }
-            if (list) {
-                list.innerHTML = rows.map(function (row) {
-                    var rating = row.rating === 'up' ? '👍' : (row.rating === 'down' ? '👎' : '—');
-                    return ''
-                        + '<article class="ai-explain-admin-row">'
-                        + '  <div class="ai-explain-admin-meta">'
-                        + '    <strong>' + esc(row.questionId || '') + '</strong>'
-                        + '    <span>' + esc(detailLevelLabel(row.detailLevel)) + '</span>'
-                        + '    <span>' + esc(row.model || '') + '</span>'
-                        + '    <span>👍' + esc(String(row.upCount || 0)) + ' 👎' + esc(String(row.downCount || 0)) + '</span>'
-                        + '  </div>'
-                        + '  <p class="ai-explain-admin-snippet">' + esc(row.explanationSnippet || '') + '</p>'
-                        + '  <div class="ai-explain-admin-fb">'
-                        + '    <span>' + rating + '</span>'
-                        + '    <span>' + esc(row.user || '') + '</span>'
-                        + '    <span>' + esc(formatWhen(row.at)) + '</span>'
-                        + '  </div>'
-                        + '  <p class="ai-explain-admin-text">' + esc(row.text || '') + '</p>'
-                        + '</article>';
-                }).join('');
-            }
-        } catch (err) {
-            if (list) list.innerHTML = '';
-            if (st) {
-                st.hidden = false;
-                st.textContent = errorMessage(err && err.code);
-                st.className = 'ai-explain-status is-error';
-            }
-        }
-    }
+    // No-op kept for ReportIssue.openHub (previously closed the standalone overlay).
+    function closeAdminPanel() {}
 
     function questionMatchesAiFilter(question, triAi) {
         if (!triAi || typeof triAi !== 'object') return true;
@@ -1107,8 +943,7 @@
 
     async function initAiExplanationFeature() {
         bindEscape();
-        ensureAdminButton();
-        refreshAdminButton();
+        removeLegacyAiAdminHeaderButtons();
         if (hasAiAccess()) {
             await loadAiExplanations(false);
             if (typeof populateDynamicFilters === 'function') {
@@ -1140,9 +975,7 @@
         questionHasExplanation: questionHasExplanation,
         questionMatchesAiFilter: questionMatchesAiFilter,
         summaryForQuestion: summaryForQuestion,
-        refreshAdminButton: refreshAdminButton,
-        setAdminUiDelegated: setAdminUiDelegated,
-        closeAdminPanel: closeAdminFeedback,
+        closeAdminPanel: closeAdminPanel,
         setDefaultDetailLevel: setDefaultDetailLevel,
         init: initAiExplanationFeature,
         store: store
