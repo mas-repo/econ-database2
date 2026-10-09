@@ -1511,8 +1511,7 @@ body.poe-settings-open {
 /* #poe-generate-btn and per-question AI出題／AI解釋 share body.poe-ai-allowed
    (set when accessRights.ai). */
 body:not(.poe-ai-allowed) .question-ai-generate,
-body:not(.poe-ai-allowed) .question-ai-explain,
-body:not(.poe-ai-allowed) .ai-explain-btn {
+body:not(.poe-ai-allowed) .question-ai-explain {
     display: none !important;
 }
 

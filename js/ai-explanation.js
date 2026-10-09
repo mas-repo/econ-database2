@@ -11,6 +11,7 @@
 
     var AI_EXPLANATIONS_PATH = 'data/ai-explanations.json';
     var LABEL_HAS = '有AI解釋';
+    var LABEL_NONE = '沒有AI解釋';
     var LABEL_SHORT = '簡短';
     var LABEL_DETAILED = '詳盡';
 
@@ -130,9 +131,10 @@
     }
 
     // Values used by 題目 / 統計 AI filters (tri-state).
+    // Presence: 有AI解釋 / 沒有AI解釋. Detail: 簡短 / 詳盡 when present.
     function filterValuesForQuestion(questionId) {
         var summary = summaryForQuestion(questionId);
-        if (!summary.count) return [];
+        if (!summary.count) return [LABEL_NONE];
         var values = [LABEL_HAS];
         if (summary.shortCount) values.push(LABEL_SHORT);
         if (summary.detailedCount) values.push(LABEL_DETAILED);
@@ -1081,18 +1083,15 @@
         var excluded = Object.keys(triAi).filter(function (k) { return triAi[k] === 'excluded'; });
         if (!checked.length && !excluded.length) return true;
         var values = filterValuesForQuestion(question && question.id);
-        var has = values.indexOf(LABEL_HAS) !== -1;
 
         if (checked.length) {
             var ok = checked.every(function (item) {
-                if (item === LABEL_HAS) return has;
                 return values.indexOf(item) !== -1;
             });
             if (!ok) return false;
         }
         if (excluded.length) {
             var blocked = excluded.some(function (item) {
-                if (item === LABEL_HAS) return has;
                 return values.indexOf(item) !== -1;
             });
             if (blocked) return false;
@@ -1130,6 +1129,7 @@
 
     global.AiExplanation = {
         LABEL_HAS: LABEL_HAS,
+        LABEL_NONE: LABEL_NONE,
         LABEL_SHORT: LABEL_SHORT,
         LABEL_DETAILED: LABEL_DETAILED,
         hasAiAccess: hasAiAccess,
