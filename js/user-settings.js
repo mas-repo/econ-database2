@@ -553,6 +553,76 @@
         button.hidden = !isSignedIn();
     }
 
+    function usAiProviderFromSelect() {
+        var el = document.getElementById('us-ai-provider');
+        return el && el.value === 'openrouter' ? 'openrouter' : 'poe';
+    }
+
+    function fillUsAiModelControls(provider, selectedModel) {
+        var selectEl = document.getElementById('us-ai-model');
+        var customEl = document.getElementById('us-ai-model-custom');
+        if (!selectEl) return;
+        var Poe = global.PoeGenerate;
+        provider = provider === 'openrouter' ? 'openrouter' : 'poe';
+        if (customEl) {
+            customEl.placeholder = provider === 'openrouter'
+                ? '例如 anthropic/claude-3.5-sonnet'
+                : '例如 Claude-Opus-4.6';
+        }
+        if (Poe && typeof Poe.fillModelSelect === 'function') {
+            Poe.fillModelSelect(selectEl, provider, selectedModel, customEl);
+            return;
+        }
+        // Fallback if Poe helpers are unavailable: keep a minimal known list.
+        var list = provider === 'openrouter'
+            ? ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-sonnet-4']
+            : ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'GLM-5.3-flash', 'GLM-5.3'];
+        var selected = String(selectedModel || '').trim() || list[0];
+        selectEl.textContent = '';
+        var seen = false;
+        list.forEach(function (model) {
+            var opt = document.createElement('option');
+            opt.value = model;
+            opt.textContent = model;
+            selectEl.appendChild(opt);
+            if (model === selected) seen = true;
+        });
+        if (selected && !seen) {
+            var customOpt = document.createElement('option');
+            customOpt.value = selected;
+            customOpt.textContent = selected + '（自訂）';
+            selectEl.appendChild(customOpt);
+        }
+        selectEl.value = selected;
+        if (customEl && document.activeElement !== customEl) {
+            customEl.value = (selected && list.indexOf(selected) === -1) ? selected : '';
+        }
+    }
+
+    function readUsAiModel(provider) {
+        var selectEl = document.getElementById('us-ai-model');
+        var customEl = document.getElementById('us-ai-model-custom');
+        var Poe = global.PoeGenerate;
+        provider = provider === 'openrouter' ? 'openrouter' : 'poe';
+        var customRaw = customEl ? String(customEl.value || '').trim() : '';
+        if (customRaw) {
+            if (Poe && typeof Poe.sanitizeModelId === 'function') {
+                var customOk = Poe.sanitizeModelId(provider, customRaw);
+                if (customOk) return customOk;
+            } else {
+                return customRaw;
+            }
+        }
+        var fromSelect = selectEl ? String(selectEl.value || '').trim() : '';
+        if (Poe && typeof Poe.sanitizeModelId === 'function') {
+            return Poe.sanitizeModelId(provider, fromSelect)
+                || (typeof Poe.defaultModelForProvider === 'function'
+                    ? Poe.defaultModelForProvider(provider)
+                    : fromSelect);
+        }
+        return fromSelect;
+    }
+
     function fillModalFromSettings() {
         var s = getSettings();
         var setVal = function (id, value) {
@@ -578,7 +648,7 @@
         setVal('us-density', s.display.density);
         setVal('us-lang', s.display.lang);
         setVal('us-ai-provider', s.ai.provider || 'poe');
-        setVal('us-ai-model', s.ai.defaultModel || '');
+        fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || '');
         setVal('us-ai-explain', s.ai.explainStyle);
         setCheck('us-ai-quick-prompts', s.ai.showQuickPrompts !== false);
         var aiSection = document.getElementById('user-settings-ai-section');
@@ -640,7 +710,7 @@
             s.display.lang = val('us-lang') || 'both';
             if (hasAiAccess()) {
                 s.ai.provider = val('us-ai-provider') === 'openrouter' ? 'openrouter' : 'poe';
-                s.ai.defaultModel = String(val('us-ai-model') || '').trim();
+                s.ai.defaultModel = readUsAiModel(s.ai.provider);
                 s.ai.explainStyle = val('us-ai-explain') === 'detailed' ? 'detailed' : 'short';
                 s.ai.showQuickPrompts = chk('us-ai-quick-prompts');
             }
@@ -728,17 +798,21 @@
             + '    </section>'
             + '    <section class="user-settings-section" id="user-settings-ai-section" hidden>'
             + '      <h3>AI</h3>'
-            + '      <label>預設供應商<select id="us-ai-provider">'
+            + '      <label>預設供應商<select id="us-ai-provider" aria-label="預設供應商">'
             + '        <option value="poe">Poe</option>'
             + '        <option value="openrouter">OpenRouter</option>'
             + '      </select></label>'
-            + '      <label>預設模型<input type="text" id="us-ai-model" maxlength="120" placeholder="例如 Claude-Sonnet-5.5"></label>'
+            + '      <label>預設模型<select id="us-ai-model" aria-label="預設模型"></select></label>'
+            + '      <label>自訂模型 id（選填）'
+            + '        <input type="text" id="us-ai-model-custom" autocomplete="off" spellcheck="false" maxlength="120"'
+            + '          placeholder="例如 Claude-Opus-4.6" aria-label="自訂模型 id">'
+            + '      </label>'
             + '      <label>AI解釋詳細度<select id="us-ai-explain">'
             + '        <option value="short">簡短</option>'
             + '        <option value="detailed">詳盡</option>'
             + '      </select></label>'
             + '      <label class="user-settings-check"><input type="checkbox" id="us-ai-quick-prompts"> 顯示追問快捷提示</label>'
-            + '      <p class="user-settings-note">API 金鑰只留在本機，不會上載。</p>'
+            + '      <p class="user-settings-note">模型清單與「API／模型設定」相同。API 金鑰只留在本機，不會上載。</p>'
             + '    </section>'
             + '  </div>'
             + '  <p class="user-settings-status" id="user-settings-status" hidden></p>'
@@ -758,6 +832,43 @@
             setModalStatus('已套用' + (isSignedIn() ? '，正在同步…' : '（本機）'), 'info');
             if (isSignedIn()) flushRemoteSave();
         });
+        var providerSel = overlay.querySelector('#us-ai-provider');
+        var modelSel = overlay.querySelector('#us-ai-model');
+        var modelCustom = overlay.querySelector('#us-ai-model-custom');
+        if (providerSel) {
+            providerSel.addEventListener('change', function () {
+                var provider = usAiProviderFromSelect();
+                var keep = modelCustom && String(modelCustom.value || '').trim()
+                    ? String(modelCustom.value || '').trim()
+                    : (modelSel ? String(modelSel.value || '').trim() : '');
+                var Poe = global.PoeGenerate;
+                // Preset lists differ by provider; don't carry a Poe id into OpenRouter (or vice versa).
+                if (Poe && typeof Poe.isKnownModel === 'function' && keep && !Poe.isKnownModel(provider, keep)) {
+                    keep = '';
+                }
+                fillUsAiModelControls(provider, keep);
+            });
+        }
+        if (modelSel) {
+            modelSel.addEventListener('change', function () {
+                if (modelCustom) modelCustom.value = '';
+            });
+        }
+        if (modelCustom) {
+            modelCustom.addEventListener('change', function () {
+                var provider = usAiProviderFromSelect();
+                var Poe = global.PoeGenerate;
+                var value = modelCustom.value;
+                if (Poe && typeof Poe.sanitizeModelId === 'function') {
+                    value = Poe.sanitizeModelId(provider, value);
+                } else {
+                    value = String(value || '').trim();
+                }
+                if (!value) return;
+                fillUsAiModelControls(provider, value);
+                modelCustom.value = value;
+            });
+        }
         return overlay;
     }
 
