@@ -309,6 +309,8 @@
                     : String(question[def.prop]);
             } else if (def.kind === 'scalar') {
                 snap[def.id] = scalarDisplay(question[def.prop]);
+            } else if (def.prop === 'year' && typeof normalizeYear === 'function') {
+                snap[def.id] = normalizeYear(question[def.prop]);
             } else {
                 snap[def.id] = String(question[def.prop] == null ? '' : question[def.prop]);
             }
@@ -872,6 +874,8 @@
             target[def.prop] = marksNum;
         } else if (def.kind === 'scalar') {
             target[def.prop] = scalarStore(raw);
+        } else if (def.prop === 'year' && typeof normalizeYear === 'function') {
+            target[def.prop] = normalizeYear(raw);
         } else {
             target[def.prop] = String(raw == null ? '' : raw).trim();
         }

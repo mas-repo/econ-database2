@@ -48,9 +48,10 @@ function partitionEmptySelection(stateMap) {
     };
 }
 
-// Canonical year key for filters/stats only — does not rewrite stored q.year.
-// Mock papers may be stored as "39" or "MT39"; both become "39" (label MT39).
-// Four-digit exam years and other tokens (PP / SP) stay as trimmed text.
+// Canonical year key for filters/stats matching only — does not rewrite stored
+// q.year (writes use normalizeYear → MT##). Mock papers may still appear as
+// legacy "39" or stored "MT39"; both become key "39" (UI label MT39 via
+// yearFilterLabel). Four-digit exam years and tokens (PP / SP) stay as text.
 function normalizeYearFilterKey(year) {
     if (year == null) return '';
     const text = String(year).trim();

@@ -1,11 +1,15 @@
 // question-fields.js
-// Shared blank-field checks and questionParts helpers for filters, form, and
-// advanced condition matching.
+// Shared blank-field checks, year normalize, and questionParts helpers for
+// filters, form, bulk edit, import/sync, and advanced condition matching.
 //
 // Blank: null/undefined, whitespace-only, or '-' count as blank.
 // 題目 = questionTextChi + questionTextEng + plainText (all blank → 題目空白)
 // 答案 = answerMC + answerChi + answerEng
 // 評卷報告 = markersReportChi + markersReportEng (UI label 評卷報告 / Markers Report)
+//
+// year: mock papers store MT## (e.g. MT27–MT44). Bare 1–3 digit years are
+// auto-normalized to MT## on write. Four-digit calendar years and tokens
+// like PP / SP are never rewritten.
 //
 // questionParts: [{ label, marks, performance }, ...]
 // Total marks (question.marks) stays authoritative — parts do not auto-sum into it.
@@ -250,6 +254,23 @@
         return normalizeQuestionParts(list);
     }
 
+    /**
+     * Canonical stored year. Auto-normalizes bare 1–3 digit mock years to MT##
+     * (MT27, MT39, …). Leaves 4-digit calendar years and other tokens (PP, SP)
+     * unchanged. Already-MT values are re-canonicalized to MT + integer digits
+     * (no leading zeros, no spaces).
+     */
+    function normalizeYear(year) {
+        if (year == null) return '';
+        var text = String(year).trim();
+        if (!text || text === '-') return text === '-' ? '-' : '';
+        var mt = text.match(/^MT\s*(\d{1,3})$/i);
+        if (mt) return 'MT' + String(parseInt(mt[1], 10));
+        if (/^\d{1,3}$/.test(text)) return 'MT' + String(parseInt(text, 10));
+        if (/^\d{4}$/.test(text)) return text;
+        return text;
+    }
+
     function questionSearchText(question, scope) {
         scope = scope || 'all';
         var parts = [];
@@ -295,6 +316,7 @@
     global.validatePartMarksSumMany = validatePartMarksSumMany;
     global.serializeQuestionPartsCompact = serializeQuestionPartsCompact;
     global.parseQuestionPartsCompact = parseQuestionPartsCompact;
+    global.normalizeYear = normalizeYear;
     global.questionSearchText = questionSearchText;
     global.ADMIN_BLANK_FEATURE_ITEMS = ADMIN_BLANK_FEATURES;
     global.PART_MARKS_SUM_TOLERANCE = PART_MARKS_SUM_TOLERANCE;
