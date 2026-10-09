@@ -180,7 +180,8 @@
         }).join('\n');
     }
 
-    // questionFeatureOn is defined in question-fields.js (loads before this file).
+    // Thin alias over global questionFeatureOn (question-fields.js). No local
+    // fallback — do not reorder scripts so this loads first.
     function featureIsOn(question, featureName) {
         return !!questionFeatureOn(question, featureName);
     }

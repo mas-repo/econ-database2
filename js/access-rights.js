@@ -1,5 +1,6 @@
 // Role flags from the Apps Script proxy. The page never stores an allowlist.
-// checkAccess returns booleans only. Defaults stay closed until that reply.
+// checkAccess returns booleans only: admin, ai, githubSync, mockTests.
+// Ignore legacy `allowed` (mirrors githubSync). Defaults stay closed until reply.
 
 var accessRightsCache = {
     username: '',
@@ -50,12 +51,10 @@ function applyAccessRights(rights) {
     if (window.ReportIssue && typeof ReportIssue.refreshHubButton === 'function') {
         ReportIssue.refreshHubButton();
     }
+    // Losing `ai`: clear AI解釋 filter + close its modal (CSS also hides controls).
     if (!window.accessRights.ai) {
         if (window.triStateFilters && window.triStateFilters.ai) {
             window.triStateFilters.ai = {};
-        }
-        if (typeof closeAiExplanationModal === 'function') {
-            // no-op if not exported; AiExplanation.close covers it
         }
         if (window.AiExplanation && typeof AiExplanation.close === 'function') {
             AiExplanation.close();

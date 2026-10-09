@@ -1435,7 +1435,8 @@ body.poe-settings-open {
     }
 }
 
-/* Per-question AI buttons follow the same access gate as #poe-generate-btn. */
+/* #poe-generate-btn and per-question AI出題／AI解釋 share body.poe-ai-allowed
+   (set when accessRights.ai). */
 body:not(.poe-ai-allowed) .question-ai-generate,
 body:not(.poe-ai-allowed) .question-ai-explain,
 body:not(.poe-ai-allowed) .ai-explain-btn {

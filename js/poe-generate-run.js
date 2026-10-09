@@ -1,4 +1,5 @@
-// Generation, model test, copy, and the public entry points.
+// Generation, continueGeneration 追問 (composer + chips + optional refs),
+// model test, copy, and public entry points.
 // Depends on PoeGenerate from the earlier poe-generate-*.js scripts.
 (function (Poe) {
 

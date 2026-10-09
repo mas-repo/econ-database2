@@ -1,6 +1,7 @@
-// 回報問題 — per-question issue reports for all signed-in users.
-// Persist: shared/data/issue-reports.json via Apps Script (reportIssue /
-// listIssueReports). Admin viewer is combined with AI解釋 Feedback.
+// 回報問題 — UI for any authenticated session; Apps Script reportIssue requires
+// a known hash (rights.known). Persist: shared/data/issue-reports.json
+// (reportIssue / listIssueReports). Admin hub「回饋／回報」combines AI解釋
+// Feedback + issue reports (replaces the standalone AI Feedback button).
 // Dependencies: access-rights, github-sync (gitProxyRequest / gitUsername),
 // optional PoeGenerate.proxyRequest, AiExplanation admin hooks.
 

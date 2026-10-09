@@ -1,17 +1,17 @@
 // schema-version.js
 // Shared question-bank schemaVersion guards.
 //
-// Field: schemaVersion (integer on the bank JSON object root).
-// Bump SCHEMA_VERSION in constants.js only when the data shape changes so an
-// older writer would drop fields. Missing schemaVersion on a cloud/file
-// payload is treated as 0 (oldest compatible — banks written before this
-// guard). Distinct from export metadata `version: '1.0'`.
+// Field: schemaVersion (integer on the bank JSON object root). Distinct from
+// export metadata `version: '1.0'`. Missing/invalid → 0 (oldest compatible).
+//
+// Bump SCHEMA_VERSION in constants.js when an older client must not overwrite
+// a newer bank — bank field shape changes (v2/v4) *or* side-file capability
+// gates (v3 AI解釋, v5 回報問題). See the version table in constants.js.
 //
 // Upload: local SCHEMA_VERSION < cloud schemaVersion → block (no overwrite).
 // Load/download/import: cloud/file > local → notify user to update the app.
-// Apps Script handleGitUpload_ also rejects with schema_version_stale when the
-// client's declared schemaVersion is older than the cloud bank (defense in
-// depth with the client check). Do not put write PATs in the browser.
+// Apps Script handleGitUpload_ also rejects with schema_version_stale (defense
+// in depth). Do not put write PATs in the browser.
 
 (function (global) {
     'use strict';

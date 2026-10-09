@@ -6,9 +6,10 @@
  * to use these features. All of that lives only in Script properties:
  *   POE_API_KEY                (shared Poe fallback for admin only; see resolveApiKey_)
  *   OPENROUTER_API_KEY         (optional shared OpenRouter fallback for admin only)
- *   ALLOWED_ADMIN_HASHES       (SHA-256 hex; full rights)
- *   ALLOWED_AI_HASHES          (SHA-256 hex; AI出題 and mock tests, no GitHub)
- *   ALLOWED_RESTRICTED_HASHES  (SHA-256 hex; browse without mock tests, AI, or GitHub)
+ *   ALLOWED_ADMIN_HASHES       (SHA-256 hex; full rights: AI + GitHub + admin + mocks)
+ *   ALLOWED_AI_HASHES          (SHA-256 hex; AI出題／追問／AI解釋／題幹檢視 + mocks; no GitHub)
+ *   ALLOWED_MOCK_HASHES        (SHA-256 hex; mockTests only; no AI / GitHub / admin)
+ *   ALLOWED_RESTRICTED_HASHES  (SHA-256 hex; known browse; no mock / AI / GitHub)
  *   GITHUB_TOKEN
  *   GITHUB_OWNER
  *   GITHUB_REPO
@@ -44,9 +45,10 @@
  * fixed folders in AI_USAGE_RECORD_USERS_ and ignores any other name in the request.
  * listAiBackups and listAiUsageRecords each return one page of AI_BACKUP_LIST_MAX_
  * generateQuestions files, newest first. Pass after / afterName to continue.
- * Those list responses are lean (metadata + contentPreview only). Full reply
- * text is loaded with getAiBackup, which can return the body in chunks.
- * The request still cannot choose other users.
+ * Personal Git backup *files* may also store testModel / continueGeneration
+ * (written as action "reply" — see backupFileAction_); list/usage APIs still
+ * page generateQuestions only. Lean list responses (metadata + contentPreview);
+ * full text via getAiBackup (chunked). The request still cannot choose other users.
  *
  * Shared diagrams, the question bank, and paper packs live under the same prefix.
  * GITHUB_SHARED_PREFIX defaults to shared. The site asks for a relative path
@@ -98,20 +100,22 @@
  * Access / login:
  *   checkAccess | checkRights → handleCheck_
  *   logLogin                   → handleLogin_
- * AI generate / test / personal backups / admin usage:
+ * AI出題／追問／test／personal backups／admin usage:
  *   generateQuestions   → handleGenerate_
  *   continueGeneration  → handleContinueGeneration_  (multi-turn follow-up; messages[]; refs optional)
- *   generateAiExplanation     → handleGenerateAiExplanation_  (ai; writes shared/data/ai-explanations.json)
- *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
- *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
- *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
- *   reportIssue               → handleReportIssue_               (known user; writes shared/data/issue-reports.json)
- *   listIssueReports          → handleListIssueReports_          (admin)
  *   testModel           → handleTest_
  *   reviewStemPatterns  → handleReviewStemPatterns_  (no Git AI backup / no GenerationBackup sheet)
  *   listAiBackups       → handleListAiBackups_
  *   getAiBackup         → handleGetAiBackup_
  *   listAiUsageRecords  → handleListAiUsageRecords_  (admin)
+ * AI解釋 side-file (shared/data/ai-explanations.json):
+ *   generateAiExplanation     → handleGenerateAiExplanation_  (ai)
+ *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
+ *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
+ *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
+ * 回報問題 side-file (shared/data/issue-reports.json):
+ *   reportIssue               → handleReportIssue_       (known user)
+ *   listIssueReports          → handleListIssueReports_  (admin)
  * Shared bank read (Apps Script body fallback; prefer direct read below):
  *   fetchSharedAsset → handleFetchShared_
  *   listSharedData   → handleListShared_
@@ -412,7 +416,8 @@ function resolveAiBackupOwner_(requester, body) {
   return owner;
 }
 
-// === AI generate / test / lean reply payload ===
+// === AI generate / continueGeneration / lean reply payload ===
+// testModel and reviewStemPatterns live under "Model test / stem pattern review" below.
 
 // Poe or OpenRouter completion; may defer large content via Git AI backup.
 function handleGenerate_(body) {
@@ -2046,9 +2051,9 @@ function lookupRights_(username) {
   );
 }
 
-// `allowed` is only for public Pages builds that still check data.allowed.
-// It mirrors githubSync only (admin). AI-only clients must use the `ai` flag.
-// role flags and ignores this field.
+// `allowed` mirrors githubSync only (admin) for older Pages builds that still
+// check data.allowed. Current clients use admin / ai / githubSync / mockTests
+// and ignore `allowed`. AI-only features must gate on `ai`, not `allowed`.
 function rightsResponse_(rights) {
   var item = rights || {};
   var ai = item.ai === true;
@@ -4136,6 +4141,10 @@ function joinGithubPath_(dir, name) {
   return githubPathOk_(path) ? path : '';
 }
 
+// Git AI backup JSON `action` field: keep generateQuestions / testModel;
+// everything else (including continueGeneration) is stored as "reply".
+// GenerationBackup sheet rows keep the real action string. listAiBackups
+// still pages generateQuestions files only.
 function backupFileAction_(action) {
   if (action === 'generateQuestions' || action === 'testModel') return action;
   return 'reply';
