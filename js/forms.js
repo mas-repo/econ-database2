@@ -23,8 +23,54 @@ function clearForm() {
     if (publisherField) {
         publisherField.value = DEFAULT_PUBLISHER;
     }
+    setPartsStatusRadio('pending');
     renderQuestionPartRows([]);
+    syncPartsEditorVisibility();
 }
+
+function getPartsStatusRadio() {
+    const checked = document.querySelector('input[name="parts-status"]:checked');
+    return checked ? String(checked.value || 'pending') : 'pending';
+}
+
+function setPartsStatusRadio(status) {
+    const want = String(status || 'pending');
+    const inputs = document.querySelectorAll('input[name="parts-status"]');
+    let matched = false;
+    inputs.forEach(input => {
+        const on = input.value === want;
+        input.checked = on;
+        if (on) matched = true;
+    });
+    if (!matched) {
+        const pending = document.querySelector('input[name="parts-status"][value="pending"]');
+        if (pending) pending.checked = true;
+    }
+}
+
+function syncPartsEditorVisibility() {
+    const editor = document.getElementById('question-parts-editor');
+    if (!editor) return;
+    const status = getPartsStatusRadio();
+    const show = status === 'filled';
+    editor.hidden = !show;
+    editor.style.display = show ? '' : 'none';
+}
+
+function onPartsStatusChange() {
+    const status = getPartsStatusRadio();
+    if (status === 'none' || status === 'pending') {
+        renderQuestionPartRows([]);
+    } else if (status === 'filled') {
+        const list = document.getElementById('question-parts-list');
+        if (list && !list.querySelector('[data-question-part-row]')) {
+            renderQuestionPartRows([]);
+        }
+    }
+    syncPartsEditorVisibility();
+}
+
+window.onPartsStatusChange = onPartsStatusChange;
 
 function partPerformanceOptionsHtml(selected) {
     const items = (typeof PART_PERFORMANCE_ITEMS !== 'undefined' && Array.isArray(PART_PERFORMANCE_ITEMS))
@@ -66,6 +112,10 @@ function renderQuestionPartRows(parts) {
 }
 
 function addQuestionPartRow() {
+    if (getPartsStatusRadio() !== 'filled') {
+        setPartsStatusRadio('filled');
+        syncPartsEditorVisibility();
+    }
     const list = document.getElementById('question-parts-list');
     if (!list) return;
     const wrap = document.createElement('div');
@@ -183,10 +233,25 @@ function setupFormHandler() {
             // shared/data/ai-explanations.json. Keep empty for bank compatibility.
             AIExplanation: '',
             remarks: document.getElementById('remarks').value.trim(),
-            questionParts: readQuestionPartsFromForm(),
             dateAdded: window.editingId ? null : new Date().toISOString(),
             dateModified: new Date().toISOString()
         };
+
+        const partsChoice = getPartsStatusRadio();
+        const partsRaw = partsChoice === 'filled' ? readQuestionPartsFromForm() : [];
+        if (typeof applyPartsFields === 'function') {
+            applyPartsFields(question, partsRaw, partsChoice);
+        } else {
+            question.questionParts = partsRaw;
+            question.partsStatus = partsChoice || 'pending';
+        }
+
+        if (partsChoice === 'filled' && !(question.questionParts && question.questionParts.length)) {
+            alert('已選擇「有分題」，請至少填寫一列分題，或改為「尚未輸入」／「沒有分題」。');
+            setPartsStatusRadio('filled');
+            syncPartsEditorVisibility();
+            return;
+        }
         
         if (!question.id) {
             alert('請輸入題目 ID');
@@ -298,7 +363,14 @@ async function editQuestion(id) {
     document.getElementById('stemPatterns').value = (question.stemPatterns || []).join(', ');
     document.getElementById('option-design').value = question.optionDesign || '';
     document.getElementById('remarks').value = question.remarks || '';
-    renderQuestionPartRows(question.questionParts || []);
+    const partsStatus = (typeof resolvePartsStatus === 'function')
+        ? resolvePartsStatus(question)
+        : (question.questionParts && question.questionParts.length
+            ? 'filled'
+            : (question.partsStatus === 'none' ? 'none' : 'pending'));
+    setPartsStatusRadio(partsStatus);
+    renderQuestionPartRows(partsStatus === 'filled' ? (question.questionParts || []) : []);
+    syncPartsEditorVisibility();
     
     document.getElementById('form-section').classList.remove('hidden');
     document.getElementById('form-title').textContent = '編輯題目';

@@ -15,9 +15,23 @@
 // Total marks (question.marks) stays authoritative — parts do not auto-sum into it.
 // When parts exist, validatePartMarksSum requires every part to have marks and
 // sum(part.marks) === marks (tolerance PART_MARKS_SUM_TOLERANCE).
+//
+// partsStatus: "pending" | "none" | "filled"
+//   pending = 尚未輸入 (legacy empty/absent migrates here; not confirmed none)
+//   none    = 沒有分題 (explicitly confirmed no sub-parts; store [])
+//   filled  = 有分題 (non-empty questionParts)
 
 (function (global) {
     'use strict';
+
+    var PARTS_STATUS_PENDING = 'pending';
+    var PARTS_STATUS_NONE = 'none';
+    var PARTS_STATUS_FILLED = 'filled';
+    var PARTS_STATUS_LABELS = {
+        pending: '尚未輸入分題',
+        none: '沒有分題',
+        filled: '有分題'
+    };
 
     var ADMIN_BLANK_FEATURES = (typeof ADMIN_BLANK_FEATURE_ITEMS !== 'undefined' && Array.isArray(ADMIN_BLANK_FEATURE_ITEMS))
         ? ADMIN_BLANK_FEATURE_ITEMS.slice()
@@ -124,6 +138,70 @@
         return normalizeQuestionParts(question && question.questionParts).length > 0;
     }
 
+    function normalizePartsStatus(raw) {
+        var text = String(raw == null ? '' : raw).trim().toLowerCase();
+        if (text === PARTS_STATUS_NONE || text === 'no' || text === 'confirmed_none') {
+            return PARTS_STATUS_NONE;
+        }
+        if (text === PARTS_STATUS_FILLED || text === 'yes' || text === 'has') {
+            return PARTS_STATUS_FILLED;
+        }
+        if (text === PARTS_STATUS_PENDING || text === 'unentered' || text === 'unknown') {
+            return PARTS_STATUS_PENDING;
+        }
+        return '';
+    }
+
+    // Effective status. Non-empty parts always win as filled. Legacy empty
+    // without partsStatus → pending (not confirmed none).
+    function resolvePartsStatus(question) {
+        if (questionHasParts(question)) return PARTS_STATUS_FILLED;
+        var stored = normalizePartsStatus(question && question.partsStatus);
+        if (stored === PARTS_STATUS_NONE) return PARTS_STATUS_NONE;
+        return PARTS_STATUS_PENDING;
+    }
+
+    function partsStatusLabel(statusOrQuestion) {
+        var key;
+        if (statusOrQuestion && typeof statusOrQuestion === 'object') {
+            key = resolvePartsStatus(statusOrQuestion);
+        } else {
+            key = normalizePartsStatus(statusOrQuestion) || PARTS_STATUS_PENDING;
+        }
+        return PARTS_STATUS_LABELS[key] || PARTS_STATUS_LABELS.pending;
+    }
+
+    // Apply write rules: filled requires parts; none/pending store [].
+    // choice may be pending|none|filled; if omitted, inferred from parts.
+    function applyPartsFields(question, parts, choice) {
+        var target = question && typeof question === 'object' ? question : {};
+        var list = normalizeQuestionParts(parts);
+        var want = normalizePartsStatus(choice);
+        if (list.length > 0) {
+            target.questionParts = list;
+            target.partsStatus = PARTS_STATUS_FILLED;
+            return target;
+        }
+        target.questionParts = [];
+        if (want === PARTS_STATUS_NONE) {
+            target.partsStatus = PARTS_STATUS_NONE;
+        } else if (want === PARTS_STATUS_FILLED) {
+            // User chose filled but left rows blank → treat as pending.
+            target.partsStatus = PARTS_STATUS_PENDING;
+        } else {
+            target.partsStatus = PARTS_STATUS_PENDING;
+        }
+        return target;
+    }
+
+    function questionPartsPending(question) {
+        return resolvePartsStatus(question) === PARTS_STATUS_PENDING;
+    }
+
+    function questionPartsConfirmedNone(question) {
+        return resolvePartsStatus(question) === PARTS_STATUS_NONE;
+    }
+
     function questionHasPartPerformance(question, value) {
         var needle = String(value == null ? '' : value).trim();
         if (!needle) return false;
@@ -162,8 +240,8 @@
     }
 
     /**
-     * When questionParts is empty/absent → ok (no sum check).
-     * When one or more parts exist:
+     * When partsStatus is pending/none or questionParts is empty → ok (no sum check).
+     * When filled (one or more parts):
      *   - every part must have a numeric marks value
      *   - sum(part.marks) must equal top-level marks within PART_MARKS_SUM_TOLERANCE
      * Does not mutate marks; validation only.
@@ -309,6 +387,16 @@
     global.normalizeQuestionParts = normalizeQuestionParts;
     global.normalizeQuestionPart = normalizeQuestionPart;
     global.questionHasParts = questionHasParts;
+    global.normalizePartsStatus = normalizePartsStatus;
+    global.resolvePartsStatus = resolvePartsStatus;
+    global.partsStatusLabel = partsStatusLabel;
+    global.applyPartsFields = applyPartsFields;
+    global.questionPartsPending = questionPartsPending;
+    global.questionPartsConfirmedNone = questionPartsConfirmedNone;
+    global.PARTS_STATUS_PENDING = PARTS_STATUS_PENDING;
+    global.PARTS_STATUS_NONE = PARTS_STATUS_NONE;
+    global.PARTS_STATUS_FILLED = PARTS_STATUS_FILLED;
+    global.PARTS_STATUS_LABELS = PARTS_STATUS_LABELS;
     global.questionHasPartPerformance = questionHasPartPerformance;
     global.questionHasPartMarks = questionHasPartMarks;
     global.sumPartMarks = sumPartMarks;

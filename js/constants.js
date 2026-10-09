@@ -5,7 +5,7 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.09.14';
+const APP_VERSION = '2026.10.09.15';
 console.log('Question bank version:', APP_VERSION);
 
 // Integer stamped on shared bank JSON as schemaVersion. Bump only when the
@@ -15,7 +15,8 @@ console.log('Question bank version:', APP_VERSION);
 // v2: questionParts [{ label, marks, performance }] for SQ/LQ sub-parts.
 // v3: AI解釋 side-file contract (shared/data/ai-explanations.json); legacy
 //     question.AIExplanation URL is ignored by the UI (empty/missing is fine).
-const SCHEMA_VERSION = 3;
+// v4: partsStatus pending|none|filled — distinguish 尚未輸入 vs 沒有分題 vs 有分題.
+const SCHEMA_VERSION = 4;
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)
 const QUESTION_NUMBER_RANGE = {
@@ -87,6 +88,8 @@ const FEATURE_ITEMS = [
     '跨課題',
     '跨章節',
     '有分題',
+    '沒有分題',
+    '尚未輸入分題',
     '已刪除',
     'Out syl'
 ];

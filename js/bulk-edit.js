@@ -54,6 +54,14 @@
             placeholder: ''
         },
         {
+            id: 'partsStatus',
+            label: '分題狀態',
+            kind: 'partsStatus',
+            prop: 'partsStatus',
+            defaultOn: true,
+            placeholder: 'pending / none / filled'
+        },
+        {
             id: 'questionParts',
             label: '分題（標籤,分數,表現 | …）',
             kind: 'parts',
@@ -301,6 +309,10 @@
         COLUMN_DEFS.forEach(function (def) {
             if (def.kind === 'list') {
                 snap[def.id] = listToComma(question[def.prop]);
+            } else if (def.kind === 'partsStatus') {
+                snap[def.id] = (typeof resolvePartsStatus === 'function')
+                    ? resolvePartsStatus(question)
+                    : String(question.partsStatus || 'pending');
             } else if (def.kind === 'parts') {
                 snap[def.id] = partsToCompact(question[def.prop]);
             } else if (def.kind === 'number') {
@@ -602,6 +614,21 @@
         if (def.kind === 'number') {
             return '<input type="number" ' + attr + ' min="0" step="0.5" value="' + escapeHtml(value) + '" style="width:5.5em;">';
         }
+        if (def.kind === 'partsStatus') {
+            var current = String(value || 'pending');
+            var options = [
+                { value: 'pending', label: '尚未輸入' },
+                { value: 'none', label: '沒有分題' },
+                { value: 'filled', label: '有分題' }
+            ];
+            return '<select ' + attr + ' style="min-width:7.5em;">'
+                + options.map(function (opt) {
+                    return '<option value="' + escapeHtml(opt.value) + '"'
+                        + (opt.value === current ? ' selected' : '') + '>'
+                        + escapeHtml(opt.label) + '</option>';
+                }).join('')
+                + '</select>';
+        }
         return '<input type="text" ' + common + '>';
     }
 
@@ -866,6 +893,10 @@
             target[def.prop] = commaToList(raw);
         } else if (def.kind === 'parts') {
             target[def.prop] = compactToParts(raw);
+        } else if (def.kind === 'partsStatus') {
+            var st = String(raw == null ? '' : raw).trim().toLowerCase();
+            if (st !== 'none' && st !== 'filled' && st !== 'pending') st = 'pending';
+            target[def.prop] = st;
         } else if (def.kind === 'number') {
             var marksNum = parseFloat(String(raw).trim());
             if (String(raw).trim() === '' || isNaN(marksNum) || !isFinite(marksNum)) {
@@ -879,6 +910,25 @@
         } else {
             target[def.prop] = String(raw == null ? '' : raw).trim();
         }
+    }
+
+    function reconcilePartsFields(merged, draft) {
+        var partsText = draft && draft.questionParts != null ? draft.questionParts : '';
+        var statusChoice = String(draft && draft.partsStatus != null ? draft.partsStatus : 'pending').trim().toLowerCase();
+        var parts = compactToParts(partsText);
+        // Non-empty parts text always wins as filled.
+        if (parts.length) statusChoice = 'filled';
+        if (statusChoice !== 'none' && statusChoice !== 'filled') statusChoice = 'pending';
+        if (typeof applyPartsFields === 'function') {
+            applyPartsFields(merged, statusChoice === 'filled' ? parts : [], statusChoice);
+        } else {
+            merged.questionParts = statusChoice === 'filled' ? parts : [];
+            merged.partsStatus = statusChoice;
+        }
+        if (statusChoice === 'filled' && !(merged.questionParts && merged.questionParts.length)) {
+            return '已選擇「有分題」但分題欄空白';
+        }
+        return '';
     }
 
     function collectChangedUpdates() {
@@ -914,7 +964,17 @@
                 }
             }
 
-            if (changedProps.indexOf('marks') !== -1 || changedProps.indexOf('questionParts') !== -1) {
+            if (changedProps.indexOf('questionParts') !== -1 || changedProps.indexOf('partsStatus') !== -1) {
+                var partsErr = reconcilePartsFields(merged, row.draft);
+                if (partsErr) {
+                    errors.push('題目「' + merged.id + '」' + partsErr + '。請填寫分題或改為尚未輸入／沒有分題。');
+                    return;
+                }
+            }
+
+            if (changedProps.indexOf('marks') !== -1
+                || changedProps.indexOf('questionParts') !== -1
+                || changedProps.indexOf('partsStatus') !== -1) {
                 if (typeof validatePartMarksSum === 'function') {
                     var marksCheck = validatePartMarksSum(merged);
                     if (!marksCheck.ok) {

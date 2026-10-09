@@ -76,6 +76,23 @@ class QuestionJsonSource {
                 ? normalizeQuestionParts(question.questionParts || raw.questionParts)
                 : (Array.isArray(question.questionParts) ? question.questionParts : []);
         }
+        // partsStatus: pending|none|filled. Do not invent "none" for legacy
+        // empty/absent — resolvePartsStatus treats missing as pending.
+        if (question.questionParts && question.questionParts.length) {
+            question.partsStatus = 'filled';
+        } else if (Object.prototype.hasOwnProperty.call(raw, 'partsStatus')
+            || Object.prototype.hasOwnProperty.call(question, 'partsStatus')) {
+            var rawStatus = Object.prototype.hasOwnProperty.call(raw, 'partsStatus')
+                ? raw.partsStatus
+                : question.partsStatus;
+            if (typeof normalizePartsStatus === 'function') {
+                var st = normalizePartsStatus(rawStatus);
+                question.partsStatus = st === 'none' ? 'none' : 'pending';
+            } else {
+                question.partsStatus = String(rawStatus || '').trim() === 'none' ? 'none' : 'pending';
+            }
+            question.questionParts = [];
+        }
 
         // plainText is the question wording column. Keep questionTextChi in sync
         // so existing search and card rendering still show the text.

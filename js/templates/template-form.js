@@ -70,12 +70,25 @@ function renderFormTemplate() {
             </div>
 
             <div class="form-group" style="grid-column: 1 / -1;">
-                <label>分題分數／表現（選填）</label>
+                <label>分題分數／表現</label>
                 <p style="margin:0 0 8px;color:var(--text-light);font-size:12px;line-height:1.45;">
-                    用於 SQ/LQ 分題。每列可填分題標籤（如 a、b）、該分分數，以及表現等級。有分題時每一分都必須有分數，且合計須等於上方「分數」總分。
+                    用於 SQ/LQ 分題。請先選擇狀態：<strong>尚未輸入</strong>（未確認）、<strong>沒有分題</strong>（確認無分題）、或<strong>有分題</strong>（填寫各分）。有分題時每一分都必須有分數，且合計須等於上方「分數」總分。
                 </p>
-                <div id="question-parts-list" class="question-parts-list"></div>
-                <button type="button" class="btn btn-outline-primary btn-sm" id="question-parts-add" onclick="addQuestionPartRow()">＋ 新增分題</button>
+                <div class="parts-status-group" role="radiogroup" aria-label="分題狀態" style="display:flex;flex-wrap:wrap;gap:12px 18px;margin-bottom:10px;">
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="parts-status" value="pending" checked onchange="onPartsStatusChange()"> 尚未輸入
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="parts-status" value="none" onchange="onPartsStatusChange()"> 沒有分題
+                    </label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="parts-status" value="filled" onchange="onPartsStatusChange()"> 有分題
+                    </label>
+                </div>
+                <div id="question-parts-editor">
+                    <div id="question-parts-list" class="question-parts-list"></div>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="question-parts-add" onclick="addQuestionPartRow()">＋ 新增分題</button>
+                </div>
             </div>
 
             <div class="form-grid">

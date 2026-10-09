@@ -207,6 +207,16 @@
         if (featureName === '有分題') {
             return typeof questionHasParts === 'function' ? questionHasParts(question) : !!(question.questionParts && question.questionParts.length);
         }
+        if (featureName === '沒有分題') {
+            return typeof questionPartsConfirmedNone === 'function'
+                ? questionPartsConfirmedNone(question)
+                : (question && question.partsStatus === 'none' && !(question.questionParts && question.questionParts.length));
+        }
+        if (featureName === '尚未輸入分題') {
+            return typeof questionPartsPending === 'function'
+                ? questionPartsPending(question)
+                : (!(question && question.questionParts && question.questionParts.length) && question && question.partsStatus !== 'none');
+        }
         if (featureName === '題目空白') {
             return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(question) : false;
         }
