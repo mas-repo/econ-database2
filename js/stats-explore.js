@@ -1,6 +1,7 @@
 // stats-explore.js
 // Unified 統計 tab chrome: dimension switcher, 詳細統計 modal, 交叉分析.
 // Dimension lists come from STAT_TABS / STAT_DIMENSION_GROUPS (stats-filters.js).
+// Styles: css/stats-explore.css (via main.css) — not deferred until crosstab/detail.
 // Dependencies: stats-filters.js, statistics.js, storage, constants, utils.
 
 (function () {
@@ -368,70 +369,9 @@
             + '  </div>'
             + '</div>';
         document.body.appendChild(detailOverlay);
-        if (!document.getElementById('stats-explore-styles')) {
-            var style = document.createElement('style');
-            style.id = 'stats-explore-styles';
-            style.textContent = ''
-                + '.stats-shell-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;}'
-                + '.stats-shell-head h2{margin:0;font-size:1.35rem;}'
-                + '.stats-classification-warning{margin:0 0 12px;padding:10px 12px;border:1px solid #f0d9a8;border-radius:8px;background:#fff8eb;color:#7a4e00;font-size:13px;line-height:1.5;}'
-                + '.stats-mode-toggle{display:inline-flex;border:1px solid var(--border-light,#e0e0e0);border-radius:8px;overflow:hidden;background:#fff;}'
-                + '.stats-mode-toggle-main{display:flex;width:100%;max-width:28em;margin:14px 0 12px;border-width:2px;border-color:#90b4e0;border-radius:10px;box-shadow:0 1px 0 rgba(15,23,42,.04);}'
-                + '.stats-mode-toggle-main .stats-mode-btn{flex:1;padding:12px 16px;font-size:15px;font-weight:600;}'
-                + '.stats-mode-toggle-main .stats-mode-btn.is-active{background:#d6e8ff;color:#0f3d73;}'
-                + '.stats-mode-btn{appearance:none;border:0;background:#fff;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;}'
-                + '.stats-mode-btn+.stats-mode-btn{border-left:1px solid var(--border-light,#e0e0e0);}'
-                + '.stats-mode-btn.is-active{background:#e8f1ff;font-weight:700;}'
-                + '.stats-dimension-bar{display:flex;align-items:center;gap:8px;margin:8px 0 4px;}'
-                + '.stats-dimension-bar label{font-size:13px;color:var(--text-light,#7f8c8d);}'
-                + '.stats-dimension-bar select{padding:6px 8px;border:1px solid #d7e3ef;border-radius:6px;font:inherit;max-width:min(100%,22em);}'
-                + '.stat-card-footer{gap:8px;flex-wrap:wrap;}'
-                + '.stats-detail-overlay{position:fixed;inset:0;z-index:12400;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(15,23,42,.5);}'
-                + '.stats-detail-overlay[hidden]{display:none!important;}'
-                + '.stats-detail-dialog{width:min(960px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 16px 40px rgba(15,23,42,.2);}'
-                + '.stats-detail-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #e7eef5;}'
-                + '.stats-detail-header h3{margin:0;font-size:18px;}'
-                + '.stats-detail-close{width:34px;height:34px;border:1px solid #e0e0e0;border-radius:8px;background:#fff;font-size:20px;cursor:pointer;}'
-                + '.stats-detail-body{flex:1;min-height:0;overflow:auto;padding:14px 16px;}'
-                + '.stats-detail-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;padding:10px;border:1px solid #e7eef5;border-radius:10px;background:#f8fafc;}'
-                + '.stats-detail-toolbar .stats-mode-toggle{flex:0 0 auto;}'
-                + '.stats-detail-toolbar-label{font-size:12px;color:var(--text-light,#7f8c8d);}'
-                + '.stats-detail-sections-wrap{position:relative;}'
-                + '.stats-detail-sections-panel{position:absolute;left:0;top:calc(100% + 4px);z-index:2;min-width:16em;max-height:min(50vh,360px);overflow:auto;padding:10px;border:1px solid #d7e3ef;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.12);}'
-                + '.stats-detail-sections-panel[hidden]{display:none!important;}'
-                + '.stats-detail-sections-panel label{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0;cursor:pointer;}'
-                + '.stats-detail-sections-panel .sf-group-label{display:block;margin:8px 0 4px;font-size:11px;font-weight:700;color:#64748b;}'
-                + '.stats-detail-sections-panel .sf-group-label:first-child{margin-top:0;}'
-                + '.stats-detail-hint{font-size:12px;color:var(--text-light,#7f8c8d);margin:0 0 10px;line-height:1.45;}'
-                + '.stats-detail-section{margin-bottom:18px;}'
-                + '.stats-detail-section-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 8px;}'
-                + '.stats-detail-section-head h4{margin:0;font-size:14px;}'
-                + '.stats-detail-section-meta{font-size:12px;color:#64748b;}'
-                + '.stats-detail-table-wrap{overflow:auto;}'
-                + '.stats-detail-table{width:100%;border-collapse:collapse;font-size:13px;}'
-                + '.stats-detail-table th,.stats-detail-table td{padding:6px 8px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap;}'
-                + '.stats-detail-table th.num,.stats-detail-table td.num{text-align:right;}'
-                + '.stats-detail-table tbody tr.stats-detail-row{cursor:pointer;}'
-                + '.stats-detail-table tbody tr.stats-detail-row:hover{background:#eef5ff;}'
-                + '.stats-detail-expand{margin-top:8px;}'
-                + '.stats-detail-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e7eef5;}'
-                + '.stats-crosstab-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:8px 0 12px;padding:10px;border:1px solid #e7eef5;border-radius:10px;background:#f8fafc;}'
-                + '.stats-crosstab-controls label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-light,#7f8c8d);}'
-                + '.stats-crosstab-controls select{min-width:9em;padding:6px 8px;border:1px solid #d7e3ef;border-radius:6px;font:inherit;}'
-                + '.stats-crosstab-presets{display:flex;flex-wrap:wrap;gap:6px;width:100%;}'
-                + '.stats-crosstab-note{font-size:12px;color:var(--text-light,#7f8c8d);margin:0 0 8px;line-height:1.45;}'
-                + '.stats-crosstab-scroll{overflow:auto;max-height:min(70vh,720px);border:1px solid #e7eef5;border-radius:8px;background:#fff;}'
-                + '.stats-crosstab-table{border-collapse:collapse;font-size:12px;min-width:100%;}'
-                + '.stats-crosstab-table th,.stats-crosstab-table td{padding:6px 8px;border:1px solid #e7eef5;white-space:nowrap;}'
-                + '.stats-crosstab-table th{position:sticky;top:0;background:#f8fafc;z-index:1;font-weight:700;}'
-                + '.stats-crosstab-table th.ct-corner{left:0;z-index:2;}'
-                + '.stats-crosstab-table td.ct-rowhead{position:sticky;left:0;background:#fff;font-weight:600;z-index:1;}'
-                + '.stats-crosstab-table td.ct-cell{cursor:pointer;text-align:right;}'
-                + '.stats-crosstab-table td.ct-cell:hover{background:#eef5ff;}'
-                + '.stats-crosstab-table td.is-empty{color:#94a3b8;cursor:default;}'
-                + '.stats-crosstab-table td.is-empty:hover{background:transparent;}';
-            document.head.appendChild(style);
-        }
+        // Styles live in css/stats-explore.css (loaded via main.css) so the
+        // 一維瀏覽／交叉分析 toggle is styled on first paint — not only after
+        // this overlay or the crosstab path runs.
 
         detailOverlay.addEventListener('click', function (event) {
             if (event.target === detailOverlay) {
