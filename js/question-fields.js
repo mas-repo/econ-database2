@@ -44,6 +44,48 @@
         return text === '' || text === '-';
     }
 
+    // Confirmed-none tokens stored in the bank (distinct from filter-only
+    // EMPTY_FIELD_SENTINEL「尚未輸入」and from admin「題目空白」features).
+    // Form/bulk write: empty / '-' → these tokens. Populate: token → empty input.
+    var CONFIRMED_NONE_BY_FIELD = {
+        graphType: '沒有圖',
+        tableType: '沒有表格',
+        calculationType: '沒有計算',
+        multipleSelectionType: '並非複選型'
+    };
+    var CONFIRMED_NONE_ALIASES = {
+        multipleSelectionType: ['並非複選型', '不適用']
+    };
+
+    function confirmedNoneToken(field) {
+        return CONFIRMED_NONE_BY_FIELD[field] || '';
+    }
+
+    function isConfirmedNoneValue(field, value) {
+        var text = String(value == null ? '' : value).trim();
+        if (!text || text === '-') return false;
+        var canonical = CONFIRMED_NONE_BY_FIELD[field];
+        if (canonical && text === canonical) return true;
+        var aliases = CONFIRMED_NONE_ALIASES[field];
+        return !!(aliases && aliases.indexOf(text) !== -1);
+    }
+
+    /** Write path: blank / '-' → canonical confirmed-none; else trimmed value. */
+    function storeScalarFeatureField(field, raw) {
+        var text = String(raw == null ? '' : raw).trim();
+        if (!text || text === '-') {
+            return confirmedNoneToken(field) || '-';
+        }
+        return text;
+    }
+
+    /** Populate path: confirmed-none / '-' → empty input (same UX as before). */
+    function displayScalarFeatureField(field, stored) {
+        var text = String(stored == null ? '' : stored).trim();
+        if (!text || text === '-' || isConfirmedNoneValue(field, text)) return '';
+        return text;
+    }
+
     function allBlank(values) {
         for (var i = 0; i < values.length; i++) {
             if (!isBlankText(values[i])) return false;
@@ -97,10 +139,15 @@
     }
 
     function clearAdminBlankFeatureFilters() {
-        if (!global.triStateFilters || !global.triStateFilters.feature) return;
-        ADMIN_BLANK_FEATURES.forEach(function (item) {
-            delete global.triStateFilters.feature[item];
-        });
+        if (global.triStateFilters && global.triStateFilters.feature) {
+            ADMIN_BLANK_FEATURES.forEach(function (item) {
+                delete global.triStateFilters.feature[item];
+            });
+        }
+        // Also clear 統計 per-tab feature chips (statsFilterState).
+        if (typeof global.clearStatsAdminBlankFeatureFilters === 'function') {
+            global.clearStatsAdminBlankFeatureFilters();
+        }
     }
 
     function normalizePartPerformance(raw) {
@@ -562,6 +609,11 @@
     }
 
     global.isBlankText = isBlankText;
+    global.CONFIRMED_NONE_BY_FIELD = CONFIRMED_NONE_BY_FIELD;
+    global.confirmedNoneToken = confirmedNoneToken;
+    global.isConfirmedNoneValue = isConfirmedNoneValue;
+    global.storeScalarFeatureField = storeScalarFeatureField;
+    global.displayScalarFeatureField = displayScalarFeatureField;
     global.isQuestionTextBlank = isQuestionTextBlank;
     global.isAnswerBlank = isAnswerBlank;
     global.isMarkersReportBlank = isMarkersReportBlank;

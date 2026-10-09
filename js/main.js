@@ -428,7 +428,7 @@ if (document.readyState === 'loading') {
 }
 
 // === Hotkey Listener ===
-// Esc: Poe modal, then stats/filter overlays, else clearFilters.
+// Esc: Poe → stats/filter/進階 overlays (close only), else clearFilters.
 // AI解釋 / 回報問題 / data-checks / bulk-edit bind Escape privately — this
 // listener does not close them.
 document.addEventListener('keydown', function(e) {
@@ -445,6 +445,11 @@ document.addEventListener('keydown', function(e) {
         }
         if (document.getElementById('mf-overlay')) {
             if (typeof closeFilterModal === 'function') closeFilterModal();
+            return;
+        }
+        var afOverlay = document.getElementById('advanced-filter-overlay');
+        if (afOverlay && !afOverlay.hidden) {
+            if (typeof closeAdvancedFilterModal === 'function') closeAdvancedFilterModal();
             return;
         }
         clearFilters();

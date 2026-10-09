@@ -580,8 +580,12 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
         }
     }
 
-    // Exact ID-set layer (資料檢查 bulk pending / 進階「篩選全部待處理」).
-    var idSet = filters.idSetFilter || (typeof window !== 'undefined' ? window.idSetFilter : null);
+    // Exact ID-set / advanced: fall back to window.* only when the caller
+    // omitted the key (題目 gatherFilterState). Stats must pass inactive
+    // layers explicitly so counts never inherit 題目 idSet / 進階篩選.
+    var idSet = Object.prototype.hasOwnProperty.call(filters, 'idSetFilter')
+        ? filters.idSetFilter
+        : (typeof window !== 'undefined' ? window.idSetFilter : null);
     if (idSet && idSet.active && idSet.ids) {
         questions = questions.filter(function (q) {
             var id = q && q.id != null ? String(q.id) : '';
@@ -590,7 +594,9 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
     }
 
     // Advanced condition layer (local-only; ConditionMatch AND).
-    var advanced = filters.advancedFilter || (typeof window !== 'undefined' ? window.advancedFilter : null);
+    var advanced = Object.prototype.hasOwnProperty.call(filters, 'advancedFilter')
+        ? filters.advancedFilter
+        : (typeof window !== 'undefined' ? window.advancedFilter : null);
     if (advanced && advanced.active && Array.isArray(advanced.conditions) && advanced.conditions.length) {
         var Match = typeof window !== 'undefined' ? window.ConditionMatch : null;
         if (Match && typeof Match.matchesAllConditions === 'function') {

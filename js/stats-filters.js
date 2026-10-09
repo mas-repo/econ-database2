@@ -491,6 +491,8 @@ function getStatsTabState(tabId) {
 function statsStateToFilters(state, omitKey) {
     const tri = JSON.parse(JSON.stringify(state.triState));
     if (omitKey && tri[omitKey]) tri[omitKey] = {};
+    // Self-contained: inactive idSet/advanced so applyFilters never inherits
+    // 題目 window.idSetFilter / window.advancedFilter (see filters-review P0).
     const filters = {
         search: '',
         searchScope: 'all',
@@ -501,7 +503,13 @@ function statsStateToFilters(state, omitKey) {
         filterLogic: {
             curriculum: state.logic.curriculum || 'OR',
             chapter: state.logic.chapter || 'OR'
-        }
+        },
+        idSetFilter: (typeof emptyIdSetFilter === 'function')
+            ? emptyIdSetFilter()
+            : { active: false, ids: null, label: '', source: '' },
+        advancedFilter: (typeof emptyAdvancedFilter === 'function')
+            ? emptyAdvancedFilter()
+            : { active: false, conditions: [], label: '' }
     };
     const term = (state.search || '').trim();
     if (term && state.searchScope && state.searchScope !== 'name') {
@@ -1528,6 +1536,13 @@ async function finishJumpToQuestions(state, tri, specials) {
     window.idSetFilter = (typeof emptyIdSetFilter === 'function')
         ? emptyIdSetFilter()
         : { active: false, ids: null, label: '', source: '' };
+    if (typeof clearAdvancedConditionFilter === 'function') {
+        clearAdvancedConditionFilter({ silent: true });
+    } else {
+        window.advancedFilter = (typeof emptyAdvancedFilter === 'function')
+            ? emptyAdvancedFilter()
+            : { active: false, conditions: [], label: '' };
+    }
 
     const idNeedles = [];
     for (let i = 0; i < (specials || []).length; i++) {
@@ -1603,6 +1618,22 @@ async function jumpStatsRowToQuestions(tabId, rawValue) {
     await finishJumpToQuestions(state, tri, specials);
 }
 
+function clearStatsAdminBlankFeatureFilters() {
+    const blanks = (typeof ADMIN_BLANK_FEATURE_ITEMS !== 'undefined' && Array.isArray(ADMIN_BLANK_FEATURE_ITEMS))
+        ? ADMIN_BLANK_FEATURE_ITEMS
+        : ['題目空白', '答案空白', '評卷報告空白'];
+    Object.keys(statsFilterState).forEach((key) => {
+        const state = statsFilterState[key];
+        if (!state || !state.triState || !state.triState.feature) return;
+        blanks.forEach((item) => {
+            delete state.triState.feature[item];
+        });
+    });
+    if (typeof updateStatsFilterChrome === 'function') {
+        try { updateStatsFilterChrome(); } catch (ignore) { /* optional chrome */ }
+    }
+}
+
 window.STAT_TABS = STAT_TABS;
 window.STAT_DIMENSION_GROUPS = STAT_DIMENSION_GROUPS;
 window.listStatDimensionIds = listStatDimensionIds;
@@ -1627,3 +1658,4 @@ window.getStatsActiveDimension = getStatsActiveDimension;
 window.setStatsActiveDimension = setStatsActiveDimension;
 window.resolveStatsDimension = resolveStatsDimension;
 window.scheduleStatsRender = scheduleStatsRender;
+window.clearStatsAdminBlankFeatureFilters = clearStatsAdminBlankFeatureFilters;
