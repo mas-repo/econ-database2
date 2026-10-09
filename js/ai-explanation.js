@@ -50,6 +50,60 @@
         return !!(rights && rights.ai === true);
     }
 
+    function hasAdminAccess() {
+        var rights = (typeof currentAccessRights === 'function')
+            ? currentAccessRights()
+            : (global.accessRights || null);
+        return !!(rights && rights.admin === true);
+    }
+
+    function blankField(value) {
+        var text = String(value == null ? '' : value).trim();
+        if (!text || text === '-') return '';
+        return text;
+    }
+
+    // Bilingual generate payload: always include CN + EN stem/answer (and MC).
+    // Keeps legacy `question` / `explanation` for older Apps Script deployments.
+    function buildGenerateReference(question) {
+        var q = question && typeof question === 'object' ? question : {};
+        var concepts = Array.isArray(q.concepts)
+            ? q.concepts.map(function (item) { return String(item || '').trim(); }).filter(Boolean).join('、')
+            : String(q.concepts || '').trim();
+        var questionChi = blankField(q.questionTextChi || q.plainText);
+        var questionEng = blankField(q.questionTextEng);
+        if (!questionChi && !questionEng) {
+            questionChi = blankField(q.plainText || q.questionTextChi || q.questionTextEng);
+        }
+        var answerMC = blankField(q.answerMC);
+        var answerChi = blankField(q.answerChi);
+        var answerEng = blankField(q.answerEng);
+        var legacyExplanation = '';
+        if (global.PoeGenerate && typeof PoeGenerate.explanationText === 'function') {
+            legacyExplanation = blankField(PoeGenerate.explanationText(q));
+        } else if (answerMC && answerChi) {
+            legacyExplanation = answerChi.indexOf(answerMC) !== -1
+                ? answerChi
+                : answerMC + '\n' + answerChi;
+        } else {
+            legacyExplanation = answerMC || answerChi || answerEng;
+        }
+        return {
+            id: String(q.id || ''),
+            examination: String(q.examination || ''),
+            year: q.year == null ? '' : String(q.year),
+            questionType: String(q.questionType || ''),
+            concepts: concepts,
+            questionChi: questionChi,
+            questionEng: questionEng,
+            answerMC: answerMC,
+            answerChi: answerChi,
+            answerEng: answerEng,
+            question: questionChi || questionEng,
+            explanation: legacyExplanation
+        };
+    }
+
     function username() {
         if (global.PoeGenerate && typeof PoeGenerate.currentUsername === 'function') {
             return PoeGenerate.currentUsername();
@@ -233,11 +287,43 @@
         var qid = String(questionId || '');
         if (!qid) return;
         if (!Array.isArray(publicList)) return;
+        if (!publicList.length) {
+            delete store.byQuestion[qid];
+            return;
+        }
         if (!store.byQuestion[qid]) store.byQuestion[qid] = { explanations: [] };
         var viewer = username();
         store.byQuestion[qid].explanations = publicList.map(function (item) {
             return hydrateFromPublic(null, item, viewer);
         });
+    }
+
+    function removeExplanationFromStore(questionId, explanationId) {
+        var qid = String(questionId || '');
+        var eid = String(explanationId || '');
+        if (!qid || !eid) return;
+        var bucket = store.byQuestion[qid];
+        if (!bucket || !Array.isArray(bucket.explanations)) return;
+        bucket.explanations = bucket.explanations.filter(function (exp) {
+            return exp && String(exp.id) !== eid;
+        });
+        if (!bucket.explanations.length) delete store.byQuestion[qid];
+    }
+
+    function applyDeletedExplanation(questionId, explanationId, publicList) {
+        var qid = String(questionId || '');
+        if (Array.isArray(publicList)) {
+            replaceQuestionExplanations(qid, publicList);
+        } else {
+            removeExplanationFromStore(qid, explanationId);
+        }
+        if (modalState.questionId === qid) {
+            if (String(modalState.selectedId) === String(explanationId || '')) {
+                modalState.selectedId = '';
+            }
+            refreshModalListFromStore();
+        }
+        if (typeof populateDynamicFilters === 'function') populateDynamicFilters();
     }
 
     async function loadAiExplanations(force) {
@@ -301,7 +387,7 @@
 
     function errorMessage(code) {
         var map = {
-            feature_unavailable: '沒有 AI解釋 權限',
+            feature_unavailable: '沒有權限執行此操作',
             missing_api_key: '尚未設定 API Key。請先在 AI出題 的「API／模型設定」輸入金鑰。',
             rate_limited: '請求太頻繁或已達每日上限，請稍後再試',
             bad_request: '請求資料不正確',
@@ -433,6 +519,11 @@
             var fbBtn = event.target.closest('[data-ai-feedback]');
             if (fbBtn) {
                 openFeedbackPrompt(fbBtn.getAttribute('data-ai-qid'), fbBtn.getAttribute('data-ai-eid'));
+                return;
+            }
+            var delBtn = event.target.closest('[data-ai-delete]');
+            if (delBtn) {
+                onDeleteClick(delBtn.getAttribute('data-ai-qid'), delBtn.getAttribute('data-ai-eid'));
             }
         });
         return overlay;
@@ -563,6 +654,11 @@
             + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
             + '">Feedback</button>'
             + (exp.feedbackCount ? '    <span class="ai-explain-meta">Feedback ' + esc(String(exp.feedbackCount)) + '</span>' : '')
+            + (hasAdminAccess()
+                ? '    <button type="button" class="btn btn-outline-danger btn-sm" data-ai-delete="1" data-ai-qid="'
+                    + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
+                    + '" title="刪除此則 AI解釋">刪除</button>'
+                : '')
             + '  </div>'
             + '</article>';
     }
@@ -651,17 +747,11 @@
             setModalStatus('找不到題目資料', 'error');
             return;
         }
-        var ref = (poe && typeof poe.toReference === 'function')
-            ? poe.toReference(question)
-            : {
-                id: question.id,
-                examination: question.examination || '',
-                year: question.year == null ? '' : String(question.year),
-                questionType: question.questionType || '',
-                concepts: Array.isArray(question.concepts) ? question.concepts.join('、') : '',
-                question: String(question.plainText || question.questionTextChi || '').trim(),
-                explanation: ''
-            };
+        var ref = buildGenerateReference(question);
+        if (!ref.questionChi && !ref.questionEng) {
+            setModalStatus('題目資料不足，無法產生解釋', 'error');
+            return;
+        }
         var detailLevel = modalState.detailLevel;
         var job = {
             busy: true,
@@ -744,6 +834,42 @@
         })();
         job.promise = run;
         await run;
+    }
+
+    async function onDeleteClick(questionId, explanationId) {
+        if (!hasAdminAccess() || modalState.busy) return;
+        var qid = String(questionId || modalState.questionId || '');
+        var eid = String(explanationId || '');
+        if (!qid || !eid) return;
+        var ok = global.confirm
+            ? global.confirm('確定刪除此則 AI解釋？刪除後無法復原（連同其 Feedback 一併移除）。')
+            : true;
+        if (!ok) return;
+        modalState.busy = true;
+        setModalStatus('正在刪除…', 'info');
+        syncGenerateButton();
+        try {
+            var data = await proxyAction({
+                action: 'deleteAiExplanation',
+                questionId: qid,
+                explanationId: eid
+            }, 60000);
+            if (!data || data.ok !== true) {
+                setModalStatus(errorMessage(data && data.error), 'error');
+                return;
+            }
+            applyDeletedExplanation(
+                data.questionId || qid,
+                data.deletedId || eid,
+                Array.isArray(data.explanations) ? data.explanations : null
+            );
+            setModalStatus('已刪除該則解釋', 'ok');
+        } catch (err) {
+            setModalStatus(errorMessage(err && err.code), 'error');
+        } finally {
+            modalState.busy = false;
+            syncGenerateButton();
+        }
     }
 
     async function onVoteClick(questionId, explanationId, voteRaw) {
@@ -968,6 +1094,7 @@
         LABEL_SHORT: LABEL_SHORT,
         LABEL_DETAILED: LABEL_DETAILED,
         hasAiAccess: hasAiAccess,
+        hasAdminAccess: hasAdminAccess,
         load: loadAiExplanations,
         open: openModal,
         close: closeModal,
@@ -975,6 +1102,7 @@
         questionHasExplanation: questionHasExplanation,
         questionMatchesAiFilter: questionMatchesAiFilter,
         summaryForQuestion: summaryForQuestion,
+        applyDeletedExplanation: applyDeletedExplanation,
         closeAdminPanel: closeAdminPanel,
         setDefaultDetailLevel: setDefaultDetailLevel,
         init: initAiExplanationFeature,

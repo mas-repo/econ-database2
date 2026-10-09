@@ -363,10 +363,18 @@
             syncBulkButton();
         });
         hubOverlay.querySelector('#feedback-hub-list').addEventListener('click', function (event) {
-            var btn = event.target.closest('[data-hub-resolve]');
-            if (!btn || hubState.busy) return;
-            var id = btn.getAttribute('data-hub-resolve');
-            if (id) markItemsResolved([id]);
+            var resolveBtn = event.target.closest('[data-hub-resolve]');
+            if (resolveBtn && !hubState.busy) {
+                var resolveId = resolveBtn.getAttribute('data-hub-resolve');
+                if (resolveId) markItemsResolved([resolveId]);
+                return;
+            }
+            var deleteBtn = event.target.closest('[data-hub-delete-explanation]');
+            if (deleteBtn && !hubState.busy) {
+                var qid = deleteBtn.getAttribute('data-hub-qid');
+                var eid = deleteBtn.getAttribute('data-hub-delete-explanation');
+                if (qid && eid) deleteAiExplanationFromHub(qid, eid);
+            }
         });
         return hubOverlay;
     }
@@ -491,6 +499,11 @@
                     ? '<button type="button" class="btn btn-outline-primary btn-sm" data-hub-resolve="'
                         + esc(id) + '">標記已關閉</button>'
                     : '';
+                var deleteBtn = row.questionId && row.explanationId
+                    ? '<button type="button" class="btn btn-outline-danger btn-sm" data-hub-delete-explanation="'
+                        + esc(row.explanationId) + '" data-hub-qid="' + esc(row.questionId)
+                        + '" title="刪除此則 AI解釋（含其 Feedback）">刪除解釋</button>'
+                    : '';
                 return ''
                     + '<article class="feedback-hub-row" data-status="' + esc(status) + '">'
                     + '  <div class="feedback-hub-meta">'
@@ -509,6 +522,7 @@
                     + '    <span>' + esc(row.user || '') + '</span>'
                     + '    <span>' + esc(formatWhen(row.at)) + '</span>'
                     + resolveBtn
+                    + deleteBtn
                     + '  </div>'
                     + '  <p class="feedback-hub-text">' + esc(row.text || '') + '</p>'
                     + '</article>';
@@ -586,6 +600,56 @@
             applyLocalStatus(list, STATUS_RESOLVED);
             list.forEach(function (id) { delete hubState.selected[id]; });
             setHubBanner('已標記 ' + list.length + ' 項為已關閉。', 'ok');
+            renderHubList();
+        } catch (err) {
+            setHubBanner(errorMessage(err && err.code), 'error');
+        } finally {
+            hubState.busy = false;
+            syncBulkButton();
+        }
+    }
+
+    async function deleteAiExplanationFromHub(questionId, explanationId) {
+        if (hubState.busy || !hasAdminAccess()) return;
+        var qid = String(questionId || '').trim();
+        var eid = String(explanationId || '').trim();
+        if (!qid || !eid) return;
+        var ok = global.confirm
+            ? global.confirm('確定刪除此則 AI解釋？刪除後無法復原（該解釋下的 Feedback 一併移除）。')
+            : true;
+        if (!ok) return;
+        hubState.busy = true;
+        syncBulkButton();
+        setHubBanner('正在刪除解釋…', 'info');
+        try {
+            var data = await proxyAction({
+                action: 'deleteAiExplanation',
+                questionId: qid,
+                explanationId: eid
+            }, 60000);
+            if (!data || data.ok !== true) {
+                setHubBanner(errorMessage(data && data.error), 'error');
+                return;
+            }
+            if (global.AiExplanation && typeof AiExplanation.applyDeletedExplanation === 'function') {
+                AiExplanation.applyDeletedExplanation(
+                    data.questionId || qid,
+                    data.deletedId || eid,
+                    Array.isArray(data.explanations) ? data.explanations : null
+                );
+            }
+            // Drop hub rows that pointed at the deleted explanation.
+            hubState.aiRows = (hubState.aiRows || []).filter(function (row) {
+                return !(row && String(row.questionId || '') === qid
+                    && String(row.explanationId || '') === eid);
+            });
+            Object.keys(hubState.selected).forEach(function (id) {
+                var still = hubState.aiRows.some(function (row) {
+                    return row && String(row.id || '') === String(id);
+                });
+                if (!still) delete hubState.selected[id];
+            });
+            setHubBanner('已刪除該則 AI解釋。', 'ok');
             renderHubList();
         } catch (err) {
             setHubBanner(errorMessage(err && err.code), 'error');
