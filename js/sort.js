@@ -28,17 +28,26 @@ function sortQuestions(questions, sortBy = 'default') {
         return secA.localeCompare(secB, undefined, { numeric: true });
     }
     
-    // Safe year comparison
+    // Year sort key: prefer filter canonical (MT39 / 39 → "39", 2016 → "2016").
+    function yearSortKey(year) {
+        if (typeof normalizeYearFilterKey === 'function') {
+            return normalizeYearFilterKey(year);
+        }
+        return String(year == null ? '' : year).trim();
+    }
+
+    // Safe year comparison (4-digit calendar and mock MT## / bare digits).
     function compareYears(a, b) {
-        const yA = parseInt(a.year);
-        const yB = parseInt(b.year);
-        // If both are numbers, compare them
-        if (!isNaN(yA) && !isNaN(yB)) return yA - yB;
-        // If one is NaN (e.g. "Sample Paper"), handle it
-        if (isNaN(yA) && !isNaN(yB)) return -1; // Non-numbers
-        if (!isNaN(yA) && isNaN(yB)) return 1;
-        // Both strings
-        return String(a.year).localeCompare(String(b.year));
+        const keyA = yearSortKey(a.year);
+        const keyB = yearSortKey(b.year);
+        const yA = parseInt(keyA, 10);
+        const yB = parseInt(keyB, 10);
+        const numA = /^\d{1,4}$/.test(keyA);
+        const numB = /^\d{1,4}$/.test(keyB);
+        if (numA && numB) return yA - yB;
+        if (!numA && numB) return -1;
+        if (numA && !numB) return 1;
+        return String(keyA).localeCompare(String(keyB));
     }
     
     sorted.sort((a, b) => {

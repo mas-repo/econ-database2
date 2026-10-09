@@ -235,6 +235,9 @@
         }
         if (def.kind === 'scalar') {
             if (question[def.prop] === undefined || question[def.prop] === null) return false;
+            if (def.prop === 'year' && typeof normalizeYearFilterKey === 'function') {
+                return normalizeYearFilterKey(question[def.prop]) === normalizeYearFilterKey(needle);
+            }
             return String(question[def.prop]).trim() === needle;
         }
         if (def.kind === 'partPerformance') {

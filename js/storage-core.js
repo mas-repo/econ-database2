@@ -54,11 +54,23 @@ class IndexedDBStorage {
         });
     }
 
+    // Ensure mock years persist as MT## (never bare 1–3 digit) on every write.
+    prepareQuestionForWrite(question) {
+        if (!question || typeof question !== 'object') return question;
+        if (typeof normalizeYear !== 'function' || question.year == null || question.year === '') {
+            return question;
+        }
+        const nextYear = normalizeYear(question.year);
+        if (nextYear === question.year) return question;
+        return Object.assign({}, question, { year: nextYear });
+    }
+
     async addQuestion(question) {
+        const prepared = this.prepareQuestionForWrite(question);
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([this.storeName], 'readwrite');
             const store = transaction.objectStore(this.storeName);
-            const request = store.add(question);
+            const request = store.add(prepared);
 
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
@@ -67,24 +79,26 @@ class IndexedDBStorage {
 
     // Batch insert — significantly faster than adding one by one
     async addQuestions(questions) {
+        const preparedList = (questions || []).map(q => this.prepareQuestionForWrite(q));
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([this.storeName], 'readwrite');
             const store = transaction.objectStore(this.storeName);
 
-            questions.forEach(q => {
+            preparedList.forEach(q => {
                 store.put(q);
             });
 
-            transaction.oncomplete = () => resolve(questions.length);
+            transaction.oncomplete = () => resolve(preparedList.length);
             transaction.onerror = (e) => reject(transaction.error || e.target.error);
         });
     }
 
     async updateQuestion(question) {
+        const prepared = this.prepareQuestionForWrite(question);
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([this.storeName], 'readwrite');
             const store = transaction.objectStore(this.storeName);
-            const request = store.put(question);
+            const request = store.put(prepared);
 
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);

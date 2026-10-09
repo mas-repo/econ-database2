@@ -96,17 +96,76 @@ const PRIORITY_CONFIG = {
 };
 
 /**
+ * Clear viewport-clamping styles applied by positionFilterDropdownInViewport.
+ */
+function clearFilterDropdownPosition(panel) {
+    if (!panel || !panel.style) return;
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.maxWidth = '';
+    panel.classList.remove('dropdown-align-end');
+}
+
+/**
+ * Keep an open filter panel inside the viewport.
+ * Wide panels (Chapters / Years) use min-width larger than their column; when
+ * the trigger sits on the far right they would otherwise overflow. Flip to
+ * right-align, then clamp left / max-width if still needed.
+ */
+function positionFilterDropdownInViewport(panel) {
+    if (!panel) return;
+    clearFilterDropdownPosition(panel);
+
+    const computed = window.getComputedStyle(panel);
+    if (computed.position === 'static') return;
+
+    const anchor = panel.closest('.dropdown-filter') || panel.parentElement;
+    if (!anchor) return;
+
+    const margin = 8;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    if (vw <= 0) return;
+
+    const maxWidth = Math.max(120, vw - margin * 2);
+    panel.style.maxWidth = maxWidth + 'px';
+
+    // Default: align to the trigger's left edge.
+    panel.style.left = '0';
+    panel.style.right = 'auto';
+
+    let rect = panel.getBoundingClientRect();
+    if (rect.right > vw - margin) {
+        panel.style.left = 'auto';
+        panel.style.right = '0';
+        panel.classList.add('dropdown-align-end');
+        rect = panel.getBoundingClientRect();
+    }
+
+    if (rect.left < margin) {
+        const anchorRect = anchor.getBoundingClientRect();
+        const nextLeft = Math.round(margin - anchorRect.left);
+        panel.style.right = 'auto';
+        panel.style.left = nextLeft + 'px';
+        panel.classList.remove('dropdown-align-end');
+    }
+}
+
+/**
  * Helper: Closes ALL dropdowns and resets all arrow icons.
  */
 function closeAllDropdowns() {
     document.querySelectorAll('.dropdown-content').forEach(d => {
         d.classList.remove('active');
+        clearFilterDropdownPosition(d);
     });
 
     ['curriculum', 'chapter', 'feature', 'partPerformance', 'year'].forEach(type => {
         const sectionId = type === 'partPerformance' ? 'part-performance-options' : `${type}-options`;
         const section = document.getElementById(sectionId);
-        if (section) section.style.display = 'none';
+        if (section) {
+            section.style.display = 'none';
+            clearFilterDropdownPosition(section);
+        }
     });
 
     Object.values(ARROW_MAP).forEach(arrowId => {
@@ -196,6 +255,11 @@ function toggleDropdown(dropdownId) {
                 }
             }
         }
+
+        // Position after layout so wide panels (Chapters / Years) stay on-screen.
+        requestAnimationFrame(function () {
+            positionFilterDropdownInViewport(target);
+        });
     }
 
     updateDynamicDropdowns();
@@ -212,9 +276,34 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// Re-clamp open filter panels when the viewport size changes.
+window.addEventListener('resize', function () {
+    const openIds = [
+        'curriculum-options',
+        'feature-options',
+        'part-performance-options',
+        'chapter-options',
+        'year-options'
+    ];
+    openIds.forEach(function (id) {
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const shown = panel.style.display === 'grid' || panel.style.display === 'block';
+        if (shown) positionFilterDropdownInViewport(panel);
+    });
+    document.querySelectorAll('.dropdown-content.active').forEach(function (panel) {
+        positionFilterDropdownInViewport(panel);
+    });
+});
+
 function toggleTriState(element) {
     const filter = element.dataset.filter;
-    const value = element.dataset.value;
+    let value = element.dataset.value;
+    if (filter === 'year' && typeof normalizeYearFilterKey === 'function') {
+        value = normalizeYearFilterKey(value) || value;
+        if (element.dataset.value !== value) element.dataset.value = value;
+        consolidateYearTriState();
+    }
     
     if (!window.triStateFilters[filter]) {
         window.triStateFilters[filter] = {};
@@ -233,6 +322,8 @@ function toggleTriState(element) {
         element.classList.remove('excluded');
         delete window.triStateFilters[filter][value];
     }
+
+    if (filter === 'year') consolidateYearTriState();
 
     const parentLabel = element.closest('.tri-state-label');
     if (parentLabel && element !== parentLabel) {
@@ -256,6 +347,11 @@ window.filterByTag = async function(category, value) {
         window.triStateFilters[category] = {};
     }
 
+    if (category === 'year' && typeof normalizeYearFilterKey === 'function') {
+        value = normalizeYearFilterKey(value) || value;
+        consolidateYearTriState();
+    }
+
     const currentState = window.triStateFilters[category][value];
 
     if (currentState === 'checked') {
@@ -263,6 +359,8 @@ window.filterByTag = async function(category, value) {
     } else {
         window.triStateFilters[category][value] = 'checked';
     }
+
+    if (category === 'year') consolidateYearTriState();
 
     await filterQuestions();
 };
@@ -501,18 +599,19 @@ async function updateDynamicDropdowns() {
     const contextQuestions = window.storage.applyFilters(allQuestions, contextFilters);
 
     // --- Populate Year Filter Dynamically (Grouped by Decade) ---
-    // Mock papers store a paper number (44), not a calendar year. Show MT44.
+    // Mock papers store MT## (e.g. MT44); legacy bare "44" still matches.
+    // Filter keys collapse "44" / "MT44" → "44"; UI label is always MT44.
     const populateYearGrid = () => {
         const container = document.getElementById('year-options');
         if (!container) return;
 
-        // 1. Calculate Counts
+        consolidateYearTriState();
+
+        // 1. Calculate Counts (by canonical year key)
         const counts = {};
         contextQuestions.forEach(q => {
-            if (q.year) {
-                const y = String(q.year).trim();
-                counts[y] = (counts[y] || 0) + 1;
-            }
+            const y = normalizeYearFilterKey(q.year);
+            if (y) counts[y] = (counts[y] || 0) + 1;
         });
 
         // 2. Soft Update if the dropdown is currently open
@@ -535,14 +634,21 @@ async function updateDynamicDropdowns() {
             return;
         }
 
-        // 3. Full Rebuild
-        let validYears = window.storage.getUniqueValues(contextQuestions, 'year').map(String);
+        // 3. Full Rebuild — unique canonical keys only
+        const yearSet = new Set();
+        window.storage.getUniqueValues(contextQuestions, 'year').forEach(raw => {
+            const key = normalizeYearFilterKey(raw);
+            if (key) yearSet.add(key);
+        });
 
         // BUGFIX-CONSISTENCY: always keep currently-selected years visible,
         // even if the current context contains no matching questions.
         Object.keys(window.triStateFilters.year || {}).forEach(y => {
-            if (!validYears.includes(y)) validYears.push(y);
+            const key = normalizeYearFilterKey(y);
+            if (key) yearSet.add(key);
         });
+
+        const validYears = Array.from(yearSet);
 
         // 4. Four-digit exam years go by decade. Practice papers (PP, SP)
         // stay in their own group. Mock-paper numbers (27–44) go last.
@@ -555,11 +661,11 @@ async function updateDynamicDropdowns() {
             if (/^\d{4}$/.test(text)) {
                 const decade = Math.floor(parseInt(text, 10) / 10) * 10;
                 if (!decadeGroups[decade]) decadeGroups[decade] = [];
-                decadeGroups[decade].push(y);
+                decadeGroups[decade].push(text);
             } else if (/^\d{1,3}$/.test(text)) {
-                mockYears.push(y);
+                mockYears.push(text);
             } else {
-                specialYears.push(y);
+                specialYears.push(text);
             }
         });
 
@@ -694,9 +800,28 @@ async function populateDynamicFilters() {
 }
 
 function yearFilterLabel(year) {
-    const text = String(year).trim();
-    if (/^\d{1,3}$/.test(text)) return `MT${text}`;
-    return text;
+    const key = typeof normalizeYearFilterKey === 'function'
+        ? normalizeYearFilterKey(year)
+        : String(year == null ? '' : year).trim();
+    if (/^\d{1,3}$/.test(key)) return `MT${key}`;
+    return key || String(year == null ? '' : year).trim();
+}
+
+// Merge alias year keys in tri-state (e.g. MT39 + 39 → one entry keyed 39).
+function consolidateYearTriState() {
+    if (!window.triStateFilters || !window.triStateFilters.year) return;
+    if (typeof normalizeYearFilterKey !== 'function') return;
+    const src = window.triStateFilters.year;
+    const out = {};
+    Object.keys(src).forEach(raw => {
+        const key = normalizeYearFilterKey(raw);
+        if (!key) return;
+        const state = src[raw];
+        if (state !== 'checked' && state !== 'excluded') return;
+        if (out[key] === 'checked') return;
+        if (state === 'checked' || !out[key]) out[key] = state;
+    });
+    window.triStateFilters.year = out;
 }
 
 function paperFilterLabel(paper) {
@@ -976,7 +1101,12 @@ window.removeFilter = function(type, param1, param2) {
     } else if (type === 'year') {
         if (param1) {
             if (window.triStateFilters.year) {
+                const key = typeof normalizeYearFilterKey === 'function'
+                    ? normalizeYearFilterKey(param1)
+                    : param1;
                 delete window.triStateFilters.year[param1];
+                if (key) delete window.triStateFilters.year[key];
+                consolidateYearTriState();
             }
         } else {
             window.triStateFilters.year = {};

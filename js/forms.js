@@ -120,13 +120,19 @@ function cancelEdit() {
 // Dependencies: storage-core.js (window.storage)
 async function checkDuplicate(formData) {
     const questions = await window.storage.getQuestions();
-    return questions.some(q => 
-        q.examination === formData.examination &&
-        q.year === formData.year &&
-        q.section === formData.section &&
-        q.questionNumber === formData.questionNumber &&
-        q.id !== window.editingId // Don't count self when editing
-    );
+    const yearKey = typeof normalizeYearFilterKey === 'function'
+        ? normalizeYearFilterKey(formData.year)
+        : String(formData.year == null ? '' : formData.year).trim();
+    return questions.some(q => {
+        const qYear = typeof normalizeYearFilterKey === 'function'
+            ? normalizeYearFilterKey(q.year)
+            : String(q.year == null ? '' : q.year).trim();
+        return q.examination === formData.examination &&
+            qYear === yearKey &&
+            q.section === formData.section &&
+            q.questionNumber === formData.questionNumber &&
+            q.id !== window.editingId; // Don't count self when editing
+    });
 }
 
 // Save question
@@ -151,7 +157,9 @@ function setupFormHandler() {
             id: window.editingId || document.getElementById('question-id').value.trim(),
             publisher: document.getElementById('publisher').value.trim(),
             examination: document.getElementById('examination').value,
-            year: document.getElementById('year').value.trim(),
+            year: (typeof normalizeYear === 'function')
+                ? normalizeYear(document.getElementById('year').value)
+                : document.getElementById('year').value.trim(),
             paper: document.getElementById('paper').value.trim(),
             questionType: document.getElementById('question-type').value,
             marks: parseFloat(document.getElementById('marks').value) || 0,
@@ -262,7 +270,9 @@ async function editQuestion(id) {
     document.getElementById('question-id').value = question.id;
     document.getElementById('publisher').value = question.publisher || DEFAULT_PUBLISHER;
     document.getElementById('examination').value = question.examination;
-    document.getElementById('year').value = question.year;
+    document.getElementById('year').value = (typeof normalizeYear === 'function')
+        ? normalizeYear(question.year)
+        : (question.year || '');
     document.getElementById('paper').value = question.paper || '';
     document.getElementById('question-type').value = question.questionType;
     document.getElementById('marks').value = question.marks || '';

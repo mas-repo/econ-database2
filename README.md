@@ -10,6 +10,14 @@ Records with reviewedByAI equal to Y must not be overwritten by builders that fi
 
 ---
 
+## Field: year
+
+- Type: string.
+- **Calendar exams:** 4-digit years (`2016`, `2025`, …) — never rewritten.
+- **Mock papers:** stored as `MT##` (`MT27`–`MT44`). Bare 1–3 digit values (`39`, `27`) are **auto-normalized to `MT##`** on form save, bulk edit, import/sync (`normalizeQuestion`), and IndexedDB write (`prepareQuestionForWrite`). Helper: `normalizeYear` in `js/question-fields.js`.
+- Other tokens (`PP`, `SP`) stay as trimmed text.
+- Filters/stats still match legacy bare digits and `MT##` via `normalizeYearFilterKey` (canonical key is the digits; UI label is `MT##`).
+
 ## Field: stemPatterns (題幹模式)
 
 - Type: array of strings.

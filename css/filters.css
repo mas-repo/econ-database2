@@ -388,8 +388,16 @@
 
 #chapter-options.chapter-grid-width {
     width: 100%;
-    min-width: 380px;
-    max-width: calc(100vw - 40px);
+    min-width: min(380px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+}
+
+/* When JS flips a wide panel to the trigger's right edge (far-right columns). */
+.custom-grid-dropdown.dropdown-align-end,
+.dropdown-content.dropdown-align-end,
+#year-options.dropdown-align-end {
+    left: auto;
+    right: 0;
 }
 
 #chapter-list {
@@ -452,8 +460,8 @@
     top: calc(100% + 5px);
     left: 0;
     width: 100%;
-    min-width: 340px;
-    max-width: calc(100vw - 40px);
+    min-width: min(340px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
     background: white;
     border: 1px solid var(--border-light);
     border-radius: 8px;

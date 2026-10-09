@@ -48,6 +48,21 @@ function partitionEmptySelection(stateMap) {
     };
 }
 
+// Canonical year key for filters/stats matching only — does not rewrite stored
+// q.year (writes use normalizeYear → MT##). Mock papers may still appear as
+// legacy "39" or stored "MT39"; both become key "39" (UI label MT39 via
+// yearFilterLabel). Four-digit exam years and tokens (PP / SP) stay as text.
+function normalizeYearFilterKey(year) {
+    if (year == null) return '';
+    const text = String(year).trim();
+    if (!text || text === '-') return '';
+    const mt = text.match(/^MT\s*(\d{1,3})$/i);
+    if (mt) return String(parseInt(mt[1], 10));
+    if (/^\d{1,3}$/.test(text)) return String(parseInt(text, 10));
+    if (/^\d{4}$/.test(text)) return text;
+    return text;
+}
+
 // Helper to extract unique values from a dataset for a specific field
 IndexedDBStorage.prototype.getUniqueValues = function(questions, field) {
     const values = new Set();
@@ -240,17 +255,24 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
 
         // ADDED: Year tri-state filter
         if (filters.triState.year) {
-            const checkedYears = Object.keys(filters.triState.year).filter(k => filters.triState.year[k] === 'checked');
-            const excludedYears = Object.keys(filters.triState.year).filter(k => filters.triState.year[k] === 'excluded');
-            
+            const checkedYears = Object.keys(filters.triState.year)
+                .filter(k => filters.triState.year[k] === 'checked')
+                .map(normalizeYearFilterKey)
+                .filter(Boolean);
+            const excludedYears = Object.keys(filters.triState.year)
+                .filter(k => filters.triState.year[k] === 'excluded')
+                .map(normalizeYearFilterKey)
+                .filter(Boolean);
+
             if (checkedYears.length > 0) {
                 // OR Logic: Question matches any of the checked years
-                questions = questions.filter(q => checkedYears.includes(String(q.year)));
+                // (canonical keys so "39" and "MT39" are the same logical year)
+                questions = questions.filter(q => checkedYears.includes(normalizeYearFilterKey(q.year)));
             }
-            
+
             if (excludedYears.length > 0) {
                 // Exclude if matches any of the excluded years
-                questions = questions.filter(q => !excludedYears.includes(String(q.year)));
+                questions = questions.filter(q => !excludedYears.includes(normalizeYearFilterKey(q.year)));
             }
         }
 
