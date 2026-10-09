@@ -83,6 +83,14 @@
 .report-issue-status.is-error { color: #c0392b; }
 .report-issue-status.is-ok { color: #1e8449; }
 .report-issue-status.is-info { color: #1a5276; }
+.report-issue-status.is-warn { color: #9a6b00; }
+
+.feedback-hub-parts-preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.86rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 
 .report-issue-footer {
     display: flex;

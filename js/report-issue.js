@@ -1,9 +1,9 @@
 // 回報問題 — UI for any authenticated session; Apps Script reportIssue requires
 // a known hash (rights.known). Persist: shared/data/issue-reports.json
 // (reportIssue / listIssueReports / update*Status). Admin hub「回饋／回報」
-// combines AI解釋 Feedback + issue reports with status filter + bulk close.
+// combines AI解釋 Feedback、問題回報、分題審批 (question-parts proposals).
 // Dependencies: access-rights, github-sync (gitProxyRequest / gitUsername),
-// optional PoeGenerate.proxyRequest, AiExplanation admin hooks.
+// optional PoeGenerate.proxyRequest, AiExplanation admin hooks, question-fields.
 
 (function (global) {
     'use strict';
@@ -31,10 +31,12 @@
         busy: false
     };
     var hubState = {
-        tab: 'issues', // issues | ai
+        tab: 'issues', // issues | ai | parts
         issues: [],
         aiRows: [],
-        statusFilter: 'open', // open | resolved | all
+        partsRows: [],
+        partsStemById: {},
+        statusFilter: 'open', // open | resolved | all (issues/ai only)
         selected: {},
         busy: false,
         loading: false,
@@ -91,6 +93,7 @@
             rate_limited: '提交太頻繁，請稍後再試',
             github_not_configured: '回報服務尚未設定',
             github_error: '儲存失敗，請稍後再試',
+            validation_failed: '分題資料驗證失敗',
             network: '無法連線到服務',
             proxy_not_configured: '未設定代理服務'
         };
@@ -267,7 +270,7 @@
         button.className = 'btn btn-outline-primary header-toolbar-btn';
         button.hidden = true;
         button.textContent = '回饋／回報';
-        button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback 同問題回報');
+        button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback、問題回報同埋分題審批');
         button.dataset.bound = '1';
         button.addEventListener('click', openFeedbackHub);
         var anchor = document.getElementById('data-checks-btn')
@@ -299,16 +302,17 @@
             + '  <header class="report-issue-header">'
             + '    <div>'
             + '      <h2 id="feedback-hub-title">回饋／回報</h2>'
-            + '      <p class="report-issue-subtitle">AI解釋評分／Feedback，同埋使用者問題回報。預設先顯示待處理。</p>'
+            + '      <p class="report-issue-subtitle" id="feedback-hub-subtitle">AI解釋評分／Feedback、使用者問題回報，同埋分題提案審批。</p>'
             + '    </div>'
             + '    <button type="button" class="report-issue-close" aria-label="關閉">×</button>'
             + '  </header>'
             + '  <div class="feedback-hub-tabs" role="tablist">'
             + '    <button type="button" class="feedback-hub-tab is-active" role="tab" data-hub-tab="issues" aria-selected="true">回報問題</button>'
             + '    <button type="button" class="feedback-hub-tab" role="tab" data-hub-tab="ai" aria-selected="false">AI解釋 Feedback</button>'
+            + '    <button type="button" class="feedback-hub-tab" role="tab" data-hub-tab="parts" aria-selected="false">分題審批</button>'
             + '  </div>'
             + '  <div class="feedback-hub-toolbar">'
-            + '    <label class="feedback-hub-filter-label" for="feedback-hub-status-filter">狀態</label>'
+            + '    <label class="feedback-hub-filter-label" id="feedback-hub-filter-label" for="feedback-hub-status-filter">狀態</label>'
             + '    <select id="feedback-hub-status-filter" class="feedback-hub-status-filter" aria-label="按狀態篩選">'
             + '      <option value="open">待處理</option>'
             + '      <option value="resolved">已關閉</option>'
@@ -344,13 +348,16 @@
         hubOverlay.querySelector('.feedback-hub-tabs').addEventListener('click', function (event) {
             var tab = event.target.closest('[data-hub-tab]');
             if (!tab) return;
-            hubState.tab = tab.getAttribute('data-hub-tab') === 'ai' ? 'ai' : 'issues';
+            var next = String(tab.getAttribute('data-hub-tab') || 'issues');
+            if (next !== 'ai' && next !== 'parts') next = 'issues';
+            hubState.tab = next;
             hubState.selected = {};
             hubOverlay.querySelectorAll('[data-hub-tab]').forEach(function (btn) {
                 var on = btn.getAttribute('data-hub-tab') === hubState.tab;
                 btn.classList.toggle('is-active', on);
                 btn.setAttribute('aria-selected', on ? 'true' : 'false');
             });
+            syncHubChrome();
             renderHubList();
         });
         hubOverlay.querySelector('#feedback-hub-list').addEventListener('change', function (event) {
@@ -374,9 +381,36 @@
                 var qid = deleteBtn.getAttribute('data-hub-qid');
                 var eid = deleteBtn.getAttribute('data-hub-delete-explanation');
                 if (qid && eid) deleteAiExplanationFromHub(qid, eid);
+                return;
+            }
+            var approveBtn = event.target.closest('[data-parts-approve]');
+            if (approveBtn && !hubState.busy) {
+                approvePartsProposal(approveBtn.getAttribute('data-parts-approve'));
+                return;
+            }
+            var rejectBtn = event.target.closest('[data-parts-reject]');
+            if (rejectBtn && !hubState.busy) {
+                rejectPartsProposal(rejectBtn.getAttribute('data-parts-reject'));
             }
         });
         return hubOverlay;
+    }
+
+    function syncHubChrome() {
+        if (!hubOverlay) return;
+        var partsMode = hubState.tab === 'parts';
+        var filterLabel = document.getElementById('feedback-hub-filter-label');
+        var filter = document.getElementById('feedback-hub-status-filter');
+        var bulk = document.getElementById('feedback-hub-bulk-resolve');
+        var subtitle = document.getElementById('feedback-hub-subtitle');
+        if (filterLabel) filterLabel.hidden = partsMode;
+        if (filter) filter.hidden = partsMode;
+        if (bulk) bulk.hidden = partsMode;
+        if (subtitle) {
+            subtitle.textContent = partsMode
+                ? '待審批的分題提案（通過會寫入共用題庫；拒絕只移除提案）。'
+                : 'AI解釋評分／Feedback、使用者問題回報，同埋分題提案審批。';
+        }
     }
 
     function closeFeedbackHub() {
@@ -396,6 +430,7 @@
         hubOverlay.hidden = false;
         var filter = document.getElementById('feedback-hub-status-filter');
         if (filter) filter.value = hubState.statusFilter || 'open';
+        syncHubChrome();
         // Close standalone AI admin if open.
         if (global.AiExplanation && typeof AiExplanation.closeAdminPanel === 'function') {
             AiExplanation.closeAdminPanel();
@@ -409,6 +444,30 @@
         st.textContent = String(text || '');
         st.hidden = !text;
         st.className = 'report-issue-status' + (kind ? ' is-' + kind : '');
+    }
+
+    async function loadPartsStemMap(rows) {
+        var map = {};
+        if (!global.storage || typeof global.storage.getAllQuestions !== 'function') {
+            hubState.partsStemById = map;
+            return map;
+        }
+        try {
+            var all = await global.storage.getAllQuestions();
+            var want = {};
+            (rows || []).forEach(function (row) {
+                if (row && row.questionId) want[String(row.questionId)] = true;
+            });
+            (all || []).forEach(function (q) {
+                if (!q || !want[String(q.id || '')]) return;
+                var stem = String(q.plainText || q.questionTextChi || q.questionTextEng || '')
+                    .replace(/\s+/g, ' ').trim();
+                if (stem.length > 120) stem = stem.slice(0, 120) + '…';
+                map[String(q.id)] = stem;
+            });
+        } catch (ignore) {}
+        hubState.partsStemById = map;
+        return map;
     }
 
     async function loadHubData() {
@@ -426,34 +485,91 @@
                 }),
                 proxyAction({ action: 'listAiExplanationFeedback' }, 60000).catch(function (err) {
                     return { ok: false, error: err && err.code };
+                }),
+                proxyAction({ action: 'listQuestionPartsProposals' }, 60000).catch(function (err) {
+                    return { ok: false, error: err && err.code };
                 })
             ]);
             var issues = results[0];
             var ai = results[1];
+            var parts = results[2];
             hubState.issues = (issues && issues.ok && Array.isArray(issues.rows)) ? issues.rows : [];
             hubState.aiRows = (ai && ai.ok && Array.isArray(ai.rows)) ? ai.rows : [];
-            if ((!issues || issues.ok !== true) && (!ai || ai.ok !== true)) {
-                hubState.error = errorMessage((issues && issues.error) || (ai && ai.error));
+            hubState.partsRows = (parts && parts.ok && Array.isArray(parts.rows)) ? parts.rows : [];
+            await loadPartsStemMap(hubState.partsRows);
+            if ((!issues || issues.ok !== true)
+                && (!ai || ai.ok !== true)
+                && (!parts || parts.ok !== true)) {
+                hubState.error = errorMessage(
+                    (issues && issues.error) || (ai && ai.error) || (parts && parts.error)
+                );
             } else {
                 hubState.error = '';
             }
         } catch (err) {
             hubState.issues = [];
             hubState.aiRows = [];
+            hubState.partsRows = [];
             hubState.error = errorMessage(err && err.code);
         } finally {
             hubState.loading = false;
+            syncHubChrome();
             renderHubList();
         }
     }
 
     function filteredRows() {
+        if (hubState.tab === 'parts') return (hubState.partsRows || []).slice();
         var source = hubState.tab === 'ai' ? (hubState.aiRows || []) : (hubState.issues || []);
         var filter = hubState.statusFilter || 'open';
         if (filter === 'all') return source.slice();
         return source.filter(function (row) {
             return normalizeStatus(row && row.status) === filter;
         });
+    }
+
+    function formatPartsPreview(parts) {
+        if (!Array.isArray(parts) || !parts.length) return '（無分題）';
+        return parts.map(function (part) {
+            var label = String(part && part.label != null ? part.label : '').trim() || '?';
+            var marks = part && part.marks != null && part.marks !== '' ? String(part.marks) : '—';
+            var perf = String(part && part.performance || '').trim();
+            return label + ',' + marks + (perf ? ',' + perf : '');
+        }).join(' | ');
+    }
+
+    function findPartsRow(proposalId) {
+        var id = String(proposalId || '');
+        var rows = hubState.partsRows || [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] && String(rows[i].id) === id) return rows[i];
+        }
+        return null;
+    }
+
+    async function applyApprovedPartsLocally(questionSnap) {
+        if (!questionSnap || !questionSnap.questionId) return;
+        if (!global.storage || typeof global.storage.getAllQuestions !== 'function') return;
+        if (typeof global.applyPartsFields !== 'function'
+            || typeof global.storage.updateQuestion !== 'function') {
+            return;
+        }
+        try {
+            var all = await global.storage.getAllQuestions();
+            var qid = String(questionSnap.questionId);
+            var live = null;
+            for (var i = 0; i < (all || []).length; i++) {
+                if (all[i] && String(all[i].id) === qid) {
+                    live = all[i];
+                    break;
+                }
+            }
+            if (!live) return;
+            global.applyPartsFields(live, questionSnap.questionParts || [], 'filled');
+            await global.storage.updateQuestion(live);
+            if (typeof populateDynamicFilters === 'function') populateDynamicFilters();
+            if (typeof renderQuestions === 'function') renderQuestions();
+        } catch (ignore) {}
     }
 
     function syncBulkButton() {
@@ -481,10 +597,53 @@
         setHubBanner('', '');
         var rows = filteredRows();
         if (!rows.length) {
-            var emptyMsg = hubState.tab === 'ai'
-                ? (hubState.statusFilter === 'open' ? '沒有待處理的 AI解釋 Feedback。' : '尚未有符合條件的 AI解釋 Feedback。')
-                : (hubState.statusFilter === 'open' ? '沒有待處理的問題回報。' : '尚未有符合條件的問題回報。');
+            var emptyMsg = '尚未有符合條件的項目。';
+            if (hubState.tab === 'parts') {
+                emptyMsg = '沒有待審批的分題提案。';
+            } else if (hubState.tab === 'ai') {
+                emptyMsg = hubState.statusFilter === 'open'
+                    ? '沒有待處理的 AI解釋 Feedback。'
+                    : '尚未有符合條件的 AI解釋 Feedback。';
+            } else {
+                emptyMsg = hubState.statusFilter === 'open'
+                    ? '沒有待處理的問題回報。'
+                    : '尚未有符合條件的問題回報。';
+            }
             list.innerHTML = '<p class="report-issue-empty">' + emptyMsg + '</p>';
+            syncBulkButton();
+            return;
+        }
+        if (hubState.tab === 'parts') {
+            list.innerHTML = rows.map(function (row) {
+                var id = String(row.id || '');
+                var qid = String(row.questionId || '');
+                var stem = hubState.partsStemById[qid] || '';
+                var preview = formatPartsPreview(row.questionParts);
+                var metaBits = [];
+                if (row.source) metaBits.push(esc(row.source));
+                if (row.proposedBy) metaBits.push(esc(row.proposedBy));
+                if (row.proposedAt) metaBits.push(esc(formatWhen(row.proposedAt)));
+                return ''
+                    + '<article class="feedback-hub-row" data-parts-id="' + esc(id) + '">'
+                    + '  <div class="feedback-hub-meta">'
+                    + '    <strong>' + esc(qid) + '</strong>'
+                    + '    <span class="feedback-hub-pill">分題提案</span>'
+                    + metaBits.map(function (bit) {
+                        return '    <span>' + bit + '</span>';
+                    }).join('')
+                    + '  </div>'
+                    + (stem ? '  <p class="feedback-hub-snippet">' + esc(stem) + '</p>' : '')
+                    + '  <p class="feedback-hub-text"><code class="feedback-hub-parts-preview">'
+                    + esc(preview) + '</code></p>'
+                    + (row.note ? '  <p class="feedback-hub-text">' + esc(row.note) + '</p>' : '')
+                    + '  <div class="feedback-hub-meta">'
+                    + '    <button type="button" class="btn btn-primary btn-sm" data-parts-approve="'
+                    + esc(id) + '">通過</button>'
+                    + '    <button type="button" class="btn btn-outline-danger btn-sm" data-parts-reject="'
+                    + esc(id) + '">拒絕</button>'
+                    + '  </div>'
+                    + '</article>';
+            }).join('');
             syncBulkButton();
             return;
         }
@@ -600,6 +759,101 @@
             applyLocalStatus(list, STATUS_RESOLVED);
             list.forEach(function (id) { delete hubState.selected[id]; });
             setHubBanner('已標記 ' + list.length + ' 項為已關閉。', 'ok');
+            renderHubList();
+        } catch (err) {
+            setHubBanner(errorMessage(err && err.code), 'error');
+        } finally {
+            hubState.busy = false;
+            syncBulkButton();
+        }
+    }
+
+    async function approvePartsProposal(proposalId) {
+        if (hubState.busy || !hasAdminAccess()) return;
+        var row = findPartsRow(proposalId);
+        if (!row) return;
+        hubState.busy = true;
+        syncBulkButton();
+        setHubBanner('通過中…', 'info');
+        try {
+            var data = await proxyAction({
+                action: 'approveQuestionPartsProposal',
+                proposalId: String(row.id || ''),
+                questionId: String(row.questionId || ''),
+                confirmOverwrite: false
+            }, 120000);
+            if (!data) {
+                setHubBanner(errorMessage('github_error'), 'error');
+                return;
+            }
+            if (data.needsConfirm === true) {
+                var currentPreview = formatPartsPreview(data.current && data.current.questionParts);
+                var proposedPreview = formatPartsPreview(data.proposed && data.proposed.questionParts);
+                var ok = global.confirm
+                    ? global.confirm(
+                        '題目「' + String(row.questionId || '') + '」已有分題。確定覆寫？\n\n'
+                        + '現有：' + currentPreview + '\n'
+                        + '提案：' + proposedPreview
+                    )
+                    : false;
+                if (!ok) {
+                    setHubBanner('已取消覆寫。', 'warn');
+                    return;
+                }
+                setHubBanner('覆寫並通過中…', 'info');
+                data = await proxyAction({
+                    action: 'approveQuestionPartsProposal',
+                    proposalId: String(row.id || ''),
+                    questionId: String(row.questionId || ''),
+                    confirmOverwrite: true
+                }, 120000);
+            }
+            if (!data || data.ok !== true) {
+                setHubBanner(
+                    (data && data.message && String(data.message)) || errorMessage(data && data.error),
+                    'error'
+                );
+                return;
+            }
+            hubState.partsRows = (hubState.partsRows || []).filter(function (item) {
+                return !(item && String(item.id) === String(row.id));
+            });
+            await applyApprovedPartsLocally(data.question);
+            setHubBanner('已通過並寫入題庫：' + String(row.questionId || ''), 'ok');
+            renderHubList();
+        } catch (err) {
+            setHubBanner(errorMessage(err && err.code), 'error');
+        } finally {
+            hubState.busy = false;
+            syncBulkButton();
+        }
+    }
+
+    async function rejectPartsProposal(proposalId) {
+        if (hubState.busy || !hasAdminAccess()) return;
+        var row = findPartsRow(proposalId);
+        if (!row) return;
+        var ok = global.confirm
+            ? global.confirm('拒絕題目「' + String(row.questionId || '') + '」的分題提案？提案會從暫存移除，不會改題庫。')
+            : true;
+        if (!ok) return;
+        hubState.busy = true;
+        syncBulkButton();
+        setHubBanner('拒絕中…', 'info');
+        try {
+            var data = await proxyAction({
+                action: 'rejectQuestionPartsProposal',
+                proposalId: String(row.id || ''),
+                questionId: String(row.questionId || '')
+            }, 60000);
+            if (!data || data.ok !== true) {
+                setHubBanner(errorMessage(data && data.error), 'error');
+                return;
+            }
+            hubState.partsRows = (hubState.partsRows || []).filter(function (item) {
+                return !(item && String(item.id) === String(row.id));
+            });
+            setHubBanner('已拒絕並移除提案：' + String(row.questionId || ''), 'ok');
             renderHubList();
         } catch (err) {
             setHubBanner(errorMessage(err && err.code), 'error');

@@ -119,7 +119,17 @@ Per-question AI explanations live in the private side file `shared/data/ai-expla
 
 **回報問題** (`js/report-issue.js`): any **signed-in known user** can open the button on a question card. Tags: 有錯字 / 圖片未能正確顯示 / 分類不正確 / 其他 (+ optional text). Persists to `shared/data/issue-reports.json` via Apps Script `reportIssue`. Not gated on `ai` or `githubSync`.
 
-**Admin hub:** when `accessRights.admin`, header shows **回饋／回報** (replaces the older standalone「AI解釋 Feedback」button). Two tabs: **回報問題** (`listIssueReports`) and **AI解釋 Feedback** (`listAiExplanationFeedback`). Newest first; refresh reloads both. Side-file contract is `SCHEMA_VERSION` 5 (bank stamp) plus the issue-reports file itself.
+**Admin hub:** when `accessRights.admin`, header shows **回饋／回報** (replaces the older standalone「AI解釋 Feedback」button). Tabs: **回報問題** (`listIssueReports`)、**AI解釋 Feedback** (`listAiExplanationFeedback`)、**分題審批** (`listQuestionPartsProposals`). Newest first; refresh reloads all. Side-file contracts use bank `SCHEMA_VERSION` as a deploy gate (see `js/constants.js`).
+
+## 分題提案審批 (staging)
+
+Bulk fillers / agents must **not** write `questionParts` straight into `database.json`. They call Apps Script `proposeQuestionParts` (`admin` or `githubSync`), which upserts pending rows in `shared/data/question-parts-proposals.json` (one pending proposal per `questionId`). **Propose never touches the bank.**
+
+Admins open **回饋／回報 → 分題審批**:
+- **通過** → `approveQuestionPartsProposal` patches the shared bank under lock (`questionParts` + `partsStatus: filled`), validates part-marks sum vs `marks`, then **removes** the staging row. If the live question already has filled parts, the API returns `needsConfirm: true` (current vs proposed); the UI asks for overwrite and re-calls with `confirmOverwrite: true`.
+- **拒絕** → `rejectQuestionPartsProposal` removes the staging row only.
+
+Form / 批量編輯 can still edit parts directly on the bank. Redeploy Apps Script after merge. Coordinate staging file creation with **econ-database-data** (`shared/data/question-parts-proposals.json`).
 
 ## 批量編輯 / Bulk edit (admin mode)
 

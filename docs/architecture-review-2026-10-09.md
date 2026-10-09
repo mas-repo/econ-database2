@@ -67,6 +67,9 @@ Entry: `doPost` → `handlePost_` (`apps-script/Code.gs`).
 | `listAiExplanationFeedback` | `admin` | read side file |
 | `reportIssue` | `known` | `shared/data/issue-reports.json` |
 | `listIssueReports` | `admin` | read side file |
+| `proposeQuestionParts` | `admin` \| `githubSync` | `shared/data/question-parts-proposals.json` (never bank) |
+| `listQuestionPartsProposals` / `rejectQuestionPartsProposal` | `admin` | staging side file |
+| `approveQuestionPartsProposal` | `admin` | bank patch `database.json` + remove staging row |
 | `reviewStemPatterns` | `ai` | none (reply only) |
 | `listAiBackups`, `getAiBackup` | owner (+ admin paths) | `users/…` |
 | `listAiUsageRecords` | `admin` | backups listing |

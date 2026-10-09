@@ -5,22 +5,23 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.09.38';
+const APP_VERSION = '2026.10.09.39';
 console.log('Question bank version:', APP_VERSION);
 
 // Integer stamped on shared bank JSON as schemaVersion. Also an app-capability
 // gate: bump when an older client must not overwrite a newer stamped bank
 // (including after side-file-only features). Missing → 0 (see schema-version.js).
 // Must stay aligned with Apps Script readBankSchemaVersion_ / upload gate.
-// v2/v4 = bank fields; v3/v5/v6 = side-file contracts used as deploy gates.
+// v2/v4 = bank fields; v3/v5/v6/v7 = side-file contracts used as deploy gates.
 // v2: questionParts [{ label, marks, performance }] for SQ/LQ sub-parts.
 // v3: AI解釋 side-file (shared/data/ai-explanations.json); legacy AIExplanation URL ignored.
 // v4: partsStatus pending|none|filled — 尚未輸入 vs 沒有分題 vs 有分題.
 // v5: 回報問題 side-file (shared/data/issue-reports.json).
 // v6: issue-reports + AI解釋 feedback `status` (open|resolved); AS upload field schema.
+// v7: 分題提案 staging (shared/data/question-parts-proposals.json); approve patches bank.
 // data-checks.json is intentionally not reflected here.
 // Redeploy Apps Script after pulling this client (upload validation + hub status APIs).
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)
 const QUESTION_NUMBER_RANGE = {
