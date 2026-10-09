@@ -416,7 +416,7 @@
     padding: 10px;
     grid-template-columns: 1fr;  /* one decade group per row */
     gap: 8px;
-    max-height: 420px;
+    max-height: 540px;
     overflow-y: auto;
     box-sizing: border-box;
 }
