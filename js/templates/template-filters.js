@@ -296,11 +296,11 @@ function renderFiltersTemplate() {
                 ${modalTrigger('patterns', '🎯 題型')}
                 ${modalTrigger('stemPatterns', '🧩 題幹模式')}
 
-                <!-- 🤖 AI 詳解 (shown only when data exists) -->
-                <div class="filter-item">
+                <!-- 🤖 AI解釋 (ai access only; options built in filters.js) -->
+                <div class="filter-item" id="ai-filter-item" hidden>
                     <div class="dropdown-filter">
                         <button class="dropdown-btn" id="ai-filter-btn" onclick="toggleDropdown('ai-options')">
-                            <span>🤖 AI 詳解</span><span class="arrow" id="ai-arrow">▶</span>
+                            <span>🤖 AI解釋</span><span class="arrow" id="ai-arrow">▶</span>
                         </button>
                         <span class="active-indicator" id="indicator-ai"></span>
                         <div class="dropdown-content" id="ai-options"></div>

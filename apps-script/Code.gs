@@ -29,6 +29,10 @@
  *   <GITHUB_SHARED_PREFIX>/data/data-checks.json
  *   e.g. shared/data/data-checks.json
  * via syncDataChecksUpload / syncDataChecksDownload.
+ * AI解釋 (ai-gated generate/vote/feedback; admin list feedback):
+ *   <GITHUB_SHARED_PREFIX>/data/ai-explanations.json
+ *   e.g. shared/data/ai-explanations.json
+ * Legacy question field AIExplanation (URL) is unused by new clients.
  * Model-reply (AI出題) backups stay personal:
  *   users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json
  * <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
@@ -92,6 +96,10 @@
  * AI generate / test / personal backups / admin usage:
  *   generateQuestions   → handleGenerate_
  *   continueGeneration  → handleContinueGeneration_  (multi-turn follow-up; messages[]; refs optional)
+ *   generateAiExplanation     → handleGenerateAiExplanation_  (ai; writes shared/data/ai-explanations.json)
+ *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
+ *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
+ *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
  *   testModel           → handleTest_
  *   reviewStemPatterns  → handleReviewStemPatterns_  (no Git AI backup / no GenerationBackup sheet)
  *   listAiBackups       → handleListAiBackups_
@@ -186,6 +194,10 @@ function handlePost_(e) {
   if (action === 'checkAccess' || action === 'checkRights') return handleCheck_(body);
   if (action === 'generateQuestions') return handleGenerate_(body);
   if (action === 'continueGeneration') return handleContinueGeneration_(body);
+  if (action === 'generateAiExplanation') return handleGenerateAiExplanation_(body);
+  if (action === 'voteAiExplanation') return handleVoteAiExplanation_(body);
+  if (action === 'feedbackAiExplanation') return handleFeedbackAiExplanation_(body);
+  if (action === 'listAiExplanationFeedback') return handleListAiExplanationFeedback_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
@@ -798,6 +810,453 @@ function handleContinueGeneration_(body) {
       }
     }, true);
     return { ok: false, error: code };
+  }
+}
+
+// === AI 解釋 (shared/data/ai-explanations.json) ===
+// Side file keyed by question id. Votes / feedback / bodies live here so
+// the questions bank is not rewritten on every vote. Legacy question field
+// AIExplanation (URL) is unused by new clients.
+
+var AI_EXPLANATIONS_REL_PATH_ = 'data/ai-explanations.json';
+var AI_EXPLANATIONS_MAX_BYTES_ = 2000000;
+var AI_EXPLANATIONS_MAX_PER_QUESTION_ = 30;
+var AI_EXPLANATIONS_MAX_FEEDBACK_ = 40;
+var AI_EXPLANATION_SYSTEM_PROMPT_ = [
+  '你是香港 DSE／公開試經濟科導師。請根據使用者提供的題幹與答案撰寫「AI解釋」。',
+  '用繁體中文（香港）。解說要正確、清楚，適合學生閱讀。',
+  '不要虛構題目沒有的資料；若答案資料不足，請明確說明。',
+  '不要輸出外部連結。'
+].join('');
+
+function githubSharedAiExplanationsPath_(cfg) {
+  var prefix = githubSharedPrefix_(cfg);
+  if (!prefix) return '';
+  return joinGithubPath_(prefix, AI_EXPLANATIONS_REL_PATH_);
+}
+
+function emptyAiExplanationsStore_() {
+  return { version: 1, updatedAt: '', byQuestion: {} };
+}
+
+function normalizeAiDetailLevel_(raw) {
+  var text = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (text === 'detailed' || text === '詳盡' || text === 'detail' || text === 'long') return 'detailed';
+  return 'short';
+}
+
+function newAiExplanationId_() {
+  return 'ax_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+}
+
+function readAiExplanationsStore_(cfg) {
+  var path = githubSharedAiExplanationsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  try {
+    var read = githubReadText_(cfg, path);
+    var parsed;
+    try {
+      parsed = JSON.parse(read.text);
+    } catch (ignore) {
+      throw gitFail_('github_error');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw gitFail_('github_error');
+    }
+    if (!parsed.byQuestion || typeof parsed.byQuestion !== 'object' || Array.isArray(parsed.byQuestion)) {
+      parsed.byQuestion = {};
+    }
+    if (typeof parsed.version !== 'number') parsed.version = 1;
+    return { store: parsed, sha: read.sha || '', path: path, existed: true };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return { store: emptyAiExplanationsStore_(), sha: '', path: path, existed: false };
+    }
+    throw err;
+  }
+}
+
+function writeAiExplanationsStore_(cfg, store, message) {
+  var path = githubSharedAiExplanationsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  store.version = 1;
+  store.updatedAt = new Date().toISOString();
+  if (!store.byQuestion || typeof store.byQuestion !== 'object') store.byQuestion = {};
+  var text = JSON.stringify(store);
+  if (utf8Length_(text) > AI_EXPLANATIONS_MAX_BYTES_) throw gitFail_('payload_too_large');
+  var written = githubWriteText_(cfg, path, text, message || 'Update AI explanations');
+  return { sha: written.sha, path: path, store: store };
+}
+
+function mutateAiExplanationsStore_(username, message, mutator) {
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(25000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var loaded = readAiExplanationsStore_(cfg);
+    var result = mutator(loaded.store);
+    if (!result || result.ok === false) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return result && result.error ? gitClientError_(result.error) : gitClientError_('bad_request');
+    }
+    var written = writeAiExplanationsStore_(cfg, loaded.store, message);
+    lock.releaseLock();
+    held = false;
+    return {
+      ok: true,
+      sha: written.sha,
+      path: written.path,
+      explanation: result.explanation || null,
+      explanations: result.explanations || null,
+      feedback: result.feedback || null
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    if (code === 'github_not_found') return gitClientError_('github_not_found');
+    return gitClientError_('github_error');
+  }
+}
+
+function listExplanationsForQuestion_(store, questionId) {
+  var bucket = store.byQuestion && store.byQuestion[questionId];
+  if (!bucket || !Array.isArray(bucket.explanations)) return [];
+  return bucket.explanations.slice();
+}
+
+function findExplanation_(store, questionId, explanationId) {
+  var list = listExplanationsForQuestion_(store, questionId);
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && String(list[i].id) === String(explanationId)) return list[i];
+  }
+  return null;
+}
+
+function publicExplanationView_(exp, viewer) {
+  if (!exp) return null;
+  var up = Array.isArray(exp.votes && exp.votes.up) ? exp.votes.up : [];
+  var down = Array.isArray(exp.votes && exp.votes.down) ? exp.votes.down : [];
+  var myVote = '';
+  if (viewer) {
+    if (up.indexOf(viewer) !== -1) myVote = 'up';
+    else if (down.indexOf(viewer) !== -1) myVote = 'down';
+  }
+  return {
+    id: String(exp.id || ''),
+    questionId: String(exp.questionId || ''),
+    detailLevel: normalizeAiDetailLevel_(exp.detailLevel),
+    model: String(exp.model || ''),
+    createdAt: String(exp.createdAt || ''),
+    createdBy: String(exp.createdBy || ''),
+    text: String(exp.text || ''),
+    upCount: up.length,
+    downCount: down.length,
+    myVote: myVote,
+    feedbackCount: Array.isArray(exp.feedback) ? exp.feedback.length : 0
+  };
+}
+
+function buildAiExplanationPrompt_(question, detailLevel) {
+  var levelLabel = detailLevel === 'detailed' ? '詳盡' : '簡短';
+  var lines = [];
+  lines.push('請為以下經濟科題目撰寫「' + levelLabel + '」AI解釋。');
+  if (detailLevel === 'detailed') {
+    lines.push('要求：完整解題步驟、關鍵概念、常見陷阱，以及對照標準答案的說明。篇幅可較長。');
+  } else {
+    lines.push('要求：精簡重點（核心概念 + 答案要點），約 150–350 字，避免冗長。');
+  }
+  lines.push('');
+  if (question.id) lines.push('題號：' + question.id);
+  if (question.examination) lines.push('考試：' + question.examination);
+  if (question.year) lines.push('年份：' + question.year);
+  if (question.questionType) lines.push('題型：' + question.questionType);
+  if (question.concepts) lines.push('概念：' + question.concepts);
+  lines.push('題幹：');
+  lines.push(String(question.question || '').trim() || '（沒有題幹）');
+  lines.push('答案：');
+  lines.push(String(question.explanation || '').trim() || '（沒有答案）');
+  return lines.join('\n');
+}
+
+function handleGenerateAiExplanation_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) {
+    return { ok: false, error: 'feature_unavailable' };
+  }
+  var provider = resolveProvider_(body);
+  var apiKey = resolveApiKey_(body, username, provider);
+  if (!apiKey) return { ok: false, error: 'missing_api_key' };
+
+  var questionId = String(body.questionId || (body.question && body.question.id) || '').trim();
+  if (!questionId || questionId.length > 80) return { ok: false, error: 'bad_request' };
+  var detailLevel = normalizeAiDetailLevel_(body.detailLevel);
+  var packed = packReferences_([body.question || body], 1, 20000);
+  if (!packed.questions.length) return { ok: false, error: 'no_reference_questions' };
+  var qref = packed.questions[0];
+  qref.id = questionId;
+
+  var dailyLimit = nonNegativeInt_(props_().getProperty('POE_DAILY_LIMIT'), 40);
+  if (dailyLimit > 0 && countTodayGenerations_(username) >= dailyLimit) {
+    return { ok: false, error: 'rate_limited' };
+  }
+  var intervalSeconds = nonNegativeInt_(props_().getProperty('POE_MIN_INTERVAL_SECONDS'), 20);
+  if (!takeIntervalSlot_(username, intervalSeconds)) {
+    return { ok: false, error: 'rate_limited' };
+  }
+
+  var model = resolveModel_(body.model, provider);
+  var started = Date.now();
+  try {
+    var completion = requestCompletion_(
+      apiKey,
+      model,
+      buildAiExplanationPrompt_(qref, detailLevel),
+      AI_EXPLANATION_SYSTEM_PROMPT_,
+      provider
+    );
+    var durationMs = Date.now() - started;
+    var text = String(completion.content || '').trim();
+    if (!text) {
+      releaseIntervalSlot_(username);
+      return { ok: false, error: 'empty_response' };
+    }
+    var nowIso = new Date().toISOString();
+    var record = {
+      id: newAiExplanationId_(),
+      questionId: questionId,
+      detailLevel: detailLevel,
+      model: completion.model || model,
+      createdAt: nowIso,
+      createdBy: username,
+      text: text,
+      votes: { up: [], down: [] },
+      feedback: []
+    };
+    var saved = mutateAiExplanationsStore_(username, 'Add AI explanation for ' + questionId, function (store) {
+      if (!store.byQuestion[questionId] || typeof store.byQuestion[questionId] !== 'object') {
+        store.byQuestion[questionId] = { explanations: [] };
+      }
+      var list = Array.isArray(store.byQuestion[questionId].explanations)
+        ? store.byQuestion[questionId].explanations
+        : [];
+      list.unshift(record);
+      if (list.length > AI_EXPLANATIONS_MAX_PER_QUESTION_) {
+        list = list.slice(0, AI_EXPLANATIONS_MAX_PER_QUESTION_);
+      }
+      store.byQuestion[questionId].explanations = list;
+      return {
+        ok: true,
+        explanation: publicExplanationView_(record, username),
+        explanations: list.map(function (item) { return publicExplanationView_(item, username); })
+      };
+    });
+    if (!saved || saved.ok !== true) {
+      // Generation succeeded but persist failed — still return text so the user is not blank.
+      writeLog_({
+        username: username,
+        action: 'generateAiExplanation',
+        success: false,
+        metadata: {
+          error: saved && saved.error ? saved.error : 'github_error',
+          questionId: questionId,
+          model: record.model,
+          detailLevel: detailLevel,
+          durationMs: durationMs,
+          persistFailed: true
+        }
+      }, true);
+      return {
+        ok: true,
+        persisted: false,
+        explanation: publicExplanationView_(record, username),
+        explanations: [publicExplanationView_(record, username)],
+        model: record.model,
+        durationMs: durationMs,
+        error: saved && saved.error ? saved.error : 'github_error'
+      };
+    }
+    writeLog_({
+      username: username,
+      action: 'generateAiExplanation',
+      success: true,
+      metadata: {
+        questionId: questionId,
+        model: record.model,
+        provider: provider,
+        detailLevel: detailLevel,
+        durationMs: durationMs,
+        promptTokens: completion.promptTokens,
+        completionTokens: completion.completionTokens
+      }
+    }, true);
+    return {
+      ok: true,
+      persisted: true,
+      explanation: saved.explanation,
+      explanations: saved.explanations,
+      model: record.model,
+      durationMs: durationMs,
+      sha: saved.sha,
+      path: saved.path
+    };
+  } catch (err) {
+    releaseIntervalSlot_(username);
+    var code = classifyFetchError_(err);
+    safeLog_(err);
+    writeLog_({
+      username: username,
+      action: 'generateAiExplanation',
+      success: false,
+      metadata: { error: code, questionId: questionId, model: model, detailLevel: detailLevel }
+    }, true);
+    return { ok: false, error: code };
+  }
+}
+
+function handleVoteAiExplanation_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) return { ok: false, error: 'feature_unavailable' };
+  var questionId = String(body.questionId || '').trim();
+  var explanationId = String(body.explanationId || '').trim();
+  var vote = String(body.vote == null ? '' : body.vote).trim().toLowerCase();
+  if (!questionId || !explanationId) return { ok: false, error: 'bad_request' };
+  if (vote && vote !== 'up' && vote !== 'down') return { ok: false, error: 'bad_request' };
+
+  var saved = mutateAiExplanationsStore_(username, 'Vote AI explanation ' + explanationId, function (store) {
+    var exp = findExplanation_(store, questionId, explanationId);
+    if (!exp) return { ok: false, error: 'not_found' };
+    if (!exp.votes || typeof exp.votes !== 'object') exp.votes = { up: [], down: [] };
+    var up = Array.isArray(exp.votes.up) ? exp.votes.up.filter(Boolean) : [];
+    var down = Array.isArray(exp.votes.down) ? exp.votes.down.filter(Boolean) : [];
+    up = up.filter(function (u) { return u !== username; });
+    down = down.filter(function (u) { return u !== username; });
+    if (vote === 'up') up.push(username);
+    if (vote === 'down') down.push(username);
+    exp.votes.up = up;
+    exp.votes.down = down;
+    return {
+      ok: true,
+      explanation: publicExplanationView_(exp, username),
+      explanations: listExplanationsForQuestion_(store, questionId).map(function (item) {
+        return publicExplanationView_(item, username);
+      })
+    };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return {
+    ok: true,
+    explanation: saved.explanation,
+    explanations: saved.explanations,
+    sha: saved.sha
+  };
+}
+
+function handleFeedbackAiExplanation_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) return { ok: false, error: 'feature_unavailable' };
+  var questionId = String(body.questionId || '').trim();
+  var explanationId = String(body.explanationId || '').trim();
+  var text = String(body.text == null ? '' : body.text).trim();
+  var rating = String(body.rating == null ? '' : body.rating).trim().toLowerCase();
+  if (!questionId || !explanationId || !text) return { ok: false, error: 'bad_request' };
+  if (text.length > 2000) text = text.slice(0, 2000);
+  if (rating && rating !== 'up' && rating !== 'down') rating = '';
+
+  var entry = {
+    id: 'fb_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12),
+    user: username,
+    rating: rating || null,
+    text: text,
+    at: new Date().toISOString()
+  };
+
+  var saved = mutateAiExplanationsStore_(username, 'Feedback AI explanation ' + explanationId, function (store) {
+    var exp = findExplanation_(store, questionId, explanationId);
+    if (!exp) return { ok: false, error: 'not_found' };
+    if (!Array.isArray(exp.feedback)) exp.feedback = [];
+    exp.feedback.unshift(entry);
+    if (exp.feedback.length > AI_EXPLANATIONS_MAX_FEEDBACK_) {
+      exp.feedback = exp.feedback.slice(0, AI_EXPLANATIONS_MAX_FEEDBACK_);
+    }
+    return {
+      ok: true,
+      explanation: publicExplanationView_(exp, username),
+      feedback: entry,
+      explanations: listExplanationsForQuestion_(store, questionId).map(function (item) {
+        return publicExplanationView_(item, username);
+      })
+    };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return {
+    ok: true,
+    explanation: saved.explanation,
+    feedback: saved.feedback,
+    explanations: saved.explanations,
+    sha: saved.sha
+  };
+}
+
+function handleListAiExplanationFeedback_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  try {
+    var loaded = readAiExplanationsStore_(cfg);
+    var rows = [];
+    var byQuestion = loaded.store.byQuestion || {};
+    Object.keys(byQuestion).forEach(function (qid) {
+      var list = listExplanationsForQuestion_(loaded.store, qid);
+      list.forEach(function (exp) {
+        var feedback = Array.isArray(exp.feedback) ? exp.feedback : [];
+        feedback.forEach(function (fb) {
+          rows.push({
+            questionId: qid,
+            explanationId: String(exp.id || ''),
+            detailLevel: normalizeAiDetailLevel_(exp.detailLevel),
+            model: String(exp.model || ''),
+            explanationSnippet: clip_(String(exp.text || ''), 160),
+            upCount: Array.isArray(exp.votes && exp.votes.up) ? exp.votes.up.length : 0,
+            downCount: Array.isArray(exp.votes && exp.votes.down) ? exp.votes.down.length : 0,
+            user: String(fb && fb.user || ''),
+            rating: fb && fb.rating ? String(fb.rating) : '',
+            text: String(fb && fb.text || ''),
+            at: String(fb && fb.at || '')
+          });
+        });
+      });
+    });
+    rows.sort(function (a, b) {
+      return String(b.at).localeCompare(String(a.at));
+    });
+    if (rows.length > 500) rows = rows.slice(0, 500);
+    return { ok: true, rows: rows, path: loaded.path, sha: loaded.sha };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return { ok: true, rows: [], path: githubSharedAiExplanationsPath_(cfg), sha: '' };
+    }
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
   }
 }
 
@@ -3540,6 +3999,7 @@ function gitClientError_(code, extra) {
     github_app_jwt: true,
     github_app_install: true,
     bad_request: true,
+    not_found: true,
     payload_too_large: true,
     rate_limited: true,
     server_error: true,

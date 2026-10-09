@@ -154,10 +154,6 @@ function renderFormTemplate() {
                     <input type="text" id="option-design">
                 </div>
                 <div class="form-group">
-                    <label for="ai-explanation">AI 詳解 (URL)</label>
-                    <input type="text" id="ai-explanation">
-                </div>
-                <div class="form-group">
                     <label for="remarks">備註</label>
                     <textarea id="remarks"></textarea>
                 </div>
