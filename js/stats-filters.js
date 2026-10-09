@@ -52,6 +52,9 @@ const STAT_YEAR_KIND_CALENDAR = '日曆年';
 const STAT_YEAR_KIND_MOCK = 'Mock (MT)';
 const STAT_YEAR_KIND_OTHER = '其他';
 const STAT_HAS_PARTS_YES = '有分題';
+const STAT_HAS_PARTS_NONE = '沒有分題';
+const STAT_HAS_PARTS_PENDING = '尚未輸入分題';
+// Legacy alias used by older jump bookmarks / copy — maps to confirmed none + pending combined historically.
 const STAT_HAS_PARTS_NO = '無分題';
 
 function statsQuestionNumber(q) {
@@ -288,15 +291,19 @@ const STAT_TABS = {
             return kind ? [kind] : [];
         }
     }),
-    hasParts: makeStatDim('hasParts', '有／無分題', {
+    hasParts: makeStatDim('hasParts', '分題狀態', {
         jumpKind: 'hasParts',
         defaultSort: 'bin',
-        binOrder: [STAT_HAS_PARTS_YES, STAT_HAS_PARTS_NO],
+        binOrder: [STAT_HAS_PARTS_YES, STAT_HAS_PARTS_NONE, STAT_HAS_PARTS_PENDING],
         valuesOf(q) {
-            const has = typeof questionHasParts === 'function'
-                ? questionHasParts(q)
-                : !!(q && q.questionParts && q.questionParts.length);
-            return [has ? STAT_HAS_PARTS_YES : STAT_HAS_PARTS_NO];
+            const status = typeof resolvePartsStatus === 'function'
+                ? resolvePartsStatus(q)
+                : (q && q.questionParts && q.questionParts.length
+                    ? 'filled'
+                    : (q && q.partsStatus === 'none' ? 'none' : 'pending'));
+            if (status === 'filled') return [STAT_HAS_PARTS_YES];
+            if (status === 'none') return [STAT_HAS_PARTS_NONE];
+            return [STAT_HAS_PARTS_PENDING];
         }
     })
 };
@@ -626,6 +633,16 @@ function questionFeatureOn(q, value) {
     if (value === 'Out syl') return !!(q.outSyl && String(q.outSyl).trim().toUpperCase() === 'Y');
     if (value === '有分題') {
         return typeof questionHasParts === 'function' ? questionHasParts(q) : !!(q.questionParts && q.questionParts.length);
+    }
+    if (value === '沒有分題') {
+        return typeof questionPartsConfirmedNone === 'function'
+            ? questionPartsConfirmedNone(q)
+            : (q && q.partsStatus === 'none' && !(q.questionParts && q.questionParts.length));
+    }
+    if (value === '尚未輸入分題') {
+        return typeof questionPartsPending === 'function'
+            ? questionPartsPending(q)
+            : (!(q && q.questionParts && q.questionParts.length) && q && q.partsStatus !== 'none');
     }
     if (value === '題目空白') {
         return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(q) : false;
@@ -1499,7 +1516,14 @@ function applyStatDimJumpToTri(tri, dimId, rawValue) {
     if (cfg.jumpKind === 'hasParts') {
         if (!tri.feature) tri.feature = {};
         if (value === STAT_HAS_PARTS_YES) tri.feature['有分題'] = 'checked';
-        else if (value === STAT_HAS_PARTS_NO) tri.feature['有分題'] = 'excluded';
+        else if (value === STAT_HAS_PARTS_NONE || value === '沒有分題') {
+            tri.feature['沒有分題'] = 'checked';
+        } else if (value === STAT_HAS_PARTS_PENDING || value === '尚未輸入分題') {
+            tri.feature['尚未輸入分題'] = 'checked';
+        } else if (value === STAT_HAS_PARTS_NO) {
+            // Legacy「無分題」bin: match anything without parts (none + pending).
+            tri.feature['有分題'] = 'excluded';
+        }
         return { special: null };
     }
     if (cfg.jumpKind === 'range' && typeof cfg.rangeForBin === 'function') {

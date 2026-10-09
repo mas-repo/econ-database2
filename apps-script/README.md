@@ -169,7 +169,7 @@ Both actions require `githubSync` before any GitHub read or write. A refused cal
 
 Top-level field name (camelCase, integer): **`schemaVersion`**. Client constant: `SCHEMA_VERSION` in `js/constants.js`. Separate from the export string field `version` (e.g. `"1.0"`). Missing or invalid values are treated as **0** (oldest compatible).
 
-**econ-database-data follow-up:** stamp the live private file `shared/data/database.json` once with the current client `SCHEMA_VERSION` (now **3** after AI解釋 side-file contract; legacy `AIExplanation` URL unused). Until that stamp lands, cloud version is 0 and any current client may upload. After the stamp, older clients that omit the field (effective 0) are blocked with `schema_version_stale`. This public repo does not write the private data file.
+**econ-database-data follow-up:** stamp the live private file `shared/data/database.json` once with the current client `SCHEMA_VERSION` (now **4** after `partsStatus` pending|none|filled; AI解釋 side-file contract remains). Until that stamp lands, cloud version is 0 and any current client may upload. After the stamp, older clients that omit the field (effective 0) are blocked with `schema_version_stale`. This public repo does not write the private data file.
 
 **AI解釋 side file:** `shared/data/ai-explanations.json` (`{ version, updatedAt, byQuestion: { [questionId]: { explanations: [...] } } }`). Written by `generateAiExplanation` / `voteAiExplanation` / `feedbackAiExplanation` (`ai` gate). Admin lists feedback via `listAiExplanationFeedback`. Redeploy `Code.gs` after these handlers land (paste → New version, same `/exec`).
 

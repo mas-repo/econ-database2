@@ -708,7 +708,7 @@
             }).join('')
             + '  </div>'
             + '</div>'
-            + '<p class="stats-crosstab-note">多值欄位（如概念、題型、分題表現）：一題可計入多格。點選有數字的儲存格可跳到「題目」並套用對應篩選。答對率／分數／題號以區間分組；年份種類與有／無分題為衍生維度。不含 AI解釋 分組。</p>'
+            + '<p class="stats-crosstab-note">多值欄位（如概念、題型、分題表現）：一題可計入多格。點選有數字的儲存格可跳到「題目」並套用對應篩選。答對率／分數／題號以區間分組；年份種類與分題狀態（有／沒有／尚未輸入）為衍生維度。不含 AI解釋 分組。</p>'
             + '<div id="ct-table-host" class="stats-crosstab-scroll"></div>';
         var rowEl = document.getElementById('ct-row');
         var colEl = document.getElementById('ct-col');

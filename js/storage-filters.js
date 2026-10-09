@@ -1,16 +1,17 @@
 // Dependencies: storage-core.js (extends IndexedDBStorage)
 
-// Sentinel for "this field has no value". It is not a stored tag.
-// Blank strings and "-" (the bank's empty placeholder) count as no value.
+// Sentinel for "field not yet entered" (blank / "-" / empty array).
+// It is filter-only — never a stored tag. Confirmed-none values (e.g. 沒有圖,
+// 沒有表格, 並非複選型) are real stored options and must not use this sentinel.
 const EMPTY_FIELD_SENTINEL = '__empty__';
 const EMPTY_FIELD_LABELS = {
-    graph: '沒有圖表',
-    table: '沒有表格',
-    calculation: '沒有計算',
-    multipleSelection: '沒有複選',
-    concepts: '沒有概念',
-    patterns: '沒有題型',
-    stemPatterns: '沒有題幹模式'
+    graph: '尚未輸入',
+    table: '尚未輸入',
+    calculation: '尚未輸入',
+    multipleSelection: '尚未輸入',
+    concepts: '尚未輸入',
+    patterns: '尚未輸入',
+    stemPatterns: '尚未輸入'
 };
 
 function isBlankFilterValue(value) {

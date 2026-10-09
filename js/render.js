@@ -387,6 +387,18 @@ async function renderQuestions() {
                 ${renderCollapsibleSection('Markers Report:', q.markersReportEng)}
 
                 ${(() => {
+                    const status = (typeof resolvePartsStatus === 'function')
+                        ? resolvePartsStatus(q)
+                        : (q.questionParts && q.questionParts.length
+                            ? 'filled'
+                            : (q.partsStatus === 'none' ? 'none' : 'pending'));
+                    if (status === 'none') {
+                        return `
+                        <div class="info-item" style="margin-top:8px;">
+                            <strong>分題：</strong>
+                            <span style="color:var(--text-light);">沒有分題</span>
+                        </div>`;
+                    }
                     const parts = (typeof normalizeQuestionParts === 'function')
                         ? normalizeQuestionParts(q.questionParts)
                         : (Array.isArray(q.questionParts) ? q.questionParts : []);
