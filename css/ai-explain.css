@@ -37,8 +37,8 @@
 }
 
 .ai-explain-dialog {
-    width: min(720px, 100%);
-    max-height: min(90vh, 900px);
+    width: min(920px, 100%);
+    max-height: min(92vh, 940px);
     display: flex;
     flex-direction: column;
     background: #fff;
@@ -56,24 +56,28 @@
     width: min(480px, 100%);
 }
 
+/* Deep indigo header: light text for contrast on the purple plane. */
 .ai-explain-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    padding: 16px 18px 10px;
-    border-bottom: 1px solid var(--border-light, #dde3ea);
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
+    color: #f7f2ff;
 }
 
 .ai-explain-header h2 {
     margin: 0;
     font-size: 1.25rem;
-    color: var(--primary-color, #1a5276);
+    color: #ffffff;
+    font-weight: 700;
 }
 
 .ai-explain-subtitle {
     margin: 4px 0 0;
-    color: var(--text-light, #667788);
+    color: #e8ddff;
     font-size: 0.9rem;
 }
 
@@ -83,18 +87,33 @@
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
-    color: #667788;
+    color: #f4eeff;
     padding: 0 4px;
+    border-radius: 6px;
+}
+
+.ai-explain-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
 }
 
 .ai-explain-generate {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
     padding: 12px 18px;
     border-bottom: 1px solid var(--border-light, #dde3ea);
     background: #f7fafc;
+}
+
+.ai-explain-generate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
 }
 
 .ai-explain-level {
@@ -120,6 +139,115 @@
 .ai-explain-status.is-warn { color: #b9770e; }
 .ai-explain-status.is-info { color: #1a5276; }
 
+.ai-explain-workspace {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(200px, 260px) 1fr;
+    gap: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--border-light, #eef2f6);
+}
+
+.ai-explain-versions {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--border-light, #e8eef4);
+    background: #f8fafc;
+    overflow: hidden;
+}
+
+.ai-explain-versions-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--border-light, #e8eef4);
+    font-size: 0.88rem;
+    color: #243447;
+}
+
+.ai-explain-versions-list {
+    flex: 1;
+    overflow: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ai-explain-version {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 10px;
+    cursor: pointer;
+    font: inherit;
+    color: #243447;
+    box-shadow: 0 0 0 1px #e6edf3 inset;
+}
+
+.ai-explain-version:hover {
+    border-color: #c5b3e8;
+    background: #faf7ff;
+}
+
+.ai-explain-version.is-selected {
+    border-color: #7c5cbf;
+    background: #f3ecff;
+    box-shadow: 0 0 0 1px #7c5cbf inset;
+}
+
+.ai-explain-version-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+}
+
+.ai-explain-version-index {
+    font-size: 0.75rem;
+    color: #7a8899;
+    font-weight: 600;
+}
+
+.ai-explain-version-model {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #3b2760;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-explain-version-snippet {
+    font-size: 0.78rem;
+    color: #667788;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.ai-explain-detail {
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 16px 16px;
+    background: #fff;
+}
+
 .ai-explain-list,
 .ai-explain-admin-list {
     flex: 1;
@@ -143,6 +271,11 @@
     background: #fff;
 }
 
+.ai-explain-card.is-selected {
+    border-color: #c5b3e8;
+    box-shadow: 0 1px 0 rgba(59, 39, 96, 0.04);
+}
+
 .ai-explain-card-head,
 .ai-explain-admin-meta,
 .ai-explain-admin-fb,
@@ -157,8 +290,8 @@
     display: inline-block;
     padding: 2px 8px;
     border-radius: 999px;
-    background: #eaf4fc;
-    color: #1a5276;
+    background: #ebe4f7;
+    color: #3b2760;
     font-size: 0.8rem;
     font-weight: 600;
 }
@@ -172,15 +305,92 @@
 .ai-explain-admin-text,
 .ai-explain-admin-snippet {
     margin: 10px 0 0;
-    white-space: pre-wrap;
     line-height: 1.55;
     font-size: 0.95rem;
     color: #243447;
 }
 
+.ai-explain-body:not(.ai-explain-md) {
+    white-space: pre-wrap;
+}
+
+/* Markdown body (PoeMarkdown classes reused) */
+.ai-explain-md > :first-child {
+    margin-top: 0;
+}
+
+.ai-explain-md > :last-child {
+    margin-bottom: 0;
+}
+
+.ai-explain-md p,
+.ai-explain-md li {
+    line-height: 1.65;
+}
+
+.ai-explain-md .poe-md-h {
+    margin: 0.9em 0 0.4em;
+    color: #3b2760;
+    font-size: 1.05rem;
+}
+
+.ai-explain-md .poe-md-list {
+    margin: 0.4em 0 0.6em 1.2em;
+    padding: 0;
+}
+
+.ai-explain-md .poe-md-quote {
+    margin: 0.6em 0;
+    padding: 6px 12px;
+    border-left: 3px solid #7c5cbf;
+    background: #faf7ff;
+    color: #445566;
+}
+
+.ai-explain-md .poe-md-inline {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: #f1eef8;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+}
+
+.ai-explain-md .poe-md-code {
+    margin: 0.7em 0;
+    border: 1px solid #e4dcf3;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #f8f6fc;
+}
+
+.ai-explain-md .poe-md-code-head {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    color: #5b3d8c;
+    background: #efe8fb;
+    border-bottom: 1px solid #e4dcf3;
+}
+
+.ai-explain-md .poe-md-pre {
+    margin: 0;
+    padding: 10px 12px;
+    overflow: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.ai-explain-md .poe-md-link {
+    color: #4a2f9b;
+}
+
 .ai-explain-admin-snippet {
     color: #5a6a7a;
     font-size: 0.88rem;
+    white-space: pre-wrap;
+}
+
+.ai-explain-admin-text {
+    white-space: pre-wrap;
 }
 
 .ai-explain-actions {
@@ -197,8 +407,8 @@
 }
 
 .ai-vote-btn.is-active {
-    border-color: #90caf9;
-    background: #e3f2fd;
+    border-color: #b39ddb;
+    background: #f3eaff;
     font-weight: 600;
 }
 
@@ -230,3 +440,26 @@ body.ai-explain-open {
     overflow: hidden;
 }
 
+@media (max-width: 720px) {
+    .ai-explain-workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(140px, 36%) 1fr;
+    }
+
+    .ai-explain-versions {
+        border-right: 0;
+        border-bottom: 1px solid var(--border-light, #e8eef4);
+    }
+
+    .ai-explain-versions-list {
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+        align-items: stretch;
+    }
+
+    .ai-explain-version {
+        min-width: 180px;
+        max-width: 220px;
+    }
+}

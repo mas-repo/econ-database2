@@ -27,12 +27,17 @@
     var modalState = {
         questionId: '',
         explanations: [],
+        selectedId: '',
         busy: false,
         detailLevel: 'short',
         status: '',
         statusKind: ''
     };
     var defaultDetailLevel = 'short';
+
+    // Survives modal close/reopen: per-question in-flight generate jobs.
+    // Keyed by questionId → { busy, status, statusKind, detailLevel, promise }.
+    var generatingByQuestion = Object.create(null);
 
     var overlay = null;
     var feedbackOverlay = null;
@@ -330,6 +335,51 @@
         el.className = 'ai-explain-status' + (kind ? ' is-' + kind : '');
     }
 
+    function syncGenerateButton() {
+        var btn = document.getElementById('ai-explain-generate-btn');
+        if (!btn) return;
+        btn.disabled = !!modalState.busy;
+    }
+
+    function getGeneratingJob(qid) {
+        var key = String(qid || '');
+        return key ? generatingByQuestion[key] || null : null;
+    }
+
+    function setGeneratingJob(qid, job) {
+        var key = String(qid || '');
+        if (!key) return;
+        if (job) generatingByQuestion[key] = job;
+        else delete generatingByQuestion[key];
+    }
+
+    function restoreGeneratingUi(qid) {
+        var job = getGeneratingJob(qid);
+        if (!job || !job.busy) {
+            modalState.busy = false;
+            syncGenerateButton();
+            return false;
+        }
+        modalState.busy = true;
+        if (job.detailLevel) {
+            modalState.detailLevel = normalizeDetailLevel(job.detailLevel);
+            var levelShort = overlay && overlay.querySelector('input[name="ai-explain-level"][value="short"]');
+            var levelDetailed = overlay && overlay.querySelector('input[name="ai-explain-level"][value="detailed"]');
+            if (levelShort) levelShort.checked = modalState.detailLevel === 'short';
+            if (levelDetailed) levelDetailed.checked = modalState.detailLevel === 'detailed';
+        }
+        setModalStatus(job.status || '正在產生 AI解釋…', job.statusKind || 'info');
+        syncGenerateButton();
+        return true;
+    }
+
+    function renderMarkdownBody(text) {
+        if (global.PoeMarkdown && typeof PoeMarkdown.renderToHtml === 'function') {
+            return PoeMarkdown.renderToHtml(text);
+        }
+        return esc(text).replace(/\n/g, '<br>');
+    }
+
     function ensureOverlay() {
         if (overlay) return overlay;
         overlay = document.createElement('div');
@@ -350,10 +400,16 @@
             + '      <label><input type="radio" name="ai-explain-level" value="short" checked> 簡短</label>'
             + '      <label><input type="radio" name="ai-explain-level" value="detailed"> 詳盡</label>'
             + '    </div>'
-            + '    <button type="button" class="btn btn-primary btn-sm" id="ai-explain-generate-btn">產生新解釋</button>'
+            + '    <div class="ai-explain-generate-actions">'
+            + '      <button type="button" class="btn btn-outline-primary btn-sm" id="ai-explain-settings-btn">API／模型設定</button>'
+            + '      <button type="button" class="btn btn-primary btn-sm" id="ai-explain-generate-btn">產生新解釋</button>'
+            + '    </div>'
             + '  </div>'
             + '  <p class="ai-explain-status" id="ai-explain-status" hidden></p>'
-            + '  <div class="ai-explain-list" id="ai-explain-list"></div>'
+            + '  <div class="ai-explain-workspace" id="ai-explain-workspace">'
+            + '    <aside class="ai-explain-versions" id="ai-explain-versions" aria-label="過往解釋版本"></aside>'
+            + '    <div class="ai-explain-detail" id="ai-explain-detail"></div>'
+            + '  </div>'
             + '  <footer class="ai-explain-footer">'
             + '    <button type="button" class="btn btn-secondary" id="ai-explain-done">關閉</button>'
             + '  </footer>'
@@ -364,12 +420,18 @@
         });
         overlay.querySelector('.ai-explain-close').addEventListener('click', closeModal);
         overlay.querySelector('#ai-explain-done').addEventListener('click', closeModal);
+        overlay.querySelector('#ai-explain-settings-btn').addEventListener('click', openSharedApiSettings);
         overlay.querySelector('#ai-explain-generate-btn').addEventListener('click', onGenerateClick);
         overlay.addEventListener('change', function (event) {
             var input = event.target.closest('input[name="ai-explain-level"]');
             if (input) modalState.detailLevel = normalizeDetailLevel(input.value);
         });
         overlay.addEventListener('click', function (event) {
+            var versionBtn = event.target.closest('[data-ai-select]');
+            if (versionBtn) {
+                selectExplanation(versionBtn.getAttribute('data-ai-select'));
+                return;
+            }
             var voteBtn = event.target.closest('[data-ai-vote]');
             if (voteBtn) {
                 onVoteClick(voteBtn.getAttribute('data-ai-qid'), voteBtn.getAttribute('data-ai-eid'), voteBtn.getAttribute('data-ai-vote'));
@@ -383,11 +445,30 @@
         return overlay;
     }
 
+    function openSharedApiSettings() {
+        // Reuse AI出題's API／模型設定 modal + the same localStorage keys.
+        var poe = proxy();
+        if (poe && typeof poe.openSettingsModal === 'function') {
+            poe.openSettingsModal(false);
+            return;
+        }
+        if (global.PoeGenerate && typeof PoeGenerate.openSettingsModal === 'function') {
+            PoeGenerate.openSettingsModal(false);
+            return;
+        }
+        setModalStatus('API／模型設定尚未載入', 'error');
+    }
+
     function bindEscape() {
         if (escapeHandlerBound) return;
         escapeHandlerBound = true;
         document.addEventListener('keydown', function (event) {
             if (event.key !== 'Escape') return;
+            // Settings overlay (z-index above) owns Escape while open.
+            if (global.PoeGenerate && typeof PoeGenerate.isSettingsModalOpen === 'function'
+                && PoeGenerate.isSettingsModalOpen()) {
+                return;
+            }
             if (feedbackOverlay && !feedbackOverlay.hidden) {
                 closeFeedbackPrompt();
                 return;
@@ -400,44 +481,103 @@
         });
     }
 
+    function selectedExplanation() {
+        var list = modalState.explanations || [];
+        if (!list.length) return null;
+        var id = String(modalState.selectedId || '');
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && String(list[i].id) === id) return list[i];
+        }
+        return list[0];
+    }
+
+    function selectExplanation(explanationId) {
+        var id = String(explanationId || '');
+        var list = modalState.explanations || [];
+        var found = false;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && String(list[i].id) === id) {
+                found = true;
+                break;
+            }
+        }
+        modalState.selectedId = found ? id : (list[0] && list[0].id ? String(list[0].id) : '');
+        renderExplanationList();
+    }
+
     function renderExplanationList() {
-        var box = document.getElementById('ai-explain-list');
-        if (!box) return;
+        var versions = document.getElementById('ai-explain-versions');
+        var detail = document.getElementById('ai-explain-detail');
+        if (!versions || !detail) return;
         var list = modalState.explanations || [];
         if (!list.length) {
-            box.innerHTML = '<p class="ai-explain-empty">尚未有解釋。可選擇簡短或詳盡後產生。</p>';
+            versions.innerHTML = '';
+            detail.innerHTML = '<p class="ai-explain-empty">尚未有解釋。可選擇簡短或詳盡後產生。</p>';
             return;
         }
-        box.innerHTML = list.map(function (exp) {
-            var upActive = exp.myVote === 'up' ? ' is-active' : '';
-            var downActive = exp.myVote === 'down' ? ' is-active' : '';
-            return ''
-                + '<article class="ai-explain-card" data-eid="' + esc(exp.id) + '">'
-                + '  <header class="ai-explain-card-head">'
-                + '    <span class="ai-explain-pill">' + esc(detailLevelLabel(exp.detailLevel)) + '</span>'
-                + '    <span class="ai-explain-meta">' + esc(exp.model || '—') + '</span>'
-                + '    <span class="ai-explain-meta">' + esc(formatWhen(exp.createdAt)) + '</span>'
-                + (exp.createdBy ? '    <span class="ai-explain-meta">by ' + esc(exp.createdBy) + '</span>' : '')
-                + '  </header>'
-                + '  <div class="ai-explain-body">' + esc(exp.text).replace(/\n/g, '<br>') + '</div>'
-                + '  <div class="ai-explain-actions">'
-                + '    <button type="button" class="ai-vote-btn' + upActive + '" data-ai-vote="up" data-ai-qid="'
-                + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
-                + '" title="有用">👍 <span>' + esc(String(exp.upCount || 0)) + '</span></button>'
-                + '    <button type="button" class="ai-vote-btn' + downActive + '" data-ai-vote="down" data-ai-qid="'
-                + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
-                + '" title="沒有幫助">👎 <span>' + esc(String(exp.downCount || 0)) + '</span></button>'
-                + '    <button type="button" class="btn btn-outline-primary btn-sm" data-ai-feedback="1" data-ai-qid="'
-                + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
-                + '">Feedback</button>'
-                + (exp.feedbackCount ? '    <span class="ai-explain-meta">Feedback ' + esc(String(exp.feedbackCount)) + '</span>' : '')
-                + '  </div>'
-                + '</article>';
-        }).join('');
+        if (!modalState.selectedId || !list.some(function (e) { return e && String(e.id) === String(modalState.selectedId); })) {
+            modalState.selectedId = String(list[0].id || '');
+        }
+        versions.innerHTML = ''
+            + '<div class="ai-explain-versions-head">'
+            + '  <strong>過往版本</strong>'
+            + '  <span class="ai-explain-meta">' + esc(String(list.length)) + ' 則</span>'
+            + '</div>'
+            + '<div class="ai-explain-versions-list" role="listbox" aria-label="選擇解釋版本">'
+            + list.map(function (exp, index) {
+                var selected = String(exp.id) === String(modalState.selectedId);
+                var snippet = String(exp.text || '').replace(/\s+/g, ' ').trim().slice(0, 72);
+                return ''
+                    + '<button type="button" role="option" class="ai-explain-version'
+                    + (selected ? ' is-selected' : '') + '" data-ai-select="' + esc(exp.id) + '"'
+                    + ' aria-selected="' + (selected ? 'true' : 'false') + '">'
+                    + '  <span class="ai-explain-version-top">'
+                    + '    <span class="ai-explain-pill">' + esc(detailLevelLabel(exp.detailLevel)) + '</span>'
+                    + '    <span class="ai-explain-version-index">#' + esc(String(list.length - index)) + '</span>'
+                    + '  </span>'
+                    + '  <span class="ai-explain-version-model">' + esc(exp.model || '—') + '</span>'
+                    + '  <span class="ai-explain-meta">' + esc(formatWhen(exp.createdAt)) + '</span>'
+                    + (snippet ? '  <span class="ai-explain-version-snippet">' + esc(snippet) + (exp.text && exp.text.length > 72 ? '…' : '') + '</span>' : '')
+                    + '</button>';
+            }).join('')
+            + '</div>';
+
+        var exp = selectedExplanation();
+        if (!exp) {
+            detail.innerHTML = '<p class="ai-explain-empty">請選擇一則解釋。</p>';
+            return;
+        }
+        var upActive = exp.myVote === 'up' ? ' is-active' : '';
+        var downActive = exp.myVote === 'down' ? ' is-active' : '';
+        // Author/submitter intentionally omitted from user-facing UI.
+        detail.innerHTML = ''
+            + '<article class="ai-explain-card is-selected" data-eid="' + esc(exp.id) + '">'
+            + '  <header class="ai-explain-card-head">'
+            + '    <span class="ai-explain-pill">' + esc(detailLevelLabel(exp.detailLevel)) + '</span>'
+            + '    <span class="ai-explain-meta">' + esc(exp.model || '—') + '</span>'
+            + '    <span class="ai-explain-meta">' + esc(formatWhen(exp.createdAt)) + '</span>'
+            + '  </header>'
+            + '  <div class="ai-explain-body ai-explain-md">' + renderMarkdownBody(exp.text) + '</div>'
+            + '  <div class="ai-explain-actions">'
+            + '    <button type="button" class="ai-vote-btn' + upActive + '" data-ai-vote="up" data-ai-qid="'
+            + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
+            + '" title="有用">👍 <span>' + esc(String(exp.upCount || 0)) + '</span></button>'
+            + '    <button type="button" class="ai-vote-btn' + downActive + '" data-ai-vote="down" data-ai-qid="'
+            + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
+            + '" title="沒有幫助">👎 <span>' + esc(String(exp.downCount || 0)) + '</span></button>'
+            + '    <button type="button" class="btn btn-outline-primary btn-sm" data-ai-feedback="1" data-ai-qid="'
+            + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
+            + '">Feedback</button>'
+            + (exp.feedbackCount ? '    <span class="ai-explain-meta">Feedback ' + esc(String(exp.feedbackCount)) + '</span>' : '')
+            + '  </div>'
+            + '</article>';
     }
 
     function refreshModalListFromStore() {
         modalState.explanations = listLocalExplanations(modalState.questionId);
+        if (modalState.explanations.length && !modalState.selectedId) {
+            modalState.selectedId = String(modalState.explanations[0].id || '');
+        }
         renderExplanationList();
     }
 
@@ -448,7 +588,7 @@
         ensureOverlay();
         bindEscape();
         modalState.questionId = qid;
-        modalState.busy = false;
+        modalState.selectedId = '';
         var preferredLevel = normalizeDetailLevel(
             defaultDetailLevel
             || (global.__userAiExplainStyle)
@@ -461,7 +601,11 @@
         if (levelDetailed) levelDetailed.checked = preferredLevel === 'detailed';
         var qidEl = document.getElementById('ai-explain-qid');
         if (qidEl) qidEl.textContent = '題目 ' + qid;
-        setModalStatus(store.loaded ? '' : '載入過往解釋…', store.loaded ? '' : 'info');
+        var generating = restoreGeneratingUi(qid);
+        if (!generating) {
+            setModalStatus(store.loaded ? '' : '載入過往解釋…', store.loaded ? '' : 'info');
+            syncGenerateButton();
+        }
         overlay.hidden = false;
         document.body.classList.add('ai-explain-open');
         if (trigger && trigger.focus) overlay.dataset.trigger = '1';
@@ -469,9 +613,11 @@
         await loadAiExplanations(false);
         if (modalState.questionId !== qid) return;
         refreshModalListFromStore();
+        // Prefer in-flight generate status over load warnings.
+        if (restoreGeneratingUi(qid)) return;
         if (store.loadError) {
             setModalStatus('過往解釋載入不完整，仍可嘗試產生新解釋。', 'warn');
-        } else {
+        } else if (!modalState.status) {
             setModalStatus('', '');
         }
     }
@@ -480,10 +626,14 @@
         if (!overlay) return;
         overlay.hidden = true;
         document.body.classList.remove('ai-explain-open');
+        // Keep generatingByQuestion[qid] so reopen restores 「正在產生…」.
+        // Only clear view-local fields; do not abort in-flight work.
         modalState.questionId = '';
         modalState.explanations = [];
+        modalState.selectedId = '';
         modalState.busy = false;
         setModalStatus('', '');
+        syncGenerateButton();
     }
 
     async function onGenerateClick() {
@@ -494,6 +644,11 @@
             return;
         }
         var qid = modalState.questionId;
+        if (!qid) return;
+        if (getGeneratingJob(qid) && getGeneratingJob(qid).busy) {
+            restoreGeneratingUi(qid);
+            return;
+        }
         var question = null;
         if (poe && typeof poe.questionById === 'function') {
             question = await poe.questionById(qid);
@@ -513,46 +668,88 @@
                 question: String(question.plainText || question.questionTextChi || '').trim(),
                 explanation: ''
             };
+        var detailLevel = modalState.detailLevel;
+        var job = {
+            busy: true,
+            status: '正在產生 AI解釋…',
+            statusKind: 'info',
+            detailLevel: detailLevel,
+            startedAt: Date.now()
+        };
+        setGeneratingJob(qid, job);
         modalState.busy = true;
-        var btn = document.getElementById('ai-explain-generate-btn');
-        if (btn) btn.disabled = true;
-        setModalStatus('正在產生 AI解釋…', 'info');
-        try {
-            var model = '';
-            if (poe && typeof poe.currentModel === 'function') model = poe.currentModel();
-            else if (poe && typeof poe.readStoredModel === 'function') {
-                model = poe.readStoredModel(poe.currentProvider && poe.currentProvider());
+        setModalStatus(job.status, job.statusKind);
+        syncGenerateButton();
+
+        var run = (async function () {
+            try {
+                var model = '';
+                if (poe && typeof poe.currentModel === 'function') model = poe.currentModel();
+                else if (poe && typeof poe.readStoredModel === 'function') {
+                    model = poe.readStoredModel(poe.currentProvider && poe.currentProvider());
+                }
+                var waitMs = (poe && poe.GENERATE_WAIT_MS) || 375000;
+                var data = await proxyAction({
+                    action: 'generateAiExplanation',
+                    questionId: qid,
+                    detailLevel: detailLevel,
+                    model: model,
+                    question: ref
+                }, waitMs);
+                var stillOpen = modalState.questionId === qid && overlay && !overlay.hidden;
+                if (!data || data.ok !== true) {
+                    var failMsg = errorMessage(data && data.error);
+                    job.busy = false;
+                    job.status = failMsg;
+                    job.statusKind = 'error';
+                    setGeneratingJob(qid, null);
+                    if (stillOpen) {
+                        modalState.busy = false;
+                        setModalStatus(failMsg, 'error');
+                        syncGenerateButton();
+                    }
+                    return;
+                }
+                if (Array.isArray(data.explanations)) {
+                    replaceQuestionExplanations(qid, data.explanations);
+                } else if (data.explanation) {
+                    mergeExplanationIntoStore(data.explanation);
+                }
+                var okMsg = data.persisted === false
+                    ? ('已產生，但未能寫入共用檔（' + errorMessage(data.error || 'github_error') + '）')
+                    : '已產生並儲存';
+                var okKind = data.persisted === false ? 'warn' : 'ok';
+                job.busy = false;
+                job.status = okMsg;
+                job.statusKind = okKind;
+                setGeneratingJob(qid, null);
+                if (stillOpen) {
+                    if (data.explanation && data.explanation.id) {
+                        modalState.selectedId = String(data.explanation.id);
+                    } else if (Array.isArray(data.explanations) && data.explanations[0]) {
+                        modalState.selectedId = String(data.explanations[0].id || '');
+                    }
+                    refreshModalListFromStore();
+                    modalState.busy = false;
+                    setModalStatus(okMsg, okKind);
+                    syncGenerateButton();
+                }
+                if (typeof populateDynamicFilters === 'function') populateDynamicFilters();
+            } catch (err) {
+                var errMsg = errorMessage(err && err.code);
+                job.busy = false;
+                job.status = errMsg;
+                job.statusKind = 'error';
+                setGeneratingJob(qid, null);
+                if (modalState.questionId === qid && overlay && !overlay.hidden) {
+                    modalState.busy = false;
+                    setModalStatus(errMsg, 'error');
+                    syncGenerateButton();
+                }
             }
-            var waitMs = (poe && poe.GENERATE_WAIT_MS) || 375000;
-            var data = await proxyAction({
-                action: 'generateAiExplanation',
-                questionId: qid,
-                detailLevel: modalState.detailLevel,
-                model: model,
-                question: ref
-            }, waitMs);
-            if (!data || data.ok !== true) {
-                setModalStatus(errorMessage(data && data.error), 'error');
-                return;
-            }
-            if (Array.isArray(data.explanations)) {
-                replaceQuestionExplanations(qid, data.explanations);
-            } else if (data.explanation) {
-                mergeExplanationIntoStore(data.explanation);
-            }
-            refreshModalListFromStore();
-            if (data.persisted === false) {
-                setModalStatus('已產生，但未能寫入共用檔（' + errorMessage(data.error || 'github_error') + '）', 'warn');
-            } else {
-                setModalStatus('已產生並儲存', 'ok');
-            }
-            if (typeof populateDynamicFilters === 'function') populateDynamicFilters();
-        } catch (err) {
-            setModalStatus(errorMessage(err && err.code), 'error');
-        } finally {
-            modalState.busy = false;
-            if (btn) btn.disabled = false;
-        }
+        })();
+        job.promise = run;
+        await run;
     }
 
     async function onVoteClick(questionId, explanationId, voteRaw) {
