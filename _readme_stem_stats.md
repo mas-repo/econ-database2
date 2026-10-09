@@ -166,6 +166,6 @@ Invented = not in Excel 78 (`scripts/classify_chunks/vocab.json`). Singleton = f
 ## 6. Filter UI verification
 - `js/templates/template-filters.js` L271: `modalTrigger('stemPatterns', '🧩 題幹模式')`
 - `js/filter-modal.js` `MODAL_FILTER_DEFS` includes `{ key: 'stemPatterns', label: '🧩 題幹模式' }`
-- `js/constants.js` `APP_VERSION` = `2026.09.30.6`
+- `js/constants.js` `APP_VERSION` = `2026.10.09.16`
 
 (Current vocab `stemPatterns` length: 1265)

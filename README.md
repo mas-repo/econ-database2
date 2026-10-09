@@ -12,12 +12,19 @@ Records with reviewedByAI equal to Y must not be overwritten by builders that fi
 
 ## 統計 tab
 
-Top-level tabs are **題目** and **統計** (not separate 概念 / 課程分類 / 章節 / 題型 / 題幹模式 tabs). Inside **統計**:
+Top-level tabs are **題目** and **統計** (not separate 概念 / 課程分類 / 章節 / 題型 / 題幹模式 tabs). Layout inside **統計** (top → bottom):
 
-- **一維瀏覽** — dimension switcher + **交叉分析** row/column axes share one registry (`STAT_TABS` / `STAT_DIMENSION_GROUPS` in `js/stats-filters.js`). Groups: 主題標籤 | 試卷／表現／特徵 | 區間／衍生.
+1. Heading **統計**.
+2. Classification warning (`#stats-classification-warning`): 「注意：目前的題目分類尚未完成，題目分類或會有所錯誤，切勿盡信。」
+3. Shared filter bar (`#stats-filters`) — same registry as below.
+4. Mode toggle **below the filters** (`aria-label="統計模式"`): **一維瀏覽** | **交叉分析** (`window.statsViewMode`: `browse` | `crosstab`). Switching rebuilds the filter bar (`hideOn` differs by mode).
+
+Then:
+
+- **一維瀏覽** — dimension switcher + cards. **交叉分析** — row/column axes. Both share one registry (`STAT_TABS` / `STAT_DIMENSION_GROUPS` in `js/stats-filters.js`). Groups: 主題標籤 | 試卷／表現／特徵 | 區間／衍生.
 - Priority dims: 年份 / 考試 / 卷別 / Section / 題目類型 / 特徵 (admin blank features only when admin) / 分題表現 / 圖表·表格·計算·複選類型 (hidden when unused) / 出版商 + original 概念·課程·章節·題型·題幹模式.
 - Binned: 答對率區間 `[0,20)…[80,100]`, 分數區間 `0–2…16+`, 題號區間 from id last digits `1–10…51–60` (plus 無* buckets). Jump uses matching range filters; empty buckets use id-set.
-- Derived: 年份種類（日曆年 / Mock(MT) / 其他）, 分題狀態（有分題／沒有分題／尚未輸入分題）, 選項設計（skip if unused）. **Not** a grouping dim: AI解釋 (filter only).
+- Derived: 年份種類（日曆年 / Mock(MT) / 其他）, 分題狀態（有分題／沒有分題／尚未輸入分題）, 選項設計（skip if unused）. **Not** a grouping dim: AI解釋 (filter only; `requiresAi`).
 - Cards have **詳細統計** and **查看題目**; crosstab cell click jumps with intersection filters. Local aggregation only (`js/stats-explore.js`).
 - **詳細統計** modal: sort 題數／項目順序; columns 題數·佔比·MC·文字題·平均答對率／分數; row click jumps like crosstab (parent × secondary); choosable sections from `STAT_TABS` (parent dim auto-hidden); top-N + 展開全部; prefs in `localStorage` (`statsDetailPrefs.v1`).
 - Legacy `switchTab('concepts'|…)` aliases open 統計 on that dimension.
@@ -93,9 +100,26 @@ Independent modal (`js/stem-pattern-review.js`), entry **題幹模式檢視** on
 
 **字串** field searches 題目（`questionTextChi` / `questionTextEng` / `plainText`）、答案（`answerMC` / `answerChi` / `answerEng`）、評卷報告（`markersReportChi` / `markersReportEng`）. Saved rows with `field: 'text'` keep working. Also available: **分題表現** / **分題分數** against `questionParts`.
 
-## 分題 / questionParts
+## 分題 / questionParts + partsStatus
 
 SQ/LQ sub-parts store as `questionParts: [{ label, marks, performance }, …]` (`SCHEMA_VERSION` 2). **`marks` (total) stays authoritative** — the form does not auto-sum parts into total. When one or more parts exist, **every part must have numeric `marks` and `sum(part.marks)` must equal total `marks`** (tolerance `0.001`; see `validatePartMarksSum` in `js/question-fields.js`). Empty/absent parts skip the sum check. Validation runs on the single-question form and the admin **批量編輯** modal. `performance` values are exactly: 優異、優良、良好、令人滿意、尚可、欠佳. Filters: 特徵 **有分題**; dropdown **分題表現**; advanced **分題表現** / **分題分數**.
+
+**`partsStatus`** (`pending` \| `none` \| `filled`, `SCHEMA_VERSION` 4) distinguishes 尚未輸入分題 vs 沒有分題 vs 有分題. Nonempty `questionParts` → `filled`. Legacy empty/absent `questionParts` without an explicit status resolves as **`pending`** (not confirmed none). Form radios and stats「分題狀態」use this field. Filter modal「尚未輸入」sentinel is blank/`-`/empty array only; stored values like「沒有圖」「並非複選型」remain confirmed-none options for other feature fields.
+
+## AI解釋
+
+Per-question AI explanations live in the private side file `shared/data/ai-explanations.json` (not on the question object). Legacy question field `AIExplanation` (URL) is **ignored** by the UI. Gated by `accessRights.ai` (same as AI出題). Entry: 🤖 / **AI解釋** on each question card (`js/ai-explanation.js`).
+
+- Generate: Apps Script `generateAiExplanation` (same provider / model / API-key settings as AI出題). Detail levels **簡短** / **詳盡**.
+- Existing explanations load from the side file (direct shared read preferred). Users with `ai` can **vote** (`voteAiExplanation`) and send text **feedback** (`feedbackAiExplanation`).
+- Filter (題目 + 統計): 🤖 AI解釋 — 有AI解釋／無／簡短／詳盡 (`requiresAi`). Stats uses it as a **filter only**, never a grouping dimension.
+- Admin lists feedback via `listAiExplanationFeedback` (see **回報問題** hub below). Redeploy Apps Script when these handlers change.
+
+## 回報問題 + admin 回饋／回報
+
+**回報問題** (`js/report-issue.js`): any **signed-in known user** can open the button on a question card. Tags: 有錯字 / 圖片未能正確顯示 / 分類不正確 / 其他 (+ optional text). Persists to `shared/data/issue-reports.json` via Apps Script `reportIssue`. Not gated on `ai` or `githubSync`.
+
+**Admin hub:** when `accessRights.admin`, header shows **回饋／回報** (replaces the older standalone「AI解釋 Feedback」button). Two tabs: **回報問題** (`listIssueReports`) and **AI解釋 Feedback** (`listAiExplanationFeedback`). Newest first; refresh reloads both. Side-file contract is `SCHEMA_VERSION` 5 (bank stamp) plus the issue-reports file itself.
 
 ## 批量編輯 / Bulk edit (admin mode)
 
@@ -107,29 +131,29 @@ When `accessRights.admin === true`, 特徵 also offers **題目空白** / **答�
 
 **過往紀錄 (cross-device):** Successful generations still save in this browser (`IndexedDB` / `localStorage`). When GitHub AI backups are configured, opening the modal also calls `listAiBackups` (auth: `ai`, not `githubSync`) and merges that user's private `users/<username>/<GITHUB_AI_BACKUP_DIR>/` replies into the same list (deduped). List pages are lean (preview only); opening a row loads the full reply with `getAiBackup`, including chunked reads for very long text. Long `generateQuestions` replies may also arrive with `contentViaBackup` so the browser fetches the backup instead of parsing an oversized web-app body. Each request returns 30 backups, newest first; the modal can open older pages. Search matches only the page on screen. Remote failures stay non-blocking. Incomplete runs still stay in 使用紀錄. Details: `apps-script/README.md`.
 
-## GitHub sync buttons (admin only)
+## Git sync / Git 同步 (admin only)
 
-**自動同步**, **上傳到 GitHub**, and **從 GitHub 載入** appear only when Apps Script returns githubSync: true. That flag is the admin role (ALLOWED_ADMIN_HASHES). In production the admin role only (`ALLOWED_ADMIN_HASHES`). AI editors and restricted users must never see these controls. AI出題 uses the separate i flag. Do not show GitHub UI based on a combined legacy llowed flag.
-
-## Git sync / Git 同步
-
-**自動同步**, **上傳到 GitHub**, and **從 GitHub 載入** appear only when `githubSync` is true. That flag is the admin role. An AI editor can use AI出題 and mock tests and does not see this panel. The checkbox is stored only in that browser. The page POSTs the question JSON to the same Apps Script `/exec` URL. It does not call GitHub and it must not contain a token, owner, or repository name.
+**自動同步**, **上傳到 GitHub**, and **從 GitHub 載入** appear only when Apps Script returns `githubSync: true`. That flag is the **admin** role (`ALLOWED_ADMIN_HASHES`). AI editors, mock-only, and restricted users must never see these controls. **AI出題** / **AI解釋** use the separate `ai` flag. Do not show GitHub UI based on the legacy `allowed` flag (`allowed` mirrors `githubSync` only for older Pages builds). An AI editor can use AI出題 and mock tests and does not see this panel. The Auto-sync checkbox is stored only in that browser’s `localStorage`. The page POSTs the question JSON to the same Apps Script `/exec` URL. It does not call GitHub and it must not contain a token, owner, or repository name.
 
 ### schemaVersion (shared bank)
 
-Shared bank JSON (`shared/data/database.json`) carries an integer root field `schemaVersion` (client constant `SCHEMA_VERSION` in `js/constants.js`, helpers in `js/schema-version.js`). Bump only when the data shape changes so an older writer would drop fields. **Missing `schemaVersion` is treated as `0`** (banks written before this guard). Distinct from export metadata `version: '1.0'`.
+Shared bank JSON (`shared/data/database.json`) carries an integer root field `schemaVersion` (client constant `SCHEMA_VERSION` in `js/constants.js`, helpers in `js/schema-version.js`). Bump only when the data shape changes so an older writer would drop fields. **Missing `schemaVersion` is treated as `0`** (banks written before this guard). Distinct from export metadata `version: '1.0'`. Current client stamp: **5**.
+
+| Version | Shape change |
+| --- | --- |
+| 2 | `questionParts` `[{ label, marks, performance }]` |
+| 3 | AI解釋 side-file contract (`shared/data/ai-explanations.json`); legacy `AIExplanation` URL ignored |
+| 4 | `partsStatus` `pending` \| `none` \| `filled` |
+| 5 | 回報問題 side-file contract (`shared/data/issue-reports.json`) |
 
 - **Upload / auto-sync:** before `syncDataUpload`, the client reads the cloud file and **blocks** if local `SCHEMA_VERSION` &lt; cloud `schemaVersion`, with a Traditional Chinese error (cloud written by a newer app — update before uploading). No merge that strips unknown fields. **Apps Script `handleGitUpload_` enforces the same gate** (`schema_version_stale` + client/cloud versions) and preserves `schemaVersion` / unknown top-level keys on write. Redeploy `Code.gs` after that change.
 - **Load / download / file import:** if cloud/file `schemaVersion` &gt; local, show a **warning notification** asking the user to update. If the payload has no usable `questions` array, the load fails clearly instead of half-importing. `syncDataDownload` returns `schemaVersion` for client notify.
 - Writes stamp the current `SCHEMA_VERSION`.
-- **econ-database-data:** stamp live `shared/data/database.json` with the current client `SCHEMA_VERSION` when ready (now **5** after 回報問題 side-file; private-repo follow-up; this public site does not write it). Legacy question field `AIExplanation` (URL) is ignored by the UI — empty/missing is fine; clear old strings in the data repo separately.
-- **partsStatus** (`pending` \| `none` \| `filled`): distinguishes 尚未輸入分題 vs 沒有分題 vs 有分題. Legacy empty/absent `questionParts` resolves as `pending` (not confirmed none). Filter modal「尚未輸入」sentinel is blank/`-`/empty array only; stored values like「沒有圖」「並非複選型」remain confirmed-none options.
-- **AI解釋:** explanations, votes, and feedback live in `shared/data/ai-explanations.json` (keyed by question id). Apps Script actions: `generateAiExplanation`, `voteAiExplanation`, `feedbackAiExplanation` (`ai`), `listAiExplanationFeedback` (`admin`). UI gated by `accessRights.ai` (same as AI出題).
-- **回報問題:** `shared/data/issue-reports.json` — any known user may submit (`reportIssue`); admin lists via `listIssueReports`. Combined admin「回饋／回報」viewer with AI解釋 Feedback.
+- **econ-database-data:** stamp live `shared/data/database.json` with the current client `SCHEMA_VERSION` when ready (private-repo follow-up; this public site does not write it). Feature UX for partsStatus / AI解釋 / 回報問題 is documented in the sections above.
 
 Set `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `GITHUB_DATA_PATH`, and `GITHUB_AI_BACKUP_DIR` in Apps Script Script properties, then redeploy. `GITHUB_TOKEN` is a fine-grained PAT with Contents **read and write** on the private data repository only — used only on the server for uploads and AI backups; never sent to the browser. For direct browser reads of large shared files, also set either the GitHub App trio (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`) or a separate Contents:**Read** PAT as `GITHUB_READ_TOKEN`. Never commit those values. Question-bank upload/download uses the **shared** path `<GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>` (recommended `GITHUB_DATA_PATH` = `data/database.json` → `shared/data/database.json`). Every `githubSync` user reads and writes that same file; username is for auth only and must not appear in the bank path. Personal AI出題 reply backups stay under `users/<username>/` plus `GITHUB_AI_BACKUP_DIR`. `<username>` is the trimmed, lowercased signed-in name. The page does not choose those paths.
 
-`GITHUB_SHARED_PREFIX` is optional and defaults to `shared`. A known username (admin, AI editor, or restricted) can read `shared/data/database.json`, `shared/diagrams/`, `shared/originals/`, and `shared/papers/` after Apps Script issues a read credential (or via `fetchSharedAsset` / `listSharedData` fallback). Those actions never return the write token. An unknown username does not receive the bank or a read token. Without `mockTests`, the client (or proxy) strips mock-test rows from `database.json` and refuses mock-only paths (`diagrams/`, `papers/mock-tests/`, numbered `originals/` folders, `build/`, and `database.js`). Past papers under `originals/dse/` and `papers/past-papers/` stay available. Details: `apps-script/README.md`.
+`GITHUB_SHARED_PREFIX` is optional and defaults to `shared`. A known username (admin, AI editor, mock, or restricted) can read `shared/data/database.json`, `shared/diagrams/`, `shared/originals/`, and `shared/papers/` after Apps Script issues a read credential (or via `fetchSharedAsset` / `listSharedData` fallback). Those actions never return the write token. An unknown username does not receive the bank or a read token. Without `mockTests`, the client (or proxy) strips mock-test rows from `database.json` and refuses mock-only paths (`diagrams/`, `papers/mock-tests/`, numbered `originals/` folders, `build/`, and `database.js`). Past papers under `originals/dse/` and `papers/past-papers/` stay available. Details: `apps-script/README.md`.
 
 ## Import scripts / 匯入腳本
 

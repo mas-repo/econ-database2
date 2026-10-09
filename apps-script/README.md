@@ -2,9 +2,9 @@
 
 The site button **AI出題** is hidden until `checkAccess` returns `ai: true` for the signed-in user. It sends either the currently filtered questions or questions the user pasted, the instruction for the chosen 出題模式 (the user may still edit it), `provider` (`poe` | `openrouter`), and a model id to this Apps Script web app. The script calls Poe (`https://api.poe.com/v1/chat/completions`) or OpenRouter (`https://openrouter.ai/api/v1/chat/completions`) and appends a row to the spreadsheet. The browser never receives the server API key. Users may send their own `poeApiKey` or `openRouterApiKey` from localStorage (settings modal). Script property `POE_API_KEY` is a shared Poe fallback **only for the admin role**; optional `OPENROUTER_API_KEY` is the same for OpenRouter. Other AI users must supply their own browser key or calls return `missing_api_key`. The public repository does not contain the allowlist or any key.
 
-**After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores AI reference `答案：` labels / stem+answer framing, `schema_version_stale` upload gating, `testModel`, the model allowlist, the backup tab, and **`continueGeneration`（AI出題追問）**.
+**After this change is merged**, paste the updated `Code.gs` from this repo into the live Apps Script project and create a **new deployment version** (Deploy → Manage deployments → Edit → Version: New version → Deploy). Keep the existing `/exec` URL. An older deployment ignores AI reference `答案：` labels / stem+answer framing, `schema_version_stale` upload gating, `testModel`, the model allowlist / free-text Poe ids, the backup tab, **`continueGeneration`（AI出題追問）**, **`reviewStemPatterns`**, **AI解釋** actions (`generateAiExplanation` / `voteAiExplanation` / `feedbackAiExplanation` / `listAiExplanationFeedback`), and **回報問題** (`reportIssue` / `listIssueReports`).
 
-Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the three role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
+Git sync and the shared question bank use the same sign-in, with different flags. Only `githubSync` can upload or download the **shared** question bank under `shared/data/…`. Any known username (a hash on one of the **four** role lists) can load shared diagrams, the question bank, and paper files through this web app. A restricted role receives the bank with mock-test questions removed. The script talks to GitHub. The browser does not.
 
 GitHub Pages is a static host. A private repository’s raw file URL answers 404 unless a token is sent, and the write token must not be in the page. Large shared reads prefer `issueSharedReadToken` plus direct GitHub API calls; `fetchSharedAsset` and `listSharedData` remain Apps Script fallbacks. Questions load only from the private repository `mas-repo/econ-database-data`. The question bank is not committed under `econ-database/data/`, and a failed private-repo read does not fall back to a file in this repo.
 
@@ -16,8 +16,8 @@ GitHub Pages is a static host. A private repository’s raw file URL answers 404
 
 **Architecture contrast (reads vs writes):**
 
-- **Large shared assets** (question bank, diagrams, originals, papers, data-checks *download*): after username validation, the client prefers `issueSharedReadToken` (GitHub App installation token, or `GITHUB_READ_TOKEN` fallback) and fetches from `api.github.com` directly so multi‑MB bodies skip the Apps Script `googleusercontent` echo path. `fetchSharedAsset` / `listSharedData` remain server-side fallbacks.
-- **AI出題** (`generateQuestions`, `testModel`, AI backups, usage records), **admin bank upload**, and **data-checks upload** stay on Apps Script with the server write token (`GITHUB_TOKEN`). Normal `ai` users never receive write credentials.
+- **Large shared assets** (question bank, diagrams, originals, papers, `ai-explanations.json` / `issue-reports.json` reads, data-checks *download*): after username validation, the client prefers `issueSharedReadToken` (GitHub App installation token, or `GITHUB_READ_TOKEN` fallback) and fetches from `api.github.com` directly so multi‑MB bodies skip the Apps Script `googleusercontent` echo path. `fetchSharedAsset` / `listSharedData` remain server-side fallbacks.
+- **AI出題** (`generateQuestions`, `continueGeneration`, `testModel`, `reviewStemPatterns`, personal AI backups, usage records), **AI解釋** writes (`generateAiExplanation` / vote / feedback), **回報問題** (`reportIssue`), **admin bank upload**, and **data-checks upload** stay on Apps Script with the server write token (`GITHUB_TOKEN`). Normal `ai` users never receive write credentials.
 
 Comment-only edits to `Code.gs` do not require a new web-app deployment; paste + redeploy only when runtime code changes.
 
@@ -29,7 +29,7 @@ Comment-only edits to `Code.gs` do not require a new web-app deployment; paste +
 - `checkAccess` (alias `checkRights`) returns `{ "ok": true, "admin": false, "ai": false, "githubSync": false, "mockTests": false, "allowed": false }`. It does not return a username, a hash, or a role name. `allowed` mirrors `githubSync` only (admin). An older page that still checks `data.allowed` therefore shows the GitHub panel only for admin; AI出題 must use the `ai` flag on the current page. The current page uses `ai`, `githubSync`, `admin`, and `mockTests` and ignores `allowed`.
 - `generateQuestions`, `continueGeneration` (追問), and `testModel` require `ai`. GitHub upload and download require `githubSync`. Shared reads require a known username. A refused call does not reveal who is listed.
 - `continueGeneration` accepts `messages[]` (`system` / `user` / `assistant`). It does **not** re-pack the reference bank unless `includeReferences: true` and `questions[]` are sent. Daily limit counts successful `generateQuestions` **and** `continueGeneration` rows.
-- The modal sends `provider` and `model`. For Poe, the script accepts only `Claude-Sonnet-5.5`, `GPT-6.1-Sol`, and `Gemini-3.8-Flash` (else `Claude-Sonnet-5.5` / optional `POE_MODEL`). For OpenRouter, the script accepts a validated free-text model id (else `openai/gpt-4o-mini` / optional `OPENROUTER_MODEL`).
+- The modal sends `provider` and `model`. For Poe, **presets** are `Claude-Sonnet-5.5`, `GPT-6.1-Sol`, `Gemini-3.8-Flash`, `GLM-5.3-flash`, and `GLM-5.3`; the script also accepts a sanitized free-text Poe bot id (`isAllowedPoeModelId_`). Empty/invalid falls back to `Claude-Sonnet-5.5` / optional `POE_MODEL` when that property is itself allowed. For OpenRouter, the script accepts a validated free-text model id (else `openai/gpt-4o-mini` / optional `OPENROUTER_MODEL`).
 - `appsscript.json` limits `UrlFetchApp` to `https://api.poe.com/`, `https://openrouter.ai/`, and `https://api.github.com/`.
 - Do not commit real usernames, hashes of real usernames, or the API key. Examples below use placeholders such as `user_a` and an obviously fake hash. Never paste a production hash into git.
 
@@ -57,7 +57,7 @@ You can ignore the editor’s run dropdown until the properties below exist. `se
 
 **Project Settings → Script properties**. Names must match. Values are not in git.
 
-Production roles are **only** these three hash lists. Do not store plaintext usernames. The script does not read `ALLOWED_USER_HASHES` or `ALLOWED_USERS`. Delete those properties on the live project after the three lists below are set, or a leftover plaintext name sits in Project Settings even though it no longer grants access.
+Production roles are **only** these **four** hash lists. Do not store plaintext usernames. The script does not read `ALLOWED_USER_HASHES` or `ALLOWED_USERS`. Delete those properties on the live project after the four lists below are set, or a leftover plaintext name sits in Project Settings even though it no longer grants access.
 
 ### Roles (production): hashes only
 
@@ -66,15 +66,14 @@ Production roles are **only** these three hash lists. Do not store plaintext use
 3. Choose **出題代理 → 計算使用者名稱雜湊**.
 4. For each person, paste the username into that dialog. Do this privately. The dialog does not write the name into the sheet or into the repo. It lowercases and trims the name, then shows only the SHA-256 hex.
 5. Copy that hex into exactly one Script property:
-   - `ALLOWED_ADMIN_HASHES` — full rights: AI出題, GitHub upload/download and the Auto-sync checkbox, 管理員模式 (edit, import, export), and mock tests.
-   - ALLOWED_AI_HASHES — AI出題 and mock tests; no GitHub; no admin edit.
-- ALLOWED_MOCK_HASHES — mock tests only; no AI出題; no GitHub; no admin edit.
-- ALLOWED_AI_HASHES (detail) — AI出題 (filter, paste, modes, models, and 測試) and mock tests. No GitHub buttons, no Auto-sync, no 管理員模式.
-   - `ALLOWED_RESTRICTED_HASHES` — browse the site like a student or teacher. No AI出題, no GitHub buttons, no Auto-sync, and no mock-test questions. Everyone on this list has the same rights.
-6. Separate hashes in one property with commas, newlines, or spaces. If the same hash is in more than one list, the highest role wins: admin, then AI editor, then restricted.
+   - `ALLOWED_ADMIN_HASHES` — full rights: AI出題 / AI解釋, GitHub upload/download and the Auto-sync checkbox, 管理員模式 (edit, import, export, **回饋／回報** hub), and mock tests.
+   - `ALLOWED_AI_HASHES` — AI出題 (filter, paste, modes, models, 測試, 追問), AI解釋, 題幹模式檢視, and mock tests. No GitHub buttons, no Auto-sync, no 管理員模式.
+   - `ALLOWED_MOCK_HASHES` — mock tests only; no AI出題 / AI解釋; no GitHub; no admin edit. Shared bank loads (including mocks).
+   - `ALLOWED_RESTRICTED_HASHES` — browse the site like a student or teacher. No AI出題, no GitHub buttons, no Auto-sync, and no mock-test questions. Everyone on this list has the same rights. **回報問題** still works for any known signed-in user (including restricted).
+6. Separate hashes in one property with commas, newlines, or spaces. If the same hash is in more than one list, the highest role wins: **admin → AI editor → mock → restricted**.
 7. Delete `ALLOWED_USER_HASHES` and `ALLOWED_USERS` if they are still set.
 
-A value that is not 64 hex characters never matches, so a plaintext username in a property does not grant a role. If all three lists are empty, nobody is known. `checkAccess` does not say which property matched, and it does not echo the username or any hash.
+A value that is not 64 hex characters never matches, so a plaintext username in a property does not grant a role. If all four lists are empty, nobody is known. `checkAccess` does not say which property matched, and it does not echo the username or any hash.
 
 `checkAccess` and `checkRights` return only:
 
@@ -100,17 +99,18 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 
 | Property | Required | Placeholder / default |
 | --- | --- | --- |
-| `POE_API_KEY` | admin-only fallback | Shared upstream key for the **admin** role only (`resolvePoeApiKey_` gates on `lookupRights_(username).admin`, which matches `githubSync` / `ALLOWED_ADMIN_HASHES`). Prefer non-empty `poeApiKey` from the modal for any AI user; else if admin and this property is set, use it; else return `missing_api_key` (AI editors and other non-admin users never receive this fallback). Never log or store the body key. |
-**Shared Poe key gate:** `resolvePoeApiKey_` does not compare a plaintext username. It allows Script property `POE_API_KEY` only when `lookupRights_(username).admin === true` (same membership as `githubSync`). In production that admin hash list is the single shared-key operator; every other AI user must send `poeApiKey` from the browser.
-
+| `POE_API_KEY` | admin-only fallback | Shared upstream Poe key for the **admin** role only (`resolvePoeApiKey_` gates on `lookupRights_(username).admin`, which matches `githubSync` / `ALLOWED_ADMIN_HASHES`). Prefer non-empty `poeApiKey` from the modal for any AI user; else if admin and this property is set, use it; else return `missing_api_key` (AI editors and other non-admin users never receive this fallback). Never log or store the body key. |
+| `OPENROUTER_API_KEY` | admin-only fallback | Same shared-key gate as `POE_API_KEY`, for OpenRouter. Prefer browser `openRouterApiKey`. |
 | `ALLOWED_ADMIN_HASHES` | for full rights | SHA-256 hex list from the menu above. Example placeholder subject: `user_a`. |
 | `ALLOWED_AI_HASHES` | for AI出題 without GitHub | SHA-256 hex list. Same menu. No GitHub sync and no admin edit. |
+| `ALLOWED_MOCK_HASHES` | for mock tests only | SHA-256 hex list. Same menu. `mockTests` only; no `ai`, no `githubSync`, no admin. |
 | `ALLOWED_RESTRICTED_HASHES` | for browse without mocks | SHA-256 hex list. Same menu. No AI出題, no GitHub, no mock tests. |
-| `POE_MODEL` | no | Fallback only when the client omits `model`, and only if the value is `Claude-Sonnet-5.5`, `GPT-6.1-Sol`, or `Gemini-3.8-Flash`. Other values are ignored. Default: `Claude-Sonnet-5.5`. |
+| `POE_MODEL` | no | Fallback only when the client omits `model`, and only if the value passes `isAllowedPoeModelId_` (presets or sanitized free-text id). Other values are ignored. Default: `Claude-Sonnet-5.5`. |
+| `OPENROUTER_MODEL` | no | Fallback when the client omits OpenRouter `model` and the property passes `isAllowedOpenRouterModel_`. Default: `openai/gpt-4o-mini`. |
 | `POE_MAX_REFERENCES` | no | `40` (hard cap 80) |
 | `POE_MAX_REFERENCE_CHARS` | no | `80000` |
 | `POE_MIN_INTERVAL_SECONDS` | no | `20` (`0` disables the cooldown) |
-| `POE_DAILY_LIMIT` | no | `40` successful generations per username per day (`0` disables) |
+| `POE_DAILY_LIMIT` | no | `40` successful `generateQuestions` **and** `continueGeneration` rows per username per day (`0` disables) |
 | `POE_MAX_TOKENS` | no | empty; a low value cuts long answers short |
 | `POE_TEMPERATURE` | no | empty |
 | `SPREADSHEET_ID` | only if the script is not bound | the id in the sheet URL |
@@ -128,6 +128,8 @@ Changing properties does **not** require a new deployment. Changing `Code.gs` do
 | `GITHUB_AI_BACKUP_DIR` | for Git sync | directory inside each user's folder, such as `ai-backups`. Stored as `users/<username>/ai-backups/`. Personal AI出題 history only. |
 | `GITHUB_SHARED_PREFIX` | no | `shared` when this property is empty. Shared diagrams, JSON, and papers live under this prefix. Do not set it to `users` or a path under `users`. |
 
+**Shared Poe / OpenRouter key gate:** `resolvePoeApiKey_` / the OpenRouter resolver do not compare a plaintext username. They allow Script property keys only when `lookupRights_(username).admin === true` (same membership as `githubSync`). In production that admin hash list is the single shared-key operator; every other AI user must send `poeApiKey` or `openRouterApiKey` from the browser.
+
 Usernames are trimmed and lowercased before the hash check. The site already stores the signed-in name that way.
 
 Do not paste real owner, repository, or token values into this file. The path examples above are shapes, not an identity.
@@ -143,7 +145,7 @@ Copy the URL that ends in `/exec`.
 
 The first deployment asks you to authorize Sheets and external requests. Approve that as the deploying account.
 
-When you later edit the script, including after pulling a new `Code.gs`: **Deploy → Manage deployments → Edit → Version: New version → Deploy**. Keep the same `/exec` URL. Modes, the model dropdown, `testModel`, and reply backup are ignored by a deployment that still runs an older script. Paste this repo’s `Code.gs` into the live project before you create that new version.
+When you later edit the script, including after pulling a new `Code.gs`: **Deploy → Manage deployments → Edit → Version: New version → Deploy**. Keep the same `/exec` URL. Modes, the model dropdown, `testModel`, `continueGeneration`, `reviewStemPatterns`, AI解釋 / 回報問題 handlers, and reply backup are ignored by a deployment that still runs an older script. Paste this repo’s `Code.gs` into the live project before you create that new version.
 
 ## 5. Point the site at the web app
 
@@ -262,7 +264,7 @@ Expected layout inside the private repository:
 
 `listSharedData` takes `path` (a directory such as `papers/mock-tests`, or empty for the shared root) and optional `recursive: true`. It returns `{ "ok": true, "path", "truncated", "entries": [{ "path", "type", "size" }] }` with at most 8000 entries. `type` is `file` or `dir`.
 
-Both list/fetch actions and `issueSharedReadToken` require a known username (admin, AI editor, or restricted). They do not require `ai` or `githubSync`. Without `mockTests`, `data/database.json` is returned/stripped with mock-test rows removed (Apps Script strip, or client-side strip on direct reads), and `data/database.js`, `build/`, `diagrams/`, `papers/mock-tests/`, and numbered `originals/<digits>/` folders return `feature_unavailable`. `originals/dse/` and `papers/past-papers/` stay available. An unknown username gets `feature_unavailable` and does not receive the bank or a read token. A refused call does not say whether GitHub is configured. There is a per-username cap of 120 shared reads per minute (`rate_limited`). The page loads the bank once, then loads each diagram or original image when it is shown.
+Both list/fetch actions and `issueSharedReadToken` require a known username (admin, AI editor, mock, or restricted). They do not require `ai` or `githubSync`. Without `mockTests`, `data/database.json` is returned/stripped with mock-test rows removed (Apps Script strip, or client-side strip on direct reads), and `data/database.js`, `build/`, `diagrams/`, `papers/mock-tests/`, and numbered `originals/<digits>/` folders return `feature_unavailable`. `originals/dse/` and `papers/past-papers/` stay available. An unknown username gets `feature_unavailable` and does not receive the bank or a read token. A refused call does not say whether GitHub is configured. There is a per-username cap of 120 shared reads per minute (`rate_limited`). The page loads the bank once, then loads each diagram or original image when it is shown.
 
 `sharedConfigured` on a GET of `/exec` is true when a shared read can be attempted via Apps Script. `directReadConfigured` is true when App or `GITHUB_READ_TOKEN` credentials are ready. GET does not reveal the prefix or any token.
 
@@ -274,14 +276,14 @@ The public question file is several megabytes. Direct browser reads use the Cont
 
 ### Model reply backup
 
-A successful `generateQuestions` or `testModel` call still aims to return the reply to the browser. It also:
+A successful `generateQuestions`, `continueGeneration`, or `testModel` call still aims to return the reply to the browser. It also:
 
 - appends a row to `GenerationBackup` (column list under GenerationBackup below)
 - writes the reply JSON under `users/<username>/<GITHUB_AI_BACKUP_DIR>/`, in a new timestamped file, when the GitHub properties are set
 
-When the generate JSON (including the full reply) would exceed about 48,000 characters, `generateQuestions` omits `content` from the web-app response and sets `contentViaBackup: true`, plus `backupName` / `requestId` / `contentChars` when known. The browser then loads the full text with `getAiBackup` (or recovers via `listAiBackups`). Shorter replies still return `content` inline. This avoids truncated or unparseable bodies on the Apps Script `googleusercontent` echo path for long model replies.
+When the generate JSON (including the full reply) would exceed about 48,000 characters, `generateQuestions` omits `content` from the web-app response and sets `contentViaBackup: true`, plus `backupName` / `requestId` / `contentChars` when known. The browser then loads the full text with `getAiBackup` (or recovers via `listAiBackups`). Shorter replies still return `content` inline. This avoids truncated or unparseable bodies on the Apps Script `googleusercontent` echo path for long model replies. `continueGeneration` uses the same oversized-reply / Git-backup path when time remains.
 
-`generateQuestions` files record `source` / `referenceSource` as `filter` or `paste`, plus `modeId`, `modeName`, and a clipped `instruction` (max 4000 characters) when the generate handler has them. Older files may omit those fields. The sheet cell is clipped. The GitHub file keeps the reply (up to one million characters). Backup failure does not fail the generation or the test.
+`generateQuestions` files record `source` / `referenceSource` as `filter` or `paste`, plus `modeId`, `modeName`, and a clipped `instruction` (max 4000 characters) when the generate handler has them. `continueGeneration` backups record `action: continueGeneration` and `messageCount` (instruction may be empty). Older files may omit those fields. The sheet cell is clipped. The GitHub file keeps the reply (up to one million characters). Backup failure does not fail the generation or the test.
 
 ### Cross-device AI history (`listAiBackups` / `getAiBackup`)
 
@@ -306,8 +308,13 @@ The script creates a tab named `UsageLog` (or `LOG_SHEET_NAME`) with:
 
 - `login` — once per username about every 30 minutes, after someone signs in on the site.
 - `generateQuestions` — success or failure, with model, mode id, `source` (`filter` or `paste`), counts, duration, and the length of the 出題指示 (`instructionChars`, plus `instructionProvidedChars` for the raw client length). The instruction text and the question text are not written to this tab. The reply itself goes to `GenerationBackup` and, when configured, to the private repository.
+- `continueGeneration` — AI出題 **追問**. Same daily-limit bucket as `generateQuestions`. Metadata includes model / duration / turn counts; message bodies and keys are not written here. Successful replies may still go to `GenerationBackup` / GitHub AI backup when configured.
 - `testModel` — the **測試** button. Success means the model returned the expected short ping (`正常`). The metadata has the model, duration, and a short `replyPreview`. It requires `ai`. It does not count toward `POE_DAILY_LIMIT`. It has its own cooldown of `POE_MIN_INTERVAL_SECONDS`, separate from generation. A successful reply is also written to `GenerationBackup` and, when configured, to the private repository.
+- `reviewStemPatterns` — 題幹模式檢視. Metadata only (no reply body, no GenerationBackup / Git AI backup).
+- `generateAiExplanation` — AI解釋 generate. Metadata may include question id / detail level / model; explanation text lives in `shared/data/ai-explanations.json`, not this tab.
+- `reportIssue` — 回報問題 submit. Metadata may include question id / tags; report body lives in `shared/data/issue-reports.json`.
 - `syncDataUpload` / `syncDataDownload` — success or failure when `githubSync` is true. The log stores a byte count, optional `schemaVersion`, or an error code (including `schema_version_stale` with client/cloud versions), not the question text and not the token.
+- Vote / feedback / list-admin actions for AI解釋 and `listIssueReports` may leave little or no UsageLog noise; treat the side files + admin hub as the source of truth for those contents.
 
 Protect the `UsageLog` tab (**Data → Protect sheets and ranges**) so casual editors cannot clear it. The web app still appends rows because it runs as the deploying account.
 
@@ -318,6 +325,7 @@ On a successful upstream reply, the script also appends a row to `GenerationBack
 `timestamp | username | action | model | modeId | modeName | instruction | filteredCount | sentCount | responseTruncated | responseText | metadata`
 
 - `generateQuestions` stores the instruction that was sent, the mode id and name, the filtered and sent counts, and the model’s full reply.
+- `continueGeneration` stores the follow-up reply (instruction often empty); metadata may include `messageCount` / `includeReferences`.
 - `testModel` stores the fixed ping prompt, an empty mode, and the short reply. `passed` in `metadata` says whether the reply matched `正常`.
 - A cell is cut at 45,000 characters (instructions at 8,000). `responseTruncated` is `yes` when the reply was cut, and `metadata.truncation` lists `response_truncated` and/or `instruction_truncated`.
 - Reference stems are not copied into the sheet. The reply can still contain newly written questions.

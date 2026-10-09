@@ -69,18 +69,20 @@
  *   openrouter.ai, and api.github.com. The browser never calls those hosts with a secret.
  * - UsageLog is created on first write. Protect that tab so casual editors
  *   cannot wipe the audit trail. The deploying account can still append.
- * - GenerationBackup is a separate tab. Successful generateQuestions and
- *   testModel calls append the model reply there. Protect that tab too.
- *   Do not point BACKUP_SHEET_NAME at UsageLog or a data tab.
+ * - GenerationBackup is a separate tab. Successful generateQuestions,
+ *   continueGeneration, and testModel calls append the model reply there.
+ *   Protect that tab too. Do not point BACKUP_SHEET_NAME at UsageLog or a
+ *   data tab.
  * - The spreadsheet may currently be shared with edit access. Narrow that
  *   share when you can. Visitors do not need sheet access; the web app
  *   writes the log as the deploying account.
  * - Production allowlists are hash-only. In the bound spreadsheet use
  *   出題代理 → 計算使用者名稱雜湊. Paste each username in that private
  *   dialog, then copy the hex into exactly one of ALLOWED_ADMIN_HASHES,
- *   ALLOWED_AI_HASHES, or ALLOWED_RESTRICTED_HASHES (comma, newline, or
- *   space separated). Do not commit those hashes or the usernames.
- *   ALLOWED_USER_HASHES and ALLOWED_USERS are not read. Delete them.
+ *   ALLOWED_AI_HASHES, ALLOWED_MOCK_HASHES, or ALLOWED_RESTRICTED_HASHES
+ *   (comma, newline, or space separated). Do not commit those hashes or
+ *   the usernames. ALLOWED_USER_HASHES and ALLOWED_USERS are not read.
+ *   Delete them.
  * - Script property changes apply immediately. Code changes need a new
  *   deployment version (Manage deployments → Edit → New version) so the
  *   existing /exec URL keeps working.
