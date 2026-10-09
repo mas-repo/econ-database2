@@ -708,8 +708,24 @@
     }
 
     // --- Admin feedback browser ---
+    // When ReportIssue owns the combined「回饋／回報」hub, skip the standalone
+    // AI-only button (setAdminUiDelegated(true)).
+
+    var adminUiDelegated = false;
+
+    function setAdminUiDelegated(flag) {
+        adminUiDelegated = !!flag;
+        if (adminUiDelegated) {
+            var legacy = document.getElementById('ai-explain-feedback-admin-btn');
+            if (legacy) legacy.hidden = true;
+            closeAdminFeedback();
+        } else {
+            refreshAdminButton();
+        }
+    }
 
     function ensureAdminButton() {
+        if (adminUiDelegated) return null;
         var host = document.querySelector('header div[style*="flex-wrap"]') ||
             document.querySelector('header');
         if (!host) return null;
@@ -733,6 +749,11 @@
     }
 
     function refreshAdminButton() {
+        if (adminUiDelegated) {
+            var legacy = document.getElementById('ai-explain-feedback-admin-btn');
+            if (legacy) legacy.hidden = true;
+            return;
+        }
         var button = ensureAdminButton();
         if (!button) return;
         var allowed = hasAdminAccess();
@@ -904,6 +925,8 @@
         questionMatchesAiFilter: questionMatchesAiFilter,
         summaryForQuestion: summaryForQuestion,
         refreshAdminButton: refreshAdminButton,
+        setAdminUiDelegated: setAdminUiDelegated,
+        closeAdminPanel: closeAdminFeedback,
         init: initAiExplanationFeature,
         store: store
     };

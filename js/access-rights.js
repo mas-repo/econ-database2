@@ -47,6 +47,9 @@ function applyAccessRights(rights) {
     if (window.AiExplanation && typeof AiExplanation.refreshAdminButton === 'function') {
         AiExplanation.refreshAdminButton();
     }
+    if (window.ReportIssue && typeof ReportIssue.refreshHubButton === 'function') {
+        ReportIssue.refreshHubButton();
+    }
     if (!window.accessRights.ai) {
         if (window.triStateFilters && window.triStateFilters.ai) {
             window.triStateFilters.ai = {};

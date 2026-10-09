@@ -33,6 +33,9 @@
  *   <GITHUB_SHARED_PREFIX>/data/ai-explanations.json
  *   e.g. shared/data/ai-explanations.json
  * Legacy question field AIExplanation (URL) is unused by new clients.
+ * 回報問題 (any known user; admin list):
+ *   <GITHUB_SHARED_PREFIX>/data/issue-reports.json
+ *   e.g. shared/data/issue-reports.json
  * Model-reply (AI出題) backups stay personal:
  *   users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json
  * <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
@@ -100,6 +103,8 @@
  *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
  *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
  *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
+ *   reportIssue               → handleReportIssue_               (known user; writes shared/data/issue-reports.json)
+ *   listIssueReports          → handleListIssueReports_          (admin)
  *   testModel           → handleTest_
  *   reviewStemPatterns  → handleReviewStemPatterns_  (no Git AI backup / no GenerationBackup sheet)
  *   listAiBackups       → handleListAiBackups_
@@ -198,6 +203,8 @@ function handlePost_(e) {
   if (action === 'voteAiExplanation') return handleVoteAiExplanation_(body);
   if (action === 'feedbackAiExplanation') return handleFeedbackAiExplanation_(body);
   if (action === 'listAiExplanationFeedback') return handleListAiExplanationFeedback_(body);
+  if (action === 'reportIssue') return handleReportIssue_(body);
+  if (action === 'listIssueReports') return handleListIssueReports_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
@@ -1254,6 +1261,188 @@ function handleListAiExplanationFeedback_(body) {
   } catch (err) {
     if (err && err.code === 'github_not_found') {
       return { ok: true, rows: [], path: githubSharedAiExplanationsPath_(cfg), sha: '' };
+    }
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+}
+
+// === 回報問題 (shared/data/issue-reports.json) ===
+// Side file of user issue reports keyed by id. Any known username may submit;
+// admin lists for the combined feedback viewer.
+
+var ISSUE_REPORTS_REL_PATH_ = 'data/issue-reports.json';
+var ISSUE_REPORTS_MAX_BYTES_ = 1500000;
+var ISSUE_REPORTS_MAX_ITEMS_ = 2000;
+var ISSUE_REPORT_TAGS_ = {
+  typo: '有錯字',
+  image: '圖片未能正確顯示',
+  classification: '分類不正確',
+  other: '其他'
+};
+
+function githubSharedIssueReportsPath_(cfg) {
+  var prefix = githubSharedPrefix_(cfg);
+  if (!prefix) return '';
+  return joinGithubPath_(prefix, ISSUE_REPORTS_REL_PATH_);
+}
+
+function emptyIssueReportsStore_() {
+  return { version: 1, updatedAt: '', reports: [] };
+}
+
+function normalizeIssueTags_(raw) {
+  var list = Array.isArray(raw) ? raw : [];
+  var out = [];
+  var seen = {};
+  list.forEach(function (item) {
+    var key = String(item == null ? '' : item).trim().toLowerCase();
+    if (key === 'typo' || key === '有錯字') key = 'typo';
+    else if (key === 'image' || key === '圖片未能正確顯示' || key === 'image_fail') key = 'image';
+    else if (key === 'classification' || key === '分類不正確') key = 'classification';
+    else if (key === 'other' || key === '其他') key = 'other';
+    else return;
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(key);
+  });
+  return out;
+}
+
+function readIssueReportsStore_(cfg) {
+  var path = githubSharedIssueReportsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  try {
+    var read = githubReadText_(cfg, path);
+    var parsed;
+    try {
+      parsed = JSON.parse(read.text);
+    } catch (ignore) {
+      throw gitFail_('github_error');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw gitFail_('github_error');
+    }
+    if (!Array.isArray(parsed.reports)) parsed.reports = [];
+    if (typeof parsed.version !== 'number') parsed.version = 1;
+    return { store: parsed, sha: read.sha || '', path: path, existed: true };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return { store: emptyIssueReportsStore_(), sha: '', path: path, existed: false };
+    }
+    throw err;
+  }
+}
+
+function writeIssueReportsStore_(cfg, store, message) {
+  var path = githubSharedIssueReportsPath_(cfg);
+  if (!path) throw gitFail_('github_error');
+  store.version = 1;
+  store.updatedAt = new Date().toISOString();
+  if (!Array.isArray(store.reports)) store.reports = [];
+  var text = JSON.stringify(store);
+  if (utf8Length_(text) > ISSUE_REPORTS_MAX_BYTES_) throw gitFail_('payload_too_large');
+  var written = githubWriteText_(cfg, path, text, message || 'Update issue reports');
+  return { sha: written.sha, path: path, store: store };
+}
+
+function publicIssueReportView_(row) {
+  if (!row) return null;
+  var tags = normalizeIssueTags_(row.tags);
+  return {
+    id: String(row.id || ''),
+    questionId: String(row.questionId || ''),
+    tags: tags,
+    tagLabels: tags.map(function (t) { return ISSUE_REPORT_TAGS_[t] || t; }),
+    text: String(row.text || ''),
+    user: String(row.user || ''),
+    createdAt: String(row.createdAt || '')
+  };
+}
+
+function handleReportIssue_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = lookupRights_(username);
+  if (!username || !rights.known) return { ok: false, error: 'feature_unavailable' };
+
+  var questionId = String(body.questionId || '').trim();
+  if (!questionId || questionId.length > 80) return { ok: false, error: 'bad_request' };
+  var tags = normalizeIssueTags_(body.tags);
+  var text = String(body.text == null ? '' : body.text).trim();
+  if (text.length > 4000) text = text.slice(0, 4000);
+  if (!tags.length && !text) return { ok: false, error: 'bad_request' };
+  if (!tags.length) tags = ['other'];
+
+  var record = {
+    id: 'ir_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16),
+    questionId: questionId,
+    tags: tags,
+    text: text,
+    user: username,
+    createdAt: new Date().toISOString()
+  };
+
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(25000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var loaded = readIssueReportsStore_(cfg);
+    var list = Array.isArray(loaded.store.reports) ? loaded.store.reports : [];
+    list.unshift(record);
+    if (list.length > ISSUE_REPORTS_MAX_ITEMS_) list = list.slice(0, ISSUE_REPORTS_MAX_ITEMS_);
+    loaded.store.reports = list;
+    var written = writeIssueReportsStore_(cfg, loaded.store, 'Add issue report for ' + questionId);
+    lock.releaseLock();
+    held = false;
+    writeLog_({
+      username: username,
+      action: 'reportIssue',
+      success: true,
+      metadata: { questionId: questionId, tags: tags.join(',') }
+    }, true);
+    return {
+      ok: true,
+      report: publicIssueReportView_(record),
+      sha: written.sha,
+      path: written.path
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    if (code === 'github_not_found') return gitClientError_('github_not_found');
+    return gitClientError_('github_error');
+  }
+}
+
+function handleListIssueReports_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  try {
+    var loaded = readIssueReportsStore_(cfg);
+    var rows = (loaded.store.reports || []).map(publicIssueReportView_).filter(Boolean);
+    rows.sort(function (a, b) {
+      return String(b.createdAt).localeCompare(String(a.createdAt));
+    });
+    if (rows.length > 500) rows = rows.slice(0, 500);
+    return { ok: true, rows: rows, path: loaded.path, sha: loaded.sha };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return { ok: true, rows: [], path: githubSharedIssueReportsPath_(cfg), sha: '' };
     }
     safeLog_(err);
     return gitClientError_(err && err.code ? err.code : 'github_error');
