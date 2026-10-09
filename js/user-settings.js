@@ -542,7 +542,7 @@
         button = document.createElement('button');
         button.type = 'button';
         button.id = 'user-settings-btn';
-        button.className = 'btn btn-outline-primary';
+        button.className = 'btn btn-outline-primary header-toolbar-btn';
         button.textContent = '用戶設定';
         button.setAttribute('aria-label', '開啟用戶設定');
         button.dataset.bound = '1';
