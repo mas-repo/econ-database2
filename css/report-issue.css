@@ -153,7 +153,45 @@
 }
 
 .feedback-hub-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
     padding: 10px 18px 0;
+}
+
+.feedback-hub-filter-label {
+    font-size: 0.9rem;
+    color: #445566;
+}
+
+.feedback-hub-status-filter {
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 4px 8px;
+    border: 1px solid var(--border-light, #dde3ea);
+    border-radius: 6px;
+    background: #fff;
+    color: #243447;
+}
+
+.feedback-hub-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: #445566;
+    cursor: pointer;
+}
+
+.feedback-hub-status-pill.is-open {
+    background: #fff3cd;
+    color: #7a5b00;
+}
+
+.feedback-hub-status-pill.is-resolved {
+    background: #e8f5e9;
+    color: #1e8449;
 }
 
 .feedback-hub-list {

@@ -25,7 +25,8 @@ var GIT_ERROR_TEXT = {
     server_error: '同步服務發生錯誤',
     schema_too_new: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
     schema_version_stale: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
-    schema_unreadable: '無法安全載入較新格式的題庫，請先更新網頁'
+    schema_unreadable: '無法安全載入較新格式的題庫，請先更新網頁',
+    validation_failed: '上傳已拒絕：題目欄位驗證失敗'
 };
 
 function gitProxyUrl() {
@@ -67,6 +68,11 @@ function gitFailureText(error) {
     }
     if (error && error.code === 'schema_unreadable') {
         return error.message || GIT_ERROR_TEXT.schema_unreadable;
+    }
+    if (error && error.code === 'validation_failed') {
+        var detail = error.message ? String(error.message).trim() : '';
+        if (detail) return detail.length > 420 ? detail.slice(0, 419) + '…' : detail;
+        return GIT_ERROR_TEXT.validation_failed;
     }
     if (error && error.code && GIT_ERROR_TEXT[error.code]) return GIT_ERROR_TEXT[error.code];
     var message = error && error.message ? String(error.message) : '';
@@ -279,13 +285,19 @@ async function uploadQuestionsToGit(options) {
                 data: exportData
             }, 180000);
             if (!data || data.ok !== true) {
-                var failed = new Error((data && data.error) || 'github_error');
+                var failed = new Error((data && (data.message || data.error)) || 'github_error');
                 failed.code = data && data.error ? data.error : 'github_error';
+                if (data && typeof data.message === 'string' && data.message) {
+                    failed.message = data.message;
+                }
                 if (data && typeof data.clientSchemaVersion === 'number') {
                     failed.clientSchemaVersion = data.clientSchemaVersion;
                 }
                 if (data && typeof data.cloudSchemaVersion === 'number') {
                     failed.cloudSchemaVersion = data.cloudSchemaVersion;
+                }
+                if (data && Array.isArray(data.failingIds)) {
+                    failed.failingIds = data.failingIds;
                 }
                 throw failed;
             }

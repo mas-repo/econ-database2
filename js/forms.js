@@ -194,10 +194,17 @@ function setupFormHandler() {
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        // Auto-fill '-' for empty fields
-        const multipleSelectionType = document.getElementById('multiple-selection-type').value.trim() || '-';
-        const graphType = document.getElementById('graph-type').value.trim() || '-';
-        const tableType = document.getElementById('table-type').value.trim() || '-';
+        // Empty / '-' → canonical confirmed-none (沒有圖 / 沒有表格 / …).
+        const storeFeat = (typeof storeScalarFeatureField === 'function')
+            ? storeScalarFeatureField
+            : function (field, raw) {
+                const t = String(raw == null ? '' : raw).trim();
+                return t || '-';
+            };
+        const multipleSelectionType = storeFeat('multipleSelectionType', document.getElementById('multiple-selection-type').value);
+        const graphType = storeFeat('graphType', document.getElementById('graph-type').value);
+        const tableType = storeFeat('tableType', document.getElementById('table-type').value);
+        const calculationType = storeFeat('calculationType', document.getElementById('calculation-type').value);
 
         const marksRaw = document.getElementById('marks').value.trim();
         let marksValue = 0;
@@ -238,7 +245,7 @@ function setupFormHandler() {
             multipleSelectionType: multipleSelectionType,
             graphType: graphType,
             tableType: tableType,
-            calculationType: document.getElementById('calculation-type').value.trim() || '-',            
+            calculationType: calculationType,
             answerMC: document.getElementById('answer-mc').value.trim(),
             answerChi: document.getElementById('answer-chi').value.trim(),
             answerEng: document.getElementById('answer-eng').value.trim(),
@@ -431,11 +438,17 @@ async function editQuestion(id) {
     document.getElementById('question-number').value = question.questionNumber || '';
     document.getElementById('question-text-chi').value = question.questionTextChi || '';
     document.getElementById('question-text-eng').value = question.questionTextEng || '';
-    // Don't show '-' in the form, leave it empty
-    document.getElementById('multiple-selection-type').value = question.multipleSelectionType === '-' ? '' : (question.multipleSelectionType || '');
-    document.getElementById('graph-type').value = question.graphType === '-' ? '' : (question.graphType || '');
-    document.getElementById('table-type').value = question.tableType === '-' ? '' : (question.tableType || '');
-    document.getElementById('calculation-type').value = question.calculationType === '-' ? '' : (question.calculationType || '');
+    // Confirmed-none / '-' → empty inputs (same UX as historic '-' blank).
+    const dispFeat = (typeof displayScalarFeatureField === 'function')
+        ? displayScalarFeatureField
+        : function (field, stored) {
+            const t = String(stored == null ? '' : stored).trim();
+            return (!t || t === '-') ? '' : t;
+        };
+    document.getElementById('multiple-selection-type').value = dispFeat('multipleSelectionType', question.multipleSelectionType);
+    document.getElementById('graph-type').value = dispFeat('graphType', question.graphType);
+    document.getElementById('table-type').value = dispFeat('tableType', question.tableType);
+    document.getElementById('calculation-type').value = dispFeat('calculationType', question.calculationType);
     document.getElementById('correct-percentage').value = (question.correctPercentage == null || question.correctPercentage === '')
         ? ''
         : String(question.correctPercentage);

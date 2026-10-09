@@ -113,9 +113,13 @@
  *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
  *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
  *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
+ *   updateAiExplanationFeedbackStatus → handleUpdateAiExplanationFeedbackStatus_ (admin)
+ *   bulkUpdateAiExplanationFeedbackStatus → handleBulkUpdateAiExplanationFeedbackStatus_ (admin)
  * 回報問題 side-file (shared/data/issue-reports.json):
  *   reportIssue               → handleReportIssue_       (known user)
  *   listIssueReports          → handleListIssueReports_  (admin)
+ *   updateIssueReportStatus   → handleUpdateIssueReportStatus_ (admin)
+ *   bulkUpdateIssueReportStatus → handleBulkUpdateIssueReportStatus_ (admin)
  * Shared bank read (Apps Script body fallback; prefer direct read below):
  *   fetchSharedAsset → handleFetchShared_
  *   listSharedData   → handleListShared_
@@ -209,8 +213,12 @@ function handlePost_(e) {
   if (action === 'voteAiExplanation') return handleVoteAiExplanation_(body);
   if (action === 'feedbackAiExplanation') return handleFeedbackAiExplanation_(body);
   if (action === 'listAiExplanationFeedback') return handleListAiExplanationFeedback_(body);
+  if (action === 'updateAiExplanationFeedbackStatus') return handleUpdateAiExplanationFeedbackStatus_(body);
+  if (action === 'bulkUpdateAiExplanationFeedbackStatus') return handleBulkUpdateAiExplanationFeedbackStatus_(body);
   if (action === 'reportIssue') return handleReportIssue_(body);
   if (action === 'listIssueReports') return handleListIssueReports_(body);
+  if (action === 'updateIssueReportStatus') return handleUpdateIssueReportStatus_(body);
+  if (action === 'bulkUpdateIssueReportStatus') return handleBulkUpdateIssueReportStatus_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
@@ -1198,6 +1206,7 @@ function handleFeedbackAiExplanation_(body) {
     user: username,
     rating: rating || null,
     text: text,
+    status: 'open',
     at: new Date().toISOString()
   };
 
@@ -1230,6 +1239,72 @@ function handleFeedbackAiExplanation_(body) {
   };
 }
 
+function normalizeHubItemStatus_(raw) {
+  var text = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (text === 'resolved' || text === 'closed' || text === 'done'
+      || text === '已修' || text === '已關閉' || text === '已處理') {
+    return 'resolved';
+  }
+  // Missing / pending / open → open (backward compatible default).
+  return 'open';
+}
+
+function hubStatusLabel_(status) {
+  return normalizeHubItemStatus_(status) === 'resolved' ? '已關閉' : '待處理';
+}
+
+function publicAiFeedbackRow_(qid, exp, fb) {
+  var status = normalizeHubItemStatus_(fb && fb.status);
+  return {
+    id: String(fb && fb.id || ''),
+    questionId: qid,
+    explanationId: String(exp && exp.id || ''),
+    detailLevel: normalizeAiDetailLevel_(exp && exp.detailLevel),
+    model: String(exp && exp.model || ''),
+    explanationSnippet: clip_(String(exp && exp.text || ''), 160),
+    upCount: Array.isArray(exp && exp.votes && exp.votes.up) ? exp.votes.up.length : 0,
+    downCount: Array.isArray(exp && exp.votes && exp.votes.down) ? exp.votes.down.length : 0,
+    user: String(fb && fb.user || ''),
+    rating: fb && fb.rating ? String(fb.rating) : '',
+    text: String(fb && fb.text || ''),
+    status: status,
+    statusLabel: hubStatusLabel_(status),
+    at: String(fb && fb.at || '')
+  };
+}
+
+function sortHubRowsOpenFirst_(rows, dateKey) {
+  var key = dateKey || 'at';
+  rows.sort(function (a, b) {
+    var aOpen = normalizeHubItemStatus_(a && a.status) === 'open' ? 0 : 1;
+    var bOpen = normalizeHubItemStatus_(b && b.status) === 'open' ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    return String(b && b[key] || '').localeCompare(String(a && a[key] || ''));
+  });
+  return rows;
+}
+
+function findAiFeedbackEntry_(store, feedbackId) {
+  var id = String(feedbackId || '').trim();
+  if (!id) return null;
+  var byQuestion = store && store.byQuestion ? store.byQuestion : {};
+  var qids = Object.keys(byQuestion);
+  for (var i = 0; i < qids.length; i++) {
+    var qid = qids[i];
+    var list = listExplanationsForQuestion_(store, qid);
+    for (var j = 0; j < list.length; j++) {
+      var exp = list[j];
+      var feedback = Array.isArray(exp.feedback) ? exp.feedback : [];
+      for (var k = 0; k < feedback.length; k++) {
+        if (String(feedback[k] && feedback[k].id || '') === id) {
+          return { questionId: qid, explanation: exp, feedback: feedback[k] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function handleListAiExplanationFeedback_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
@@ -1244,25 +1319,11 @@ function handleListAiExplanationFeedback_(body) {
       list.forEach(function (exp) {
         var feedback = Array.isArray(exp.feedback) ? exp.feedback : [];
         feedback.forEach(function (fb) {
-          rows.push({
-            questionId: qid,
-            explanationId: String(exp.id || ''),
-            detailLevel: normalizeAiDetailLevel_(exp.detailLevel),
-            model: String(exp.model || ''),
-            explanationSnippet: clip_(String(exp.text || ''), 160),
-            upCount: Array.isArray(exp.votes && exp.votes.up) ? exp.votes.up.length : 0,
-            downCount: Array.isArray(exp.votes && exp.votes.down) ? exp.votes.down.length : 0,
-            user: String(fb && fb.user || ''),
-            rating: fb && fb.rating ? String(fb.rating) : '',
-            text: String(fb && fb.text || ''),
-            at: String(fb && fb.at || '')
-          });
+          rows.push(publicAiFeedbackRow_(qid, exp, fb));
         });
       });
     });
-    rows.sort(function (a, b) {
-      return String(b.at).localeCompare(String(a.at));
-    });
+    sortHubRowsOpenFirst_(rows, 'at');
     if (rows.length > 500) rows = rows.slice(0, 500);
     return { ok: true, rows: rows, path: loaded.path, sha: loaded.sha };
   } catch (err) {
@@ -1272,6 +1333,61 @@ function handleListAiExplanationFeedback_(body) {
     safeLog_(err);
     return gitClientError_(err && err.code ? err.code : 'github_error');
   }
+}
+
+function handleUpdateAiExplanationFeedbackStatus_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var feedbackId = String(body.feedbackId || body.id || '').trim();
+  var status = normalizeHubItemStatus_(body.status);
+  if (!feedbackId) return { ok: false, error: 'bad_request' };
+  var saved = mutateAiExplanationsStore_(username, 'Update AI feedback status ' + feedbackId, function (store) {
+    var found = findAiFeedbackEntry_(store, feedbackId);
+    if (!found) return { ok: false, error: 'not_found' };
+    found.feedback.status = status;
+    return { ok: true, feedback: publicAiFeedbackRow_(found.questionId, found.explanation, found.feedback) };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return { ok: true, feedback: saved.feedback, sha: saved.sha, path: saved.path };
+}
+
+function handleBulkUpdateAiExplanationFeedbackStatus_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var ids = Array.isArray(body.ids) ? body.ids : (Array.isArray(body.feedbackIds) ? body.feedbackIds : []);
+  var status = normalizeHubItemStatus_(body.status);
+  var want = {};
+  var ordered = [];
+  ids.forEach(function (raw) {
+    var id = String(raw == null ? '' : raw).trim();
+    if (!id || want[id]) return;
+    want[id] = true;
+    ordered.push(id);
+  });
+  if (!ordered.length) return { ok: false, error: 'bad_request' };
+  if (ordered.length > 200) ordered = ordered.slice(0, 200);
+  var saved = mutateAiExplanationsStore_(username, 'Bulk update AI feedback status', function (store) {
+    var updated = [];
+    ordered.forEach(function (id) {
+      var found = findAiFeedbackEntry_(store, id);
+      if (!found) return;
+      found.feedback.status = status;
+      updated.push(publicAiFeedbackRow_(found.questionId, found.explanation, found.feedback));
+    });
+    if (!updated.length) return { ok: false, error: 'not_found' };
+    return { ok: true, feedback: updated };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return {
+    ok: true,
+    updated: Array.isArray(saved.feedback) ? saved.feedback : [],
+    sha: saved.sha,
+    path: saved.path
+  };
 }
 
 // === 回報問題 (shared/data/issue-reports.json) ===
@@ -1401,6 +1517,7 @@ function mutateIssueReportsStore_(username, message, mutator) {
 function publicIssueReportView_(row) {
   if (!row) return null;
   var tags = normalizeIssueTags_(row.tags);
+  var status = normalizeHubItemStatus_(row.status);
   return {
     id: String(row.id || ''),
     questionId: String(row.questionId || ''),
@@ -1408,8 +1525,20 @@ function publicIssueReportView_(row) {
     tagLabels: tags.map(function (t) { return ISSUE_REPORT_TAGS_[t] || t; }),
     text: String(row.text || ''),
     user: String(row.user || ''),
+    status: status,
+    statusLabel: hubStatusLabel_(status),
     createdAt: String(row.createdAt || '')
   };
+}
+
+function findIssueReportById_(store, reportId) {
+  var id = String(reportId || '').trim();
+  if (!id) return null;
+  var list = Array.isArray(store && store.reports) ? store.reports : [];
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i] && list[i].id || '') === id) return list[i];
+  }
+  return null;
 }
 
 function handleReportIssue_(body) {
@@ -1431,6 +1560,7 @@ function handleReportIssue_(body) {
     tags: tags,
     text: text,
     user: username,
+    status: 'open',
     createdAt: new Date().toISOString()
   };
 
@@ -1466,9 +1596,7 @@ function handleListIssueReports_(body) {
   try {
     var loaded = readIssueReportsStore_(cfg);
     var rows = (loaded.store.reports || []).map(publicIssueReportView_).filter(Boolean);
-    rows.sort(function (a, b) {
-      return String(b.createdAt).localeCompare(String(a.createdAt));
-    });
+    sortHubRowsOpenFirst_(rows, 'createdAt');
     if (rows.length > 500) rows = rows.slice(0, 500);
     return { ok: true, rows: rows, path: loaded.path, sha: loaded.sha };
   } catch (err) {
@@ -1478,6 +1606,61 @@ function handleListIssueReports_(body) {
     safeLog_(err);
     return gitClientError_(err && err.code ? err.code : 'github_error');
   }
+}
+
+function handleUpdateIssueReportStatus_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var reportId = String(body.reportId || body.id || '').trim();
+  var status = normalizeHubItemStatus_(body.status);
+  if (!reportId) return { ok: false, error: 'bad_request' };
+  var saved = mutateIssueReportsStore_(username, 'Update issue report status ' + reportId, function (store) {
+    var row = findIssueReportById_(store, reportId);
+    if (!row) return { ok: false, error: 'not_found' };
+    row.status = status;
+    return { ok: true, report: publicIssueReportView_(row) };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return { ok: true, report: saved.report, sha: saved.sha, path: saved.path };
+}
+
+function handleBulkUpdateIssueReportStatus_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var ids = Array.isArray(body.ids) ? body.ids : (Array.isArray(body.reportIds) ? body.reportIds : []);
+  var status = normalizeHubItemStatus_(body.status);
+  var want = {};
+  var ordered = [];
+  ids.forEach(function (raw) {
+    var id = String(raw == null ? '' : raw).trim();
+    if (!id || want[id]) return;
+    want[id] = true;
+    ordered.push(id);
+  });
+  if (!ordered.length) return { ok: false, error: 'bad_request' };
+  if (ordered.length > 200) ordered = ordered.slice(0, 200);
+  var saved = mutateIssueReportsStore_(username, 'Bulk update issue report status', function (store) {
+    var updated = [];
+    ordered.forEach(function (id) {
+      var row = findIssueReportById_(store, id);
+      if (!row) return;
+      row.status = status;
+      updated.push(publicIssueReportView_(row));
+    });
+    if (!updated.length) return { ok: false, error: 'not_found' };
+    return { ok: true, reports: updated };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return {
+    ok: true,
+    updated: Array.isArray(saved.reports) ? saved.reports : [],
+    sha: saved.sha,
+    path: saved.path
+  };
 }
 
 // === Model test / stem pattern review ===
@@ -2645,7 +2828,25 @@ function handleGitUpload_(body) {
       lock.releaseLock();
       held = false;
       releaseGitSlot_(username);
-      return gitClientError_(err && err.code ? err.code : 'bad_request');
+      var failCode = err && err.code ? err.code : 'bad_request';
+      if (failCode === 'validation_failed') {
+        writeLog_({
+          username: username,
+          action: 'syncDataUpload',
+          success: false,
+          metadata: {
+            error: 'validation_failed',
+            failingCount: err.failingCount || 0,
+            detail: clip_(err.clientMessage || '', 120)
+          }
+        }, true);
+        return gitClientError_('validation_failed', {
+          message: err.clientMessage || '',
+          failingIds: err.failingIds || [],
+          failingCount: err.failingCount
+        });
+      }
+      return gitClientError_(failCode);
     }
     var bytes = utf8Length_(text);
     if (bytes > GITHUB_DATA_MAX_BYTES_) {
@@ -4175,7 +4376,13 @@ function readBankSchemaVersion_(data) {
 // omitted them) so an upload never "helps" by stripping newer keys.
 function questionPayloadText_(data, cloudData) {
   var extracted = extractQuestions_(data);
-  if (!extracted.ok) throw gitFail_(extracted.error);
+  if (!extracted.ok) {
+    throw gitFail_(extracted.error, null, {
+      message: extracted.message || '',
+      failingIds: extracted.failingIds || null,
+      failingCount: extracted.failingCount
+    });
+  }
   var out = {};
   function copyTopLevel_(source) {
     if (!source || typeof source !== 'object' || Array.isArray(source)) return;
@@ -4198,6 +4405,156 @@ function questionPayloadText_(data, cloudData) {
   return JSON.stringify(out);
 }
 
+// Bank field schema for syncDataUpload (aligned with client EXAMINATION_TYPES /
+// QUESTION_TYPES / CHAPTER_RANGE). Hard-reject whole upload on first failures.
+var BANK_EXAMINATION_TYPES_ = ['HKDSE', 'HKCEE', 'HKALE'];
+var BANK_QUESTION_TYPES_ = ['MC', '文字題 (SQ/LQ)'];
+var BANK_CHAPTER_MIN_ = 1;
+var BANK_CHAPTER_MAX_ = 29;
+var BANK_UPLOAD_FAIL_IDS_CAP_ = 8;
+var BANK_UPLOAD_MESSAGE_MAX_ = 420;
+
+function parseBankChapterToken_(raw) {
+  var text = String(raw == null ? '' : raw).trim();
+  if (!text || text === '-') return '';
+  var mt = text.match(/^Ch\s*0*(\d{1,2})$/i);
+  if (mt) return String(parseInt(mt[1], 10));
+  if (/^\d{1,2}$/.test(text)) return String(parseInt(text, 10));
+  var digits = text.match(/(\d{1,2})/);
+  if (digits) return String(parseInt(digits[1], 10));
+  return '';
+}
+
+function isPresentArrayField_(value) {
+  return value != null && value !== '';
+}
+
+function validateArrayField_(value, fieldName, failures) {
+  if (!isPresentArrayField_(value)) return;
+  if (!Array.isArray(value)) failures.push(fieldName + ' must be an array');
+}
+
+function validateQuestionPartsShape_(parts, failures) {
+  if (!isPresentArrayField_(parts)) return;
+  if (!Array.isArray(parts)) {
+    failures.push('questionParts must be an array');
+    return;
+  }
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i];
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      failures.push('questionParts[' + i + '] invalid shape');
+      continue;
+    }
+    var label = String(part.label == null ? '' : part.label).trim();
+    if (!label) failures.push('questionParts[' + i + '].label required');
+    if (part.marks != null && part.marks !== '') {
+      var marks = Number(part.marks);
+      if (!isFinite(marks) || marks < 0) {
+        failures.push('questionParts[' + i + '].marks must be ≥0');
+      }
+    }
+    if (part.performance != null && part.performance !== ''
+        && typeof part.performance !== 'string') {
+      failures.push('questionParts[' + i + '].performance must be string');
+    }
+  }
+}
+
+function validateOneQuestionForUpload_(item, index) {
+  var failures = [];
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return { id: '#' + index, failures: ['not an object'] };
+  }
+  var id = String(item.id == null ? '' : item.id).trim();
+  if (!id) {
+    id = '#' + index;
+    failures.push('id required');
+  }
+  var examination = String(item.examination == null ? '' : item.examination).trim();
+  if (!examination) failures.push('examination required');
+  else if (BANK_EXAMINATION_TYPES_.indexOf(examination) === -1) {
+    failures.push('examination not in allowed list');
+  }
+  if (item.questionType != null && item.questionType !== '') {
+    var qtype = String(item.questionType).trim();
+    if (BANK_QUESTION_TYPES_.indexOf(qtype) === -1) {
+      failures.push('questionType not in allowed list');
+    }
+  }
+  if (item.marks != null && item.marks !== '') {
+    var marks = Number(item.marks);
+    if (!isFinite(marks) || marks < 0) failures.push('marks must be a finite number ≥0');
+  }
+  if (item.correctPercentage != null && item.correctPercentage !== '') {
+    var pct = Number(item.correctPercentage);
+    if (!isFinite(pct) || pct < 0 || pct > 100) {
+      failures.push('correctPercentage must be 0–100 or empty');
+    }
+  }
+  validateArrayField_(item.curriculumClassification, 'curriculumClassification', failures);
+  validateArrayField_(item.AristochapterClassification, 'AristochapterClassification', failures);
+  validateArrayField_(item.concepts, 'concepts', failures);
+  validateArrayField_(item.patterns, 'patterns', failures);
+  validateArrayField_(item.stemPatterns, 'stemPatterns', failures);
+  validateQuestionPartsShape_(item.questionParts, failures);
+  if (Array.isArray(item.AristochapterClassification)) {
+    item.AristochapterClassification.forEach(function (token) {
+      var text = String(token == null ? '' : token).trim();
+      if (!text) return;
+      var numText = parseBankChapterToken_(text);
+      if (!numText) {
+        failures.push('chapter token unmapped: ' + text);
+        return;
+      }
+      var num = parseInt(numText, 10);
+      if (num < BANK_CHAPTER_MIN_ || num > BANK_CHAPTER_MAX_) {
+        failures.push('chapter out of Ch01–Ch29: ' + text);
+      }
+    });
+  }
+  return { id: id, failures: failures };
+}
+
+function buildUploadValidationMessage_(failing) {
+  var ids = [];
+  var i;
+  for (i = 0; i < failing.length && ids.length < BANK_UPLOAD_FAIL_IDS_CAP_; i++) {
+    ids.push(String(failing[i].id || ''));
+  }
+  var more = failing.length > ids.length
+    ? ' …(+' + (failing.length - ids.length) + ')'
+    : '';
+  var msg = '上傳已拒絕：題目欄位驗證失敗（共 '
+    + failing.length + ' 題）。Upload rejected: invalid question fields ('
+    + failing.length + '). 問題 id / Failing ids: ' + ids.join(', ') + more;
+  if (failing[0] && failing[0].failures && failing[0].failures.length) {
+    msg += '。例 / e.g. ' + failing[0].id + ': ' + failing[0].failures[0];
+  }
+  if (msg.length > BANK_UPLOAD_MESSAGE_MAX_) {
+    msg = msg.slice(0, BANK_UPLOAD_MESSAGE_MAX_ - 1) + '…';
+  }
+  return msg;
+}
+
+function validateQuestionsForUpload_(questions) {
+  var failing = [];
+  for (var i = 0; i < questions.length; i++) {
+    var result = validateOneQuestionForUpload_(questions[i], i);
+    if (result.failures && result.failures.length) failing.push(result);
+  }
+  if (!failing.length) return { ok: true };
+  return {
+    ok: false,
+    error: 'validation_failed',
+    message: buildUploadValidationMessage_(failing),
+    failingIds: failing.slice(0, BANK_UPLOAD_FAIL_IDS_CAP_).map(function (row) {
+      return row.id;
+    }),
+    failingCount: failing.length
+  };
+}
+
 function extractQuestions_(data) {
   var questions = null;
   if (Array.isArray(data)) questions = data;
@@ -4208,13 +4565,20 @@ function extractQuestions_(data) {
     var item = questions[i];
     if (!item || typeof item !== 'object' || Array.isArray(item)) return { ok: false, error: 'bad_request' };
   }
+  var fieldCheck = validateQuestionsForUpload_(questions);
+  if (!fieldCheck.ok) return fieldCheck;
   return { ok: true, questions: questions };
 }
 
-function gitFail_(code, httpStatus) {
+function gitFail_(code, httpStatus, extra) {
   var err = new Error(code || 'github_error');
   err.code = code || 'github_error';
   if (typeof httpStatus === 'number' && isFinite(httpStatus)) err.httpStatus = httpStatus;
+  if (extra && typeof extra === 'object') {
+    if (typeof extra.message === 'string') err.clientMessage = extra.message;
+    if (Array.isArray(extra.failingIds)) err.failingIds = extra.failingIds;
+    if (typeof extra.failingCount === 'number') err.failingCount = extra.failingCount;
+  }
   return err;
 }
 
@@ -4231,7 +4595,8 @@ function gitClientError_(code, extra) {
     payload_too_large: true,
     rate_limited: true,
     server_error: true,
-    schema_version_stale: true
+    schema_version_stale: true,
+    validation_failed: true
   };
   var out = { ok: false, error: allowed[code] ? code : 'github_error' };
   if (extra && typeof extra === 'object') {
@@ -4240,6 +4605,17 @@ function gitClientError_(code, extra) {
     }
     if (typeof extra.cloudSchemaVersion === 'number' && isFinite(extra.cloudSchemaVersion)) {
       out.cloudSchemaVersion = Math.floor(extra.cloudSchemaVersion);
+    }
+    if (typeof extra.message === 'string' && extra.message) {
+      out.message = String(extra.message).slice(0, BANK_UPLOAD_MESSAGE_MAX_);
+    }
+    if (Array.isArray(extra.failingIds)) {
+      out.failingIds = extra.failingIds.slice(0, BANK_UPLOAD_FAIL_IDS_CAP_).map(function (id) {
+        return String(id == null ? '' : id);
+      });
+    }
+    if (typeof extra.failingCount === 'number' && isFinite(extra.failingCount)) {
+      out.failingCount = Math.floor(extra.failingCount);
     }
   }
   return out;

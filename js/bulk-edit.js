@@ -253,13 +253,23 @@
             .filter(Boolean);
     }
 
-    function scalarDisplay(value) {
+    function scalarDisplay(value, prop) {
+        if (prop && typeof displayScalarFeatureField === 'function'
+            && typeof CONFIRMED_NONE_BY_FIELD !== 'undefined'
+            && CONFIRMED_NONE_BY_FIELD[prop]) {
+            return displayScalarFeatureField(prop, value);
+        }
         if (value == null) return '';
         var text = String(value).trim();
         return text === '-' ? '' : text;
     }
 
-    function scalarStore(text) {
+    function scalarStore(text, prop) {
+        if (prop && typeof storeScalarFeatureField === 'function'
+            && typeof CONFIRMED_NONE_BY_FIELD !== 'undefined'
+            && CONFIRMED_NONE_BY_FIELD[prop]) {
+            return storeScalarFeatureField(prop, text);
+        }
         var trimmed = String(text == null ? '' : text).trim();
         return trimmed === '' ? '-' : trimmed;
     }
@@ -320,7 +330,7 @@
                     ? ''
                     : String(question[def.prop]);
             } else if (def.kind === 'scalar') {
-                snap[def.id] = scalarDisplay(question[def.prop]);
+                snap[def.id] = scalarDisplay(question[def.prop], def.prop);
             } else if (def.prop === 'year' && typeof normalizeYear === 'function') {
                 snap[def.id] = normalizeYear(question[def.prop]);
             } else {
@@ -904,7 +914,7 @@
             }
             target[def.prop] = marksNum;
         } else if (def.kind === 'scalar') {
-            target[def.prop] = scalarStore(raw);
+            target[def.prop] = scalarStore(raw, def.prop);
         } else if (def.prop === 'year' && typeof normalizeYear === 'function') {
             target[def.prop] = normalizeYear(raw);
         } else {
