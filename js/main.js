@@ -146,6 +146,9 @@ async function initializeApp() {
     if (typeof initPoeGenerateFeature === 'function') {
         initPoeGenerateFeature();
     }
+    if (typeof initAiExplanationFeature === 'function') {
+        initAiExplanationFeature();
+    }
     if (typeof initStemPatternReviewFeature === 'function') {
         initStemPatternReviewFeature();
     }
@@ -366,6 +369,15 @@ function setupEventListeners() {
                 return;
             }
             
+            const aiExplainBtn = target.closest('[data-action="ai-explain"]');
+            if (aiExplainBtn) {
+                const id = aiExplainBtn.getAttribute('data-id');
+                if (typeof openAiExplanationModal === 'function') {
+                    openAiExplanationModal(id, aiExplainBtn);
+                }
+                return;
+            }
+
             const aiGenerateBtn = target.closest('[data-action="ai-generate"]');
             if (aiGenerateBtn) {
                 const id = aiGenerateBtn.getAttribute('data-id');

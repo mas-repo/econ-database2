@@ -756,38 +756,60 @@ async function updateDynamicDropdowns() {
     }
 
     const aiContainer = document.getElementById('ai-options');
+    const aiFilterItem = document.getElementById('ai-filter-item');
     if (aiContainer) {
-        const hasAI = contextQuestions.some(q => q.AIExplanation && q.AIExplanation.trim() !== '');
-        const wrapper = aiContainer.closest('.dropdown-filter') || aiContainer.parentElement;
-
-        if (!hasAI) {
-            if (wrapper) wrapper.style.display = 'none';
-        } else {
-            if (wrapper) wrapper.style.display = 'block'; 
-            
-            const aiCount = contextQuestions.filter(q => q.AIExplanation && q.AIExplanation.trim() !== '').length;
-
-            const item = 'AI 詳解';
-            const currentState = window.triStateFilters.ai && window.triStateFilters.ai[item];
-            
-            let wrapperClass = 'tri-state-label';
-            let checkboxClass = 'tri-state-checkbox';
-            
-            if (currentState === 'checked') {
-                wrapperClass += ' checked';
-                checkboxClass += ' checked';
-            } else if (currentState === 'excluded') {
-                wrapperClass += ' excluded';
-                checkboxClass += ' excluded';
+        const aiAllowed = !!(window.accessRights && window.accessRights.ai === true);
+        if (!aiAllowed) {
+            if (aiFilterItem) aiFilterItem.hidden = true;
+            if (window.triStateFilters && window.triStateFilters.ai) {
+                window.triStateFilters.ai = {};
             }
-
-            aiContainer.innerHTML = `
+            aiContainer.innerHTML = '';
+        } else {
+            if (aiFilterItem) aiFilterItem.hidden = false;
+            const labelHas = (window.AiExplanation && AiExplanation.LABEL_HAS) || '有AI解釋';
+            const labelShort = (window.AiExplanation && AiExplanation.LABEL_SHORT) || '簡短';
+            const labelDetailed = (window.AiExplanation && AiExplanation.LABEL_DETAILED) || '詳盡';
+            const valueFn = (typeof aiExplanationFilterValues === 'function')
+                ? aiExplanationFilterValues
+                : (id => (window.AiExplanation && AiExplanation.filterValuesForQuestion
+                    ? AiExplanation.filterValuesForQuestion(id) : []));
+            const counts = {};
+            counts[labelHas] = 0;
+            counts[labelShort] = 0;
+            counts[labelDetailed] = 0;
+            contextQuestions.forEach(q => {
+                const values = valueFn(q && q.id);
+                const seen = new Set();
+                (values || []).forEach(v => {
+                    if (seen.has(v)) return;
+                    seen.add(v);
+                    counts[v] = (counts[v] || 0) + 1;
+                });
+            });
+            const items = [labelHas, labelShort, labelDetailed];
+            aiContainer.innerHTML = items.map(item => {
+                const currentState = window.triStateFilters.ai && window.triStateFilters.ai[item];
+                let wrapperClass = 'tri-state-label';
+                let checkboxClass = 'tri-state-checkbox';
+                if (currentState === 'checked') {
+                    wrapperClass += ' checked';
+                    checkboxClass += ' checked';
+                } else if (currentState === 'excluded') {
+                    wrapperClass += ' excluded';
+                    checkboxClass += ' excluded';
+                }
+                const count = counts[item] || 0;
+                const hint = item === labelHas
+                    ? '（剔選＝有／排除＝無）'
+                    : '';
+                return `
                 <div class="${wrapperClass}" onclick="toggleTriState(this)" data-filter="ai" data-value="${item}">
                     <div class="${checkboxClass}" data-filter="ai" data-value="${item}">
-                        <span>${item} <small style="opacity: 0.6; font-size: 0.85em; margin-left: 4px;">(${aiCount})</small></span>
+                        <span>${item}${hint} <small style="opacity: 0.6; font-size: 0.85em; margin-left: 4px;">(${count})</small></span>
                     </div>
-                </div>
-            `;
+                </div>`;
+            }).join('');
         }
     }
     

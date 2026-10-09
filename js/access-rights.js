@@ -41,6 +41,27 @@ function applyAccessRights(rights) {
     if (typeof populateFeatureFilter === 'function') {
         populateFeatureFilter();
     }
+    if (typeof populateDynamicFilters === 'function') {
+        populateDynamicFilters();
+    }
+    if (window.AiExplanation && typeof AiExplanation.refreshAdminButton === 'function') {
+        AiExplanation.refreshAdminButton();
+    }
+    if (!window.accessRights.ai) {
+        if (window.triStateFilters && window.triStateFilters.ai) {
+            window.triStateFilters.ai = {};
+        }
+        if (typeof closeAiExplanationModal === 'function') {
+            // no-op if not exported; AiExplanation.close covers it
+        }
+        if (window.AiExplanation && typeof AiExplanation.close === 'function') {
+            AiExplanation.close();
+        }
+    } else if (window.AiExplanation && typeof AiExplanation.load === 'function') {
+        AiExplanation.load(false).then(function () {
+            if (typeof populateDynamicFilters === 'function') populateDynamicFilters();
+        }).catch(function () {});
+    }
 }
 
 async function loadAccessRights(username) {

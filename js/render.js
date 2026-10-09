@@ -8,7 +8,7 @@
 //
 // SECURITY: every Sheet-sourced field interpolated into HTML goes through
 // escapeHTML() — body text, attribute values, and tag labels alike.
-// URL fields (imageChi / imageEng / AIExplanation) are additionally
+// URL fields (imageChi / imageEng) are additionally
 // restricted to http(s) schemes to block javascript: URL injection.
 
 // ==========================================
@@ -327,8 +327,6 @@ async function renderQuestions() {
             ? SECTION_DISPLAY_NAMES[q.section]
             : q.section;
 
-        const aiUrl = safeHttpUrl(q.AIExplanation);
-
         return `
         <div class="question-card">
             <div class="question-header">
@@ -342,11 +340,7 @@ async function renderQuestions() {
                     ${renderOriginalBadge(q.originalAnswerImageEng, '英答案')}
                     ${renderOriginalBadge(q.originalReportImage, '報告')}
                     ${renderOriginalBadge(q.originalReportImageEng, '英報告')}
-                    ${aiUrl ? `
-                        <a href="${escapeHTML(aiUrl)}" target="_blank" rel="noopener noreferrer" class="ai-btn" title="AI 詳解" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background-color: #e3f2fd; border: 1px solid #90caf9; margin-left: 8px; font-size: 1.2em; transition: all 0.2s; cursor: pointer;">
-                            🤖
-                        </a>
-                    ` : ''} 
+                    <button type="button" class="ai-explain-btn" data-action="ai-explain" data-id="${escapeHTML(q.id)}" title="AI解釋" aria-label="AI解釋">🤖</button>
                 </div>
                 <div class="question-badges">
                     ${q.reviewedByAI === 'Y' ? `<span class="badge" title="上次覆核 ${escapeHTML(q.lastReviewDate || '')}">AI已覆核</span>` : `<span class="badge" title="尚未人工覆核">未覆核</span>`}
@@ -462,6 +456,7 @@ async function renderQuestions() {
             </div>
             
             <div class="question-card-actions${isAdminMode ? '' : ' only-ai'}" style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-outline-primary question-ai-explain" data-action="ai-explain" data-id="${escapeHTML(q.id)}" title="AI解釋">AI解釋</button>
                 <button type="button" class="btn btn-outline-primary question-ai-generate" data-action="ai-generate" data-id="${escapeHTML(q.id)}" title="根據這一題的題幹與答案出題">AI出題</button>
                 ${isAdminMode ? `
                     <button class="btn btn-warning" data-action="edit" data-id="${escapeHTML(q.id)}">編輯</button>

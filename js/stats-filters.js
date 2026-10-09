@@ -4,7 +4,7 @@
 // STAT_TABS is the shared dimension registry for 一維瀏覽 + 交叉分析 axes.
 // The active 1D dimension is hidden from the filter bar via hideOn.
 // State is independent of the 題目 tab until jump.
-// AI 詳解 is a filter only — never a grouping dimension.
+// AI解釋 is a filter only — never a grouping dimension.
 //
 // Dependencies: storage-filters.js (applyFilters, filterLogic override),
 // constants.js, utils.js (escapeHTML, debounce), filters.js
@@ -411,7 +411,7 @@ const STAT_FILTER_DEFS = [
     { key: 'percentage', label: '📊 答對率', kind: 'range', range: 'percentage', hideOn: ['percentageBin'] },
     { key: 'marks', label: '💯 分數', kind: 'range', range: 'marks', hideOn: ['marksBin'] },
     { key: 'qnum', label: '#️⃣ 題號', kind: 'range', range: 'qnum', hideOn: ['qnumBin'] },
-    { key: 'ai', label: '🤖 AI 詳解', kind: 'ai', optional: true }
+    { key: 'ai', label: '🤖 AI解釋', kind: 'ai', optional: true, requiresAi: true }
 ];
 
 const STAT_SEARCH_SCOPES = [
@@ -580,12 +580,17 @@ function statsSortOptions(tabId) {
 }
 
 function visibleStatFilters(tabId) {
+    const aiOk = !!(window.accessRights && window.accessRights.ai === true);
+    const allow = def => {
+        if (def.requiresAi && !aiOk) return false;
+        return true;
+    };
     // Crosstab uses two free axes — keep every dimension filter available.
     if (window.statsViewMode === 'crosstab') {
-        return STAT_FILTER_DEFS.slice();
+        return STAT_FILTER_DEFS.filter(allow);
     }
     const dim = resolveStatsDimension(tabId);
-    return STAT_FILTER_DEFS.filter(def => !def.hideOn || !def.hideOn.includes(dim));
+    return STAT_FILTER_DEFS.filter(def => allow(def) && (!def.hideOn || !def.hideOn.includes(dim)));
 }
 
 function triSelectionCount(state, key) {
@@ -664,7 +669,13 @@ function valuesOnQuestion(q, def) {
         return Array.from(set);
     }
     if (def.kind === 'ai') {
-        return (q.AIExplanation && String(q.AIExplanation).trim() !== '') ? ['AI 詳解'] : [];
+        if (typeof aiExplanationFilterValues === 'function') {
+            return aiExplanationFilterValues(q && q.id);
+        }
+        if (window.AiExplanation && typeof AiExplanation.filterValuesForQuestion === 'function') {
+            return AiExplanation.filterValuesForQuestion(q && q.id);
+        }
+        return [];
     }
     if (def.kind === 'year') {
         const key = typeof normalizeYearFilterKey === 'function'
@@ -712,7 +723,12 @@ function staticFilterUniverse(def, counts) {
     else if (def.kind === 'feature' && typeof effectiveFeatureItems === 'function') base = effectiveFeatureItems();
     else if (def.kind === 'feature' && typeof FEATURE_ITEMS !== 'undefined') base = FEATURE_ITEMS.slice();
     else if (def.kind === 'partPerformance' && typeof PART_PERFORMANCE_ITEMS !== 'undefined') base = PART_PERFORMANCE_ITEMS.slice();
-    else if (def.kind === 'ai') base = ['AI 詳解'];
+    else if (def.kind === 'ai') {
+        const labelHas = (window.AiExplanation && AiExplanation.LABEL_HAS) || '有AI解釋';
+        const labelShort = (window.AiExplanation && AiExplanation.LABEL_SHORT) || '簡短';
+        const labelDetailed = (window.AiExplanation && AiExplanation.LABEL_DETAILED) || '詳盡';
+        base = [labelHas, labelShort, labelDetailed];
+    }
     else base = Object.keys(counts);
 
     Object.keys(counts).forEach(value => {
@@ -767,7 +783,12 @@ function sortFilterValues(def, values, state) {
 }
 
 function datasetHasFilter(def, questions) {
+    if (def.requiresAi && !(window.accessRights && window.accessRights.ai === true)) {
+        return false;
+    }
     if (!def.optional) return true;
+    // AI解釋: always offer 有／無／簡短／詳盡 when the user has ai access.
+    if (def.kind === 'ai') return true;
     return Object.keys(countFilterValues(questions, def)).length > 0;
 }
 

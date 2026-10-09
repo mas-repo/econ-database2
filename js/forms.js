@@ -149,10 +149,6 @@ function setupFormHandler() {
         const graphType = document.getElementById('graph-type').value.trim() || '-';
         const tableType = document.getElementById('table-type').value.trim() || '-';
 
-        // Safely get AI Explanation value if the input exists in the DOM
-        const aiExplanationInput = document.getElementById('ai-explanation');
-        const aiExplanationValue = aiExplanationInput ? aiExplanationInput.value.trim() : '';
-
         const question = {
             id: window.editingId || document.getElementById('question-id').value.trim(),
             publisher: document.getElementById('publisher').value.trim(),
@@ -183,7 +179,9 @@ function setupFormHandler() {
             patterns: document.getElementById('patterns').value.split(',').map(s => s.trim()).filter(s => s),
             stemPatterns: document.getElementById('stemPatterns').value.split(',').map(s => s.trim()).filter(s => s),
             optionDesign: document.getElementById('option-design').value.trim(),
-            AIExplanation: aiExplanationValue,
+            // Legacy AIExplanation URL field is unused; AI解釋 lives in
+            // shared/data/ai-explanations.json. Keep empty for bank compatibility.
+            AIExplanation: '',
             remarks: document.getElementById('remarks').value.trim(),
             questionParts: readQuestionPartsFromForm(),
             dateAdded: window.editingId ? null : new Date().toISOString(),
@@ -299,11 +297,6 @@ async function editQuestion(id) {
     document.getElementById('patterns').value = (question.patterns || []).join(', ');
     document.getElementById('stemPatterns').value = (question.stemPatterns || []).join(', ');
     document.getElementById('option-design').value = question.optionDesign || '';
-    // Safely populate AI Explanation if input exists
-    const aiExplanationInput = document.getElementById('ai-explanation');
-    if (aiExplanationInput) {
-        aiExplanationInput.value = question.AIExplanation || '';
-    }
     document.getElementById('remarks').value = question.remarks || '';
     renderQuestionPartRows(question.questionParts || []);
     

@@ -453,16 +453,16 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
             }
         }
 
-        // AI Explanation Filter
+        // AI解釋 filter (side-file index; legacy AIExplanation URL ignored)
         if (filters.triState.ai) {
-            const checked = Object.keys(filters.triState.ai).filter(k => filters.triState.ai[k] === 'checked');
-            const excluded = Object.keys(filters.triState.ai).filter(k => filters.triState.ai[k] === 'excluded');
-
-            if (checked.length > 0 && checked.includes('AI 詳解')) {
-                questions = questions.filter(q => q.AIExplanation && q.AIExplanation.trim() !== '');
-            }
-            if (excluded.length > 0 && excluded.includes('AI 詳解')) {
-                questions = questions.filter(q => !q.AIExplanation || q.AIExplanation.trim() === '');
+            const aiMap = filters.triState.ai;
+            const hasSelection = Object.keys(aiMap).some(k => aiMap[k] === 'checked' || aiMap[k] === 'excluded');
+            if (hasSelection) {
+                if (typeof questionMatchesAiFilter === 'function') {
+                    questions = questions.filter(q => questionMatchesAiFilter(q, aiMap));
+                } else if (window.AiExplanation && typeof AiExplanation.questionMatchesAiFilter === 'function') {
+                    questions = questions.filter(q => AiExplanation.questionMatchesAiFilter(q, aiMap));
+                }
             }
         }
 
