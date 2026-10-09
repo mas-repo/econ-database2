@@ -1348,6 +1348,51 @@ function writeIssueReportsStore_(cfg, store, message) {
   return { sha: written.sha, path: path, store: store };
 }
 
+// Lock + slot + read/mutate/write — same control flow as mutateAiExplanationsStore_.
+function mutateIssueReportsStore_(username, message, mutator) {
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(25000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var loaded = readIssueReportsStore_(cfg);
+    var result = mutator(loaded.store);
+    if (!result || result.ok === false) {
+      lock.releaseLock();
+      held = false;
+      releaseGitSlot_(username);
+      return result && result.error ? gitClientError_(result.error) : gitClientError_('bad_request');
+    }
+    var written = writeIssueReportsStore_(cfg, loaded.store, message);
+    lock.releaseLock();
+    held = false;
+    return {
+      ok: true,
+      sha: written.sha,
+      path: written.path,
+      report: result.report || null,
+      reports: result.reports || null
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    if (code === 'github_not_found') return gitClientError_('github_not_found');
+    return gitClientError_('github_error');
+  }
+}
+
 function publicIssueReportView_(row) {
   if (!row) return null;
   var tags = normalizeIssueTags_(row.tags);
@@ -1384,49 +1429,28 @@ function handleReportIssue_(body) {
     createdAt: new Date().toISOString()
   };
 
-  var cfg = githubConfig_();
-  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
-  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
-  var lock = LockService.getScriptLock();
-  var held = false;
-  try {
-    if (!lock.tryLock(25000)) {
-      releaseGitSlot_(username);
-      return gitClientError_('rate_limited');
-    }
-    held = true;
-    var loaded = readIssueReportsStore_(cfg);
-    var list = Array.isArray(loaded.store.reports) ? loaded.store.reports : [];
+  var saved = mutateIssueReportsStore_(username, 'Add issue report for ' + questionId, function (store) {
+    var list = Array.isArray(store.reports) ? store.reports : [];
     list.unshift(record);
     if (list.length > ISSUE_REPORTS_MAX_ITEMS_) list = list.slice(0, ISSUE_REPORTS_MAX_ITEMS_);
-    loaded.store.reports = list;
-    var written = writeIssueReportsStore_(cfg, loaded.store, 'Add issue report for ' + questionId);
-    lock.releaseLock();
-    held = false;
-    writeLog_({
-      username: username,
-      action: 'reportIssue',
-      success: true,
-      metadata: { questionId: questionId, tags: tags.join(',') }
-    }, true);
-    return {
-      ok: true,
-      report: publicIssueReportView_(record),
-      sha: written.sha,
-      path: written.path
-    };
-  } catch (err) {
-    if (held) {
-      try { lock.releaseLock(); } catch (ignore) {}
-      held = false;
-    }
-    safeLog_(err);
-    releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    store.reports = list;
+    return { ok: true, report: publicIssueReportView_(record) };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
   }
+  writeLog_({
+    username: username,
+    action: 'reportIssue',
+    success: true,
+    metadata: { questionId: questionId, tags: tags.join(',') }
+  }, true);
+  return {
+    ok: true,
+    report: saved.report,
+    sha: saved.sha,
+    path: saved.path
+  };
 }
 
 function handleListIssueReports_(body) {
@@ -1450,6 +1474,10 @@ function handleListIssueReports_(body) {
     return gitClientError_(err && err.code ? err.code : 'github_error');
   }
 }
+
+// === Model test / stem pattern review ===
+// handleTest_ and stem review sit after side-file writers for historical layout.
+// Stem review reuses requestCompletion_ but never writes Git AI backups.
 
 // Short model ping (expects 正常). Does not count toward POE_DAILY_LIMIT.
 function handleTest_(body) {

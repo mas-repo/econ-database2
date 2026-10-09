@@ -7,8 +7,8 @@
 // its own GitHub sync.
 //
 // 字串 (field id text) searches 題目 + 答案 + 評卷報告 text groups.
-// Dependencies: optional FEATURE_ITEMS / CURRICULUM_ITEMS / questionFeatureOn /
-// question-fields.js helpers.
+// Dependencies: question-fields.js (questionFeatureOn, parts helpers) must load
+// first; optional FEATURE_ITEMS / CURRICULUM_ITEMS.
 
 (function (global) {
     'use strict';
@@ -180,55 +180,9 @@
         }).join('\n');
     }
 
+    // questionFeatureOn is defined in question-fields.js (loads before this file).
     function featureIsOn(question, featureName) {
-        if (typeof questionFeatureOn === 'function') {
-            return !!questionFeatureOn(question, featureName);
-        }
-        if (featureName === '含圖表') {
-            return !!(question.graphType && question.graphType !== '' && question.graphType !== '-' && question.graphType !== '沒有圖');
-        }
-        if (featureName === '有內嵌圖') return !!(question.inlineDiagrams && String(question.inlineDiagrams).trim());
-        if (featureName === '含表格') {
-            return !!(question.tableType && question.tableType !== '' && question.tableType !== '-' && question.tableType !== '沒有表格');
-        }
-        if (featureName === '複選') {
-            return !!(question.multipleSelectionType && question.multipleSelectionType !== '' && question.multipleSelectionType !== '-' &&
-                question.multipleSelectionType !== '並非複選型' && question.multipleSelectionType !== '不適用');
-        }
-        if (featureName === '含計算') {
-            return !!(question.calculationType && question.calculationType !== '' && question.calculationType !== '-' && question.calculationType !== '沒有計算');
-        }
-        if (featureName === '跨課題') {
-            return !!(question.curriculumClassification && Array.isArray(question.curriculumClassification) && question.curriculumClassification.length > 1);
-        }
-        if (featureName === '跨章節') {
-            return !!(question.AristochapterClassification && Array.isArray(question.AristochapterClassification) && question.AristochapterClassification.length > 1);
-        }
-        if (featureName === '有分題') {
-            return typeof questionHasParts === 'function' ? questionHasParts(question) : !!(question.questionParts && question.questionParts.length);
-        }
-        if (featureName === '沒有分題') {
-            return typeof questionPartsConfirmedNone === 'function'
-                ? questionPartsConfirmedNone(question)
-                : (question && question.partsStatus === 'none' && !(question.questionParts && question.questionParts.length));
-        }
-        if (featureName === '尚未輸入分題') {
-            return typeof questionPartsPending === 'function'
-                ? questionPartsPending(question)
-                : (!(question && question.questionParts && question.questionParts.length) && question && question.partsStatus !== 'none');
-        }
-        if (featureName === '題目空白') {
-            return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(question) : false;
-        }
-        if (featureName === '答案空白') {
-            return typeof isAnswerBlank === 'function' ? isAnswerBlank(question) : false;
-        }
-        if (featureName === '評卷報告空白') {
-            return typeof isMarkersReportBlank === 'function' ? isMarkersReportBlank(question) : false;
-        }
-        if (featureName === '已刪除') return !!(question.answerMC && String(question.answerMC).trim() === '*');
-        if (featureName === 'Out syl') return !!(question.outSyl && String(question.outSyl).trim().toUpperCase() === 'Y');
-        return false;
+        return !!questionFeatureOn(question, featureName);
     }
 
     function questionHasFieldValue(question, fieldId, value) {

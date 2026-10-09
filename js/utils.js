@@ -59,6 +59,25 @@ function escapeAttr(str) {
         .replace(/"/g, '&quot;');
 }
 
+// Shared ISO → zh-HK datetime label (AI解釋 / 回報問題 admin lists).
+function formatDateTimeZhHk(iso) {
+    var text = String(iso == null ? '' : iso).trim();
+    if (!text) return '—';
+    var d = new Date(text);
+    if (isNaN(d.getTime())) return text;
+    try {
+        return d.toLocaleString('zh-HK', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (err) {
+        return text;
+    }
+}
+
 // Populate chapter filter options dynamically
 // Dependencies: constants.js (CHAPTER_RANGE, CHAPTER_DESCRIPTIONS)
 function populateChapterFilter() {

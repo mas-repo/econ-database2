@@ -31,12 +31,11 @@
     };
 
     function esc(text) {
-        if (typeof escapeHTML === 'function') return escapeHTML(text);
-        return String(text == null ? '' : text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+        return (typeof escapeHTML === 'function') ? escapeHTML(text) : String(text == null ? '' : text);
+    }
+
+    function formatWhen(iso) {
+        return (typeof formatDateTimeZhHk === 'function') ? formatDateTimeZhHk(iso) : String(iso || '');
     }
 
     function username() {
@@ -84,21 +83,6 @@
             proxy_not_configured: '未設定代理服務'
         };
         return map[code] || ('操作失敗' + (code ? '（' + code + '）' : ''));
-    }
-
-    function formatWhen(iso) {
-        var text = String(iso || '').trim();
-        if (!text) return '—';
-        var d = new Date(text);
-        if (isNaN(d.getTime())) return text;
-        try {
-            return d.toLocaleString('zh-HK', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit'
-            });
-        } catch (err) {
-            return text;
-        }
     }
 
     function bindEscape() {
