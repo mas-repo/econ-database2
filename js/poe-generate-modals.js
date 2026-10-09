@@ -196,7 +196,7 @@
             + '      </div>'
             + '      <div class="poe-paste" id="poe-paste-wrap" hidden>'
             + '        <label for="poe-paste-input">貼上題目</label>'
-            + '        <textarea id="poe-paste-input" rows="8" maxlength="100000" aria-label="貼上題目" placeholder="可貼上一題或多題。用空行分隔，或以 1. 2. 3. 編號。若有解釋，在題幹後另起一行寫「解釋：」。"></textarea>'
+            + '        <textarea id="poe-paste-input" rows="8" maxlength="100000" aria-label="貼上題目" placeholder="可貼上一題或多題。用空行分隔，或以 1. 2. 3. 編號。請在題幹後另起一行寫「答案：」（與「複製篩選題目」相同）；「解釋：」亦可。"></textarea>'
             + '      </div>'
             + '      <div class="poe-controls">'
             + '        <label class="poe-field">出題模式'

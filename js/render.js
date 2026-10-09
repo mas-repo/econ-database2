@@ -507,7 +507,8 @@ async function copyFilteredQuestions() {
 
     const text = questions.map(q => {
         const question = (q.plainText || q.questionTextChi || '').trim();
-        return `${question}\n${answerTextForCopy(q)}`;
+        // Label answers so AI出題 paste parsing can split stem vs answer.
+        return `${question}\n答案：\n${answerTextForCopy(q)}`;
     }).join('\n\n');
 
     copyToClipboard(text, button);

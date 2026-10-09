@@ -170,9 +170,16 @@
         });
     }
 
+    // Chi-first answer text for AI references — same fields as copyFilteredQuestions
+    // (answerMC + answerChi). Falls back to answerEng only when Chi/MC are empty.
     Poe.explanationText = function explanationText(question) {
+        if (!question || typeof question !== 'object') return '';
         var letter = question.answerMC && question.answerMC !== '-' ? String(question.answerMC).trim() : '';
         var written = question.answerChi && question.answerChi !== '-' ? String(question.answerChi).trim() : '';
+        if (!letter && !written) {
+            var eng = question.answerEng && question.answerEng !== '-' ? String(question.answerEng).trim() : '';
+            if (eng) written = eng;
+        }
         if (letter && written) {
             return written.indexOf(letter) !== -1 ? written : letter + '\n' + written;
         }
@@ -181,7 +188,7 @@
 
     Poe.bankQuestionFrom = function bankQuestionFrom(question) {
         var stem = String(question.plainText || question.questionTextChi || question.questionTextEng || '').trim();
-        var copy = {
+        return {
             id: question.id || '',
             examination: question.examination || '',
             year: question.year == null ? '' : question.year,
@@ -193,25 +200,23 @@
             answerChi: question.answerChi,
             answerEng: question.answerEng
         };
-        if (!Poe.explanationText(copy)) {
-            var eng = copy.answerEng && copy.answerEng !== '-' ? String(copy.answerEng).trim() : '';
-            if (eng) copy.answerChi = eng;
-        }
-        return copy;
     }
 
+    // Pack one bank row for generateQuestions. Always include stem + answer
+    // (field name `explanation` matches Apps Script packReferences_ / buildPrompt_).
     Poe.toReference = function toReference(question) {
-        var concepts = Array.isArray(question.concepts)
-            ? question.concepts.map(function (item) { return String(item || '').trim(); }).filter(Boolean).join('、')
+        var bank = Poe.bankQuestionFrom(question || {});
+        var concepts = Array.isArray(bank.concepts)
+            ? bank.concepts.map(function (item) { return String(item || '').trim(); }).filter(Boolean).join('、')
             : '';
         return {
-            id: question.id || '',
-            examination: question.examination || '',
-            year: question.year == null ? '' : String(question.year),
-            questionType: question.questionType || '',
+            id: bank.id || '',
+            examination: bank.examination || '',
+            year: bank.year == null ? '' : String(bank.year),
+            questionType: bank.questionType || '',
             concepts: concepts,
-            question: String(question.plainText || question.questionTextChi || '').trim(),
-            explanation: Poe.explanationText(question)
+            question: String(bank.plainText || '').trim(),
+            explanation: Poe.explanationText(bank)
         };
     }
 
@@ -293,7 +298,7 @@
     }
 
     Poe.isExplanationOnly = function isExplanationOnly(block) {
-        return /^(?:解釋|答案|explanation)\s*[:：]/i.test(String(block || '').trim());
+        return /^(?:解釋|答案|參考答案|標準答案|explanation|answer)\s*[:：]/i.test(String(block || '').trim());
     }
 
     Poe.splitPasteChunks = function splitPasteChunks(text) {
@@ -331,10 +336,11 @@
         text = text.replace(/^(?:\d{1,3})\s*[.、．)）]\s*/, '');
         text = text.replace(/^[（(]\s*\d{1,3}\s*[）)]\s*/, '');
         text = text.replace(/^【[^】\n]{0,24}】\s*/, '');
-        var labelAt = text.search(/(?:^|\n)\s*(?:解釋|答案|explanation)\s*[:：]/i);
+        // Prefer an explicit 答案／解釋 label (copyFilteredQuestions writes「答案：」).
+        var labelAt = text.search(/(?:^|\n)\s*(?:解釋|答案|參考答案|標準答案|explanation|answer)\s*[:：]/i);
         var explanation = '';
         if (labelAt >= 0) {
-            explanation = text.slice(labelAt).replace(/^(?:\n)?\s*(?:解釋|答案|explanation)\s*[:：]\s*/i, '').trim();
+            explanation = text.slice(labelAt).replace(/^(?:\n)?\s*(?:解釋|答案|參考答案|標準答案|explanation|answer)\s*[:：]\s*/i, '').trim();
             text = text.slice(0, labelAt).trim();
         }
         text = text.replace(/^(?:題目|問題|question)\s*[:：]\s*/i, '').trim();
@@ -378,9 +384,9 @@
     Poe.leadForCount = function leadForCount(count) {
         if (!count) return '沒有符合篩選條件、而且含有題幹的題目。';
         if (count > Poe.CLIENT_SEND_CAP) {
-            return '目前篩選有 ' + count + ' 題含題幹。出題時會依目前排序送出前 ' + Poe.CLIENT_SEND_CAP + ' 題，伺服器可能再減少。';
+            return '目前篩選有 ' + count + ' 題含題幹。出題時會依目前排序送出前 ' + Poe.CLIENT_SEND_CAP + ' 題的題幹與答案，伺服器可能再減少。';
         }
-        return '目前篩選有 ' + count + ' 題含題幹，會全部送出作為參考。';
+        return '目前篩選有 ' + count + ' 題含題幹，會全部送出題幹與答案作為參考。';
     }
 
     Poe.leadForPaste = function leadForPaste(count) {

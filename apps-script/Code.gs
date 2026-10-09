@@ -710,7 +710,9 @@ function buildPrompt_(questions, filteredCount, truncated, instruction, source) 
     lines.push('（篩選結果共有 ' + filteredCount + ' 題，以下只附上 ' + questions.length + ' 題作為風格、用字與句式的參考。）');
     lines.push('');
   }
-  lines.push(single ? '以下只附上使用者指定的一題，包含題幹與答案（解釋）。請只根據這一題撰寫全新題目，不要假設還有其他篩選題，也不要逐句抄寫。' : '以下為參考題目。請撰寫全新題目，不要逐句抄寫參考題。');
+  lines.push(single
+    ? '以下只附上使用者指定的一題，包含題幹與答案。請只根據這一題撰寫全新題目，不要假設還有其他篩選題，也不要逐句抄寫。'
+    : '以下為參考題目（每題含題幹與答案）。請撰寫全新題目，不要逐句抄寫參考題。');
   lines.push('');
   questions.forEach(function (q, index) {
     lines.push('【參考 ' + (index + 1) + '】');
@@ -721,8 +723,8 @@ function buildPrompt_(questions, filteredCount, truncated, instruction, source) 
     if (q.concepts) lines.push('概念：' + q.concepts);
     lines.push('題目：');
     lines.push(q.question);
-    lines.push('解釋：');
-    lines.push(q.explanation || '（沒有解釋）');
+    lines.push('答案：');
+    lines.push(q.explanation || '（沒有答案）');
     lines.push('');
   });
   return lines.join('\n');
@@ -800,6 +802,10 @@ function messageText_(message) {
   return '';
 }
 
+// Pack client reference rows for the model prompt.
+// Each item should include stem (`question`) and answer (`explanation`, or
+// alias `answer`). Missing answer is kept as empty and rendered as a clear
+// placeholder — never strip unknown fields to "help" an old client.
 function packReferences_(raw, maxCount, maxChars) {
   var questions = [];
   var used = 0;
@@ -814,6 +820,10 @@ function packReferences_(raw, maxCount, maxChars) {
       truncated = true;
       break;
     }
+    var answerText = item.explanation;
+    if (answerText == null || String(answerText).trim() === '') {
+      answerText = item.answer;
+    }
     var entry = {
       id: clip_(item.id, 80),
       examination: clip_(item.examination, 40),
@@ -821,7 +831,7 @@ function packReferences_(raw, maxCount, maxChars) {
       questionType: clip_(item.questionType, 40),
       concepts: clip_(item.concepts, 300),
       question: question,
-      explanation: clip_(item.explanation, 6000)
+      explanation: clip_(answerText, 6000)
     };
     var weight = entry.question.length + entry.explanation.length;
     if (questions.length > 0 && used + weight > maxChars) {
@@ -1306,12 +1316,20 @@ function selfTestRoleRights() {
 
 function selfTestPromptShape() {
   var sample = packReferences_([
-    { id: 'SAMPLE-1', question: '測試題幹', explanation: '測試解釋', questionType: 'MC', concepts: '機會成本' }
+    { id: 'SAMPLE-1', question: '測試題幹', explanation: '測試答案A', questionType: 'MC', concepts: '機會成本' }
   ], 5, 80000);
   var built = buildPrompt_(sample.questions, 1, false, sanitizeInstruction_(''));
   selfTestGitPaths();
   if (built.indexOf(POE_INSTRUCTION_) !== 0) throw new Error('instruction_mismatch');
   if (built.indexOf('測試題幹') === -1) throw new Error('missing_reference');
+  if (built.indexOf('答案：') === -1 || built.indexOf('測試答案A') === -1) throw new Error('missing_reference_answer');
+  if (built.indexOf('每題含題幹與答案') === -1) throw new Error('filter_prompt_frame');
+  var aliasPacked = packReferences_([
+    { id: 'SAMPLE-2', question: '別名題幹', answer: '別名答案' }
+  ], 5, 80000);
+  if (!aliasPacked.questions.length || aliasPacked.questions[0].explanation !== '別名答案') {
+    throw new Error('pack_answer_alias');
+  }
   var custom = '請只出一題選擇題。';
   var customBuilt = buildPrompt_(sample.questions, 1, false, sanitizeInstruction_(custom));
   if (customBuilt.indexOf(custom) !== 0) throw new Error('custom_instruction_unused');
@@ -1335,8 +1353,9 @@ function selfTestPromptShape() {
   if (referenceSource_(null) !== 'filter') throw new Error('source_empty');
   if (referenceSource_('single') !== 'single') throw new Error('source_single');
   var singleBuilt = buildPrompt_(sample.questions, 1, false, sanitizeInstruction_(''), 'single');
-  if (singleBuilt.indexOf('測試題幹') === -1 || singleBuilt.indexOf('測試解釋') === -1) throw new Error('single_missing_qa');
+  if (singleBuilt.indexOf('測試題幹') === -1 || singleBuilt.indexOf('測試答案A') === -1) throw new Error('single_missing_qa');
   if (singleBuilt.indexOf('只附上使用者指定的一題') === -1) throw new Error('single_prompt_frame');
+  if (singleBuilt.indexOf('答案：') === -1) throw new Error('single_answer_label');
   if (resolveModel_('GPT-6.1-Sol', 'poe') !== 'GPT-6.1-Sol') throw new Error('model_allow');
   if (resolveModel_('  Gemini-3.8-Flash ', 'poe') !== 'Gemini-3.8-Flash') throw new Error('model_trim');
   if (resolveModel_('Claude-Sonnet-4.6', 'poe') !== 'Claude-Sonnet-4.6') throw new Error('model_custom_allow');
