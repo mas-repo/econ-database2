@@ -1,7 +1,8 @@
 // AI解釋 — per-question explanations (generate / list / vote / feedback).
-// Access: accessRights.ai (same gate as AI出題 / body.poe-ai-allowed).
-// Admin feedback browser: accessRights.admin.
-// Persistence: shared/data/ai-explanations.json via Apps Script + direct read.
+// Gate: accessRights.ai (same as AI出題; CSS class body.poe-ai-allowed).
+// Persist: shared/data/ai-explanations.json via Apps Script + direct read.
+// Admin Feedback UI is normally delegated to the 回饋／回報 hub
+// (ReportIssue.setAdminUiDelegated); standalone admin overlay is fallback only.
 // Depends: PoeGenerate (proxyRequest, withProviderAndApiKey, settings),
 // shared-assets (fetchSharedJsonDirectOrProxy), access-rights, render.
 

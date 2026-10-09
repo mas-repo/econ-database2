@@ -1,5 +1,6 @@
 // template-modals.js
-// Generates the Feedback modal and the shared Filter modal.
+// Shared filter modal markup only (filter-modal.js). AI解釋 Feedback /
+// 回報問題 hub markup is built in report-issue.js (not here).
 // Dependencies: None (pure HTML string generator)
 
 function renderModalsTemplate() {

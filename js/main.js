@@ -428,6 +428,9 @@ if (document.readyState === 'loading') {
 }
 
 // === Hotkey Listener ===
+// Esc: Poe modal, then stats/filter overlays, else clearFilters.
+// AI解釋 / 回報問題 / data-checks / bulk-edit bind Escape privately — this
+// listener does not close them.
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         if (typeof isPoeGenerateModalOpen === 'function' && isPoeGenerateModalOpen()) {

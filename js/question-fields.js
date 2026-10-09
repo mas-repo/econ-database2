@@ -1,6 +1,7 @@
 // question-fields.js
-// Shared blank-field checks, year normalize, and questionParts helpers for
-// filters, form, bulk edit, import/sync, and advanced condition matching.
+// Shared blank-field checks, year normalize, questionParts / partsStatus helpers,
+// and questionFeatureOn (題目／統計／ConditionMatch 特徵 matcher).
+// Must load before condition-match.js (see index.html load-order comment).
 //
 // Blank: null/undefined, whitespace-only, or '-' count as blank.
 // 題目 = questionTextChi + questionTextEng + plainText (all blank → 題目空白)

@@ -4,9 +4,10 @@
 // browser then fetches large files from api.github.com directly so bodies do
 // not travel through the Apps Script googleusercontent echo path.
 //
-// The write token (GITHUB_TOKEN) never reaches the browser. AI出題 and admin
-// uploads stay on Apps Script. If token issuance fails, fetchSharedAsset /
-// listSharedData remain as fallbacks.
+// The write token (GITHUB_TOKEN) never reaches the browser. Mutations (bank
+// upload, AI解釋, 回報問題, data-checks) stay on Apps Script; this module is
+// read-path only. If token issuance fails, fetchSharedAsset / listSharedData
+// remain as fallbacks.
 //
 // Path rules match githubSharedRelOk_ in apps-script/Code.gs.
 

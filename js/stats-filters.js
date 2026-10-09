@@ -608,7 +608,7 @@ function triSelectionCount(state, key) {
     }).length;
 }
 
-// questionFeatureOn: defined in question-fields.js (loads before condition-match).
+// Uses global questionFeatureOn from question-fields.js — do not redefine here.
 
 function valuesOnQuestion(q, def) {
     if (def.kind === 'concepts') return (Array.isArray(q.concepts) ? q.concepts : []).map(v => String(v).trim()).filter(Boolean);

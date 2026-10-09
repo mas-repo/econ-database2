@@ -1,4 +1,5 @@
-/* AI解釋 modal + admin feedback browser */
+/* AI解釋 modal + per-question controls. Standalone admin Feedback overlay
+   styles remain for fallback; primary admin UI is the report-issue.css hub. */
 .ai-explain-btn {
     display: inline-flex;
     align-items: center;

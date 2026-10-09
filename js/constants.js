@@ -5,18 +5,19 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.09.17';
+const APP_VERSION = '2026.10.09.18';
 console.log('Question bank version:', APP_VERSION);
 
-// Integer stamped on shared bank JSON as schemaVersion. Bump only when the
-// data shape changes so an older writer would drop fields. Missing field on
-// cloud/file payloads is treated as 0 (see js/schema-version.js).
+// Integer stamped on shared bank JSON as schemaVersion. Also an app-capability
+// gate: bump when an older client must not overwrite a newer stamped bank
+// (including after side-file-only features). Missing → 0 (see schema-version.js).
 // Must stay aligned with Apps Script readBankSchemaVersion_ / upload gate.
+// v2/v4 = bank fields; v3/v5 = side-file contracts used as deploy gates.
 // v2: questionParts [{ label, marks, performance }] for SQ/LQ sub-parts.
-// v3: AI解釋 side-file contract (shared/data/ai-explanations.json); legacy
-//     question.AIExplanation URL is ignored by the UI (empty/missing is fine).
-// v4: partsStatus pending|none|filled — distinguish 尚未輸入 vs 沒有分題 vs 有分題.
-// v5: 回報問題 side-file contract (shared/data/issue-reports.json).
+// v3: AI解釋 side-file (shared/data/ai-explanations.json); legacy AIExplanation URL ignored.
+// v4: partsStatus pending|none|filled — 尚未輸入 vs 沒有分題 vs 有分題.
+// v5: 回報問題 side-file (shared/data/issue-reports.json).
+// data-checks.json is intentionally not reflected here.
 const SCHEMA_VERSION = 5;
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)

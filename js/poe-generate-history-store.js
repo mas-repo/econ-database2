@@ -147,6 +147,8 @@
         return isFinite(parsed) ? parsed : 0;
     }
 
+    // Remote list pages are generateQuestions-only. continueGeneration is
+    // accepted here defensively; Git files labeled "reply" (追問) are not listed.
     Poe.mapRemoteBackup = function mapRemoteBackup(backup, username) {
         if (!backup || typeof backup !== 'object') return null;
         var action = String(backup.action || '');

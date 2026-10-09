@@ -8,10 +8,10 @@
 // API key / model / provider live in a separate settings modal (API／模型設定).
 // Requests send `provider`, `model`, `instruction`, `modeId`, and the matching key.
 //
-// The implementation is split across js/poe-generate-*.js. The files share
-// PoeGenerate and run in the order listed in index.html. Mode prompts live in
-// POE_GENERATION_MODES in poe-generate-state.js. style-continue must stay
-// identical to POE_INSTRUCTION_ in apps-script/Code.gs.
+// The implementation is split across js/poe-generate-*.js (order in index.html).
+// This file: modes, errors, FOLLOWUP_CHIPS. Multi-turn 追問 (continueGeneration)
+// runs in poe-generate-run.js. style-continue must stay identical to
+// POE_INSTRUCTION_ in apps-script/Code.gs.
 
 var PoeGenerate = {};
 (function (Poe) {
