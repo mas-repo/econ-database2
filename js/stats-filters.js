@@ -1,106 +1,325 @@
 // stats-filters.js
 // Filters for the unified 「統計」tab (一維瀏覽 + 交叉分析).
 //
-// Dimensions (概念 / 課程分類 / 章節 / 題型 / 題幹模式 / 出版商) share one
-// filter bar and one filter state. The active dimension is hidden from the
-// filter bar via hideOn. State is independent of the 題目 tab until jump.
+// STAT_TABS is the shared dimension registry for 一維瀏覽 + 交叉分析 axes.
+// The active 1D dimension is hidden from the filter bar via hideOn.
+// State is independent of the 題目 tab until jump.
+// AI 詳解 is a filter only — never a grouping dimension.
 //
 // Dependencies: storage-filters.js (applyFilters, filterLogic override),
 // constants.js, utils.js (escapeHTML, debounce), filters.js
-// (filterQuestions, closeAllDropdowns, yearFilterLabel, paperFilterLabel)
+// (filterQuestions, closeAllDropdowns, yearFilterLabel, paperFilterLabel),
+// question-list-filter.js (idSetFilter helpers for bin/derived jumps)
 
 const STATS_SHARED_MOUNT = 'stats-filters';
 const STATS_SHARED_GRID = 'stats-grid';
 const STATS_SHARED_PAGER = 'stats-pager';
 const STATS_STATE_KEY = 'stats';
 
+const QNUM_MIN_STATS = (typeof QUESTION_NUMBER_RANGE !== 'undefined') ? QUESTION_NUMBER_RANGE.min : 1;
+const QNUM_MAX_STATS = (typeof QUESTION_NUMBER_RANGE !== 'undefined') ? QUESTION_NUMBER_RANGE.max : 60;
+
+// Documented bin edges (half-open where noted; jump uses integer-safe ranges).
+// 答對率: [0,20), [20,40), [40,60), [60,80), [80,100]
+// 分數:   [0,2], (2,5], (5,10], (10,15], (15,∞) → labels 0–2 … 16+
+// 題號:   [1,10], [11,20], [21,30], [31,40], [41,50], [51,60] (+ 無題號)
+const STAT_PERCENTAGE_BINS = [
+    { label: '0–20%', min: 0, max: 19, test: n => n >= 0 && n < 20 },
+    { label: '20–40%', min: 20, max: 39, test: n => n >= 20 && n < 40 },
+    { label: '40–60%', min: 40, max: 59, test: n => n >= 40 && n < 60 },
+    { label: '60–80%', min: 60, max: 79, test: n => n >= 60 && n < 80 },
+    { label: '80–100%', min: 80, max: 100, test: n => n >= 80 && n <= 100 }
+];
+const STAT_PERCENTAGE_BIN_NONE = '（無答對率）';
+const STAT_MARKS_BINS = [
+    { label: '0–2', min: 0, max: 2, test: n => n <= 2 },
+    { label: '3–5', min: 3, max: 5, test: n => n > 2 && n <= 5 },
+    { label: '6–10', min: 6, max: 10, test: n => n > 5 && n <= 10 },
+    { label: '11–15', min: 11, max: 15, test: n => n > 10 && n <= 15 },
+    { label: '16+', min: 16, max: 30, test: n => n > 15 }
+];
+const STAT_MARKS_BIN_NONE = '（無分數）';
+const STAT_QNUM_BINS = [
+    { label: '1–10', min: 1, max: 10, test: n => n >= 1 && n <= 10 },
+    { label: '11–20', min: 11, max: 20, test: n => n >= 11 && n <= 20 },
+    { label: '21–30', min: 21, max: 30, test: n => n >= 21 && n <= 30 },
+    { label: '31–40', min: 31, max: 40, test: n => n >= 31 && n <= 40 },
+    { label: '41–50', min: 41, max: 50, test: n => n >= 41 && n <= 50 },
+    { label: '51–60', min: 51, max: 60, test: n => n >= 51 && n <= 60 }
+];
+const STAT_QNUM_BIN_NONE = '（無題號）';
+const STAT_YEAR_KIND_CALENDAR = '日曆年';
+const STAT_YEAR_KIND_MOCK = 'Mock (MT)';
+const STAT_YEAR_KIND_OTHER = '其他';
+const STAT_HAS_PARTS_YES = '有分題';
+const STAT_HAS_PARTS_NO = '無分題';
+
+function statsQuestionNumber(q) {
+    let num = NaN;
+    if (q && q.id) {
+        const idMatch = String(q.id).match(/(\d+)\s*$/);
+        if (idMatch) num = parseInt(idMatch[1], 10);
+    }
+    if (isNaN(num) && q && q.questionNumber !== undefined && q.questionNumber !== null && q.questionNumber !== '') {
+        const qnMatch = String(q.questionNumber).match(/^(\d+)/);
+        if (qnMatch) num = parseInt(qnMatch[1], 10);
+    }
+    return num;
+}
+
+function statsPercentageBin(value) {
+    if (value == null || value === '' || isNaN(Number(value))) return STAT_PERCENTAGE_BIN_NONE;
+    const n = Number(value);
+    for (let i = 0; i < STAT_PERCENTAGE_BINS.length; i++) {
+        if (STAT_PERCENTAGE_BINS[i].test(n)) return STAT_PERCENTAGE_BINS[i].label;
+    }
+    return STAT_PERCENTAGE_BIN_NONE;
+}
+
+function statsMarksBin(value) {
+    if (value == null || value === '' || isNaN(Number(value))) return STAT_MARKS_BIN_NONE;
+    const n = Number(value);
+    for (let i = 0; i < STAT_MARKS_BINS.length; i++) {
+        if (STAT_MARKS_BINS[i].test(n)) return STAT_MARKS_BINS[i].label;
+    }
+    return STAT_MARKS_BIN_NONE;
+}
+
+function statsQnumBin(q) {
+    const n = statsQuestionNumber(q);
+    if (isNaN(n)) return STAT_QNUM_BIN_NONE;
+    for (let i = 0; i < STAT_QNUM_BINS.length; i++) {
+        if (STAT_QNUM_BINS[i].test(n)) return STAT_QNUM_BINS[i].label;
+    }
+    if (n < 1) return STAT_QNUM_BINS[0].label;
+    return STAT_QNUM_BINS[STAT_QNUM_BINS.length - 1].label;
+}
+
+function statsYearKind(year) {
+    const key = typeof normalizeYearFilterKey === 'function'
+        ? normalizeYearFilterKey(year)
+        : String(year == null ? '' : year).trim();
+    if (!key) return '';
+    if (/^\d{4}$/.test(key)) return STAT_YEAR_KIND_CALENDAR;
+    if (/^\d{1,3}$/.test(key)) return STAT_YEAR_KIND_MOCK;
+    return STAT_YEAR_KIND_OTHER;
+}
+
+function statsScalarField(q, field) {
+    if (!q || q[field] === undefined || q[field] === null) return [];
+    const text = String(q[field]).trim();
+    if (!text || text === '-') return [];
+    return [text];
+}
+
+function makeStatDim(id, label, opts) {
+    opts = opts || {};
+    return {
+        id: id,
+        label: label,
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
+        groupKey: opts.groupKey || null,
+        jumpKind: opts.jumpKind || (opts.groupKey ? 'tri' : 'idSet'),
+        rangeKey: opts.rangeKey || null,
+        empty: opts.empty || ('暫無' + label + '資料'),
+        filteredEmpty: opts.filteredEmpty || ('沒有符合篩選的' + label),
+        defaultSort: opts.defaultSort || 'count-desc',
+        defaultPageSize: opts.defaultPageSize != null ? opts.defaultPageSize : -1,
+        optional: !!opts.optional,
+        binOrder: opts.binOrder || null,
+        valuesOf: opts.valuesOf,
+        rangeForBin: opts.rangeForBin || null
+    };
+}
+
 const STAT_TABS = {
-    concepts: {
-        label: '概念',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+    concepts: makeStatDim('concepts', '概念', {
         groupKey: 'concepts',
-        empty: '暫無概念資料',
-        filteredEmpty: '沒有符合篩選的概念',
-        defaultSort: 'count-desc',
         defaultPageSize: 48,
-        valuesOf(q) {
-            return Array.isArray(q.concepts) ? q.concepts : [];
-        }
-    },
-    topics: {
-        label: '課程分類',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+        valuesOf(q) { return Array.isArray(q.concepts) ? q.concepts : []; }
+    }),
+    topics: makeStatDim('topics', '課程分類', {
         groupKey: 'curriculum',
-        empty: '暫無課程分類資料',
-        filteredEmpty: '沒有符合篩選的課程分類',
         defaultSort: 'curriculum',
-        defaultPageSize: -1,
-        valuesOf(q) {
-            return Array.isArray(q.curriculumClassification) ? q.curriculumClassification : [];
-        }
-    },
-    chapters: {
-        label: '章節',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+        valuesOf(q) { return Array.isArray(q.curriculumClassification) ? q.curriculumClassification : []; }
+    }),
+    chapters: makeStatDim('chapters', '章節', {
         groupKey: 'chapter',
-        empty: '暫無章節資料',
-        filteredEmpty: '沒有符合篩選的章節',
         defaultSort: 'number',
-        defaultPageSize: -1,
-        valuesOf(q) {
-            return Array.isArray(q.AristochapterClassification) ? q.AristochapterClassification : [];
-        }
-    },
-    patterns: {
-        label: '題型',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+        valuesOf(q) { return Array.isArray(q.AristochapterClassification) ? q.AristochapterClassification : []; }
+    }),
+    patterns: makeStatDim('patterns', '題型', {
         groupKey: 'patterns',
-        empty: '暫無題型資料',
-        filteredEmpty: '沒有符合篩選的題型',
-        defaultSort: 'count-desc',
-        defaultPageSize: -1,
-        valuesOf(q) {
-            return Array.isArray(q.patterns) ? q.patterns : [];
-        }
-    },
-    stemPatterns: {
-        label: '題幹模式',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+        valuesOf(q) { return Array.isArray(q.patterns) ? q.patterns : []; }
+    }),
+    stemPatterns: makeStatDim('stemPatterns', '題幹模式', {
         groupKey: 'stemPatterns',
-        empty: '暫無題幹模式資料',
-        filteredEmpty: '沒有符合篩選的題幹模式',
-        defaultSort: 'count-desc',
         defaultPageSize: 24,
+        valuesOf(q) { return Array.isArray(q.stemPatterns) ? q.stemPatterns : []; }
+    }),
+    year: makeStatDim('year', '年份', {
+        groupKey: 'year',
+        defaultSort: 'year-desc',
         valuesOf(q) {
-            return Array.isArray(q.stemPatterns) ? q.stemPatterns : [];
+            const key = typeof normalizeYearFilterKey === 'function'
+                ? normalizeYearFilterKey(q.year)
+                : String(q && q.year != null ? q.year : '').trim();
+            return key ? [key] : [];
         }
-    },
-    publishers: {
-        label: '出版商',
-        mountId: STATS_SHARED_MOUNT,
-        gridId: STATS_SHARED_GRID,
-        pagerId: STATS_SHARED_PAGER,
+    }),
+    exam: makeStatDim('exam', '考試', {
+        groupKey: 'exam',
+        valuesOf(q) { return statsScalarField(q, 'examination'); }
+    }),
+    paper: makeStatDim('paper', '卷別', {
+        groupKey: 'paper',
+        valuesOf(q) { return statsScalarField(q, 'paper'); }
+    }),
+    section: makeStatDim('section', 'Section', {
+        groupKey: 'section',
+        valuesOf(q) {
+            if (!q || q.section === undefined || q.section === null) return [];
+            const text = String(q.section).trim();
+            return text ? [text] : [];
+        }
+    }),
+    qtype: makeStatDim('qtype', '題目類型', {
+        groupKey: 'qtype',
+        valuesOf(q) { return statsScalarField(q, 'questionType'); }
+    }),
+    publishers: makeStatDim('publishers', '出版商', {
         groupKey: 'publisher',
-        empty: '暫無出版商資料',
-        filteredEmpty: '沒有符合篩選的出版商',
-        defaultSort: 'count-desc',
-        defaultPageSize: -1,
         valuesOf(q) {
             const text = String(q && q.publisher != null ? q.publisher : '').trim();
             return [text || 'Unknown'];
         }
-    }
+    }),
+    feature: makeStatDim('feature', '特徵', {
+        groupKey: 'feature',
+        valuesOf(q) {
+            const items = (typeof effectiveFeatureItems === 'function')
+                ? effectiveFeatureItems()
+                : ((typeof FEATURE_ITEMS !== 'undefined') ? FEATURE_ITEMS : []);
+            return items.filter(item => typeof questionFeatureOn === 'function'
+                ? questionFeatureOn(q, item)
+                : false);
+        }
+    }),
+    partPerformance: makeStatDim('partPerformance', '分題表現', {
+        groupKey: 'partPerformance',
+        valuesOf(q) {
+            const parts = (typeof normalizeQuestionParts === 'function')
+                ? normalizeQuestionParts(q.questionParts)
+                : (Array.isArray(q.questionParts) ? q.questionParts : []);
+            const set = new Set();
+            parts.forEach(part => {
+                const perf = part && part.performance ? String(part.performance).trim() : '';
+                if (perf) set.add(perf);
+            });
+            return Array.from(set);
+        }
+    }),
+    graph: makeStatDim('graph', '圖表類型', {
+        groupKey: 'graph',
+        optional: true,
+        valuesOf(q) { return statsScalarField(q, 'graphType'); }
+    }),
+    table: makeStatDim('table', '表格類型', {
+        groupKey: 'table',
+        optional: true,
+        valuesOf(q) { return statsScalarField(q, 'tableType'); }
+    }),
+    calculation: makeStatDim('calculation', '計算類型', {
+        groupKey: 'calculation',
+        optional: true,
+        valuesOf(q) { return statsScalarField(q, 'calculationType'); }
+    }),
+    multipleSelection: makeStatDim('multipleSelection', '複選類型', {
+        groupKey: 'multipleSelection',
+        optional: true,
+        valuesOf(q) { return statsScalarField(q, 'multipleSelectionType'); }
+    }),
+    optionDesign: makeStatDim('optionDesign', '選項設計', {
+        jumpKind: 'idSet',
+        optional: true,
+        valuesOf(q) { return statsScalarField(q, 'optionDesign'); }
+    }),
+    percentageBin: makeStatDim('percentageBin', '答對率區間', {
+        jumpKind: 'range',
+        rangeKey: 'percentage',
+        defaultSort: 'bin',
+        binOrder: STAT_PERCENTAGE_BINS.map(b => b.label).concat([STAT_PERCENTAGE_BIN_NONE]),
+        valuesOf(q) { return [statsPercentageBin(q.correctPercentage)]; },
+        rangeForBin(label) {
+            const bin = STAT_PERCENTAGE_BINS.find(b => b.label === label);
+            return bin ? { min: bin.min, max: bin.max, active: true } : null;
+        }
+    }),
+    marksBin: makeStatDim('marksBin', '分數區間', {
+        jumpKind: 'range',
+        rangeKey: 'marks',
+        defaultSort: 'bin',
+        binOrder: STAT_MARKS_BINS.map(b => b.label).concat([STAT_MARKS_BIN_NONE]),
+        valuesOf(q) { return [statsMarksBin(q.marks)]; },
+        rangeForBin(label) {
+            const bin = STAT_MARKS_BINS.find(b => b.label === label);
+            return bin ? { min: bin.min, max: bin.max, active: true } : null;
+        }
+    }),
+    qnumBin: makeStatDim('qnumBin', '題號區間', {
+        jumpKind: 'range',
+        rangeKey: 'qnum',
+        defaultSort: 'bin',
+        binOrder: STAT_QNUM_BINS.map(b => b.label).concat([STAT_QNUM_BIN_NONE]),
+        valuesOf(q) { return [statsQnumBin(q)]; },
+        rangeForBin(label) {
+            const bin = STAT_QNUM_BINS.find(b => b.label === label);
+            return bin ? { min: bin.min, max: bin.max, active: true } : null;
+        }
+    }),
+    yearKind: makeStatDim('yearKind', '年份種類', {
+        jumpKind: 'yearKind',
+        defaultSort: 'bin',
+        binOrder: [STAT_YEAR_KIND_CALENDAR, STAT_YEAR_KIND_MOCK, STAT_YEAR_KIND_OTHER],
+        valuesOf(q) {
+            const kind = statsYearKind(q.year);
+            return kind ? [kind] : [];
+        }
+    }),
+    hasParts: makeStatDim('hasParts', '有／無分題', {
+        jumpKind: 'hasParts',
+        defaultSort: 'bin',
+        binOrder: [STAT_HAS_PARTS_YES, STAT_HAS_PARTS_NO],
+        valuesOf(q) {
+            const has = typeof questionHasParts === 'function'
+                ? questionHasParts(q)
+                : !!(q && q.questionParts && q.questionParts.length);
+            return [has ? STAT_HAS_PARTS_YES : STAT_HAS_PARTS_NO];
+        }
+    })
 };
+
+// Visual groups for the dimension picker (一維瀏覽) and crosstab axes.
+const STAT_DIMENSION_GROUPS = [
+    {
+        label: '主題標籤',
+        ids: ['concepts', 'topics', 'chapters', 'patterns', 'stemPatterns']
+    },
+    {
+        label: '試卷／表現／特徵',
+        ids: [
+            'year', 'exam', 'paper', 'section', 'qtype', 'publishers',
+            'feature', 'partPerformance',
+            'graph', 'table', 'calculation', 'multipleSelection', 'optionDesign'
+        ]
+    },
+    {
+        label: '區間／衍生',
+        ids: ['percentageBin', 'marksBin', 'qnumBin', 'yearKind', 'hasParts']
+    }
+];
 
 window.statsActiveDimension = window.statsActiveDimension || 'concepts';
 window.statsViewMode = window.statsViewMode || 'browse'; // browse | crosstab
@@ -127,6 +346,48 @@ function resolveStatsDimension(tabId) {
     return getStatsActiveDimension();
 }
 
+function listStatDimensionIds() {
+    const ids = [];
+    STAT_DIMENSION_GROUPS.forEach(group => {
+        group.ids.forEach(id => {
+            if (STAT_TABS[id] && ids.indexOf(id) === -1) ids.push(id);
+        });
+    });
+    Object.keys(STAT_TABS).forEach(id => {
+        if (ids.indexOf(id) === -1) ids.push(id);
+    });
+    return ids;
+}
+
+function datasetHasStatDimension(dimId, questions) {
+    const cfg = STAT_TABS[dimId];
+    if (!cfg) return false;
+    if (!cfg.optional) return true;
+    return (questions || []).some(q => cfg.valuesOf(q).some(v => String(v == null ? '' : v).trim()));
+}
+
+function buildStatDimensionOptionsHtml(selectedId, questions) {
+    const esc = (typeof escapeHTML === 'function')
+        ? escapeHTML
+        : (t => String(t == null ? '' : t)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;'));
+    return STAT_DIMENSION_GROUPS.map(group => {
+        const opts = group.ids.filter(id => {
+            if (!STAT_TABS[id]) return false;
+            if (questions && STAT_TABS[id].optional && !datasetHasStatDimension(id, questions)) return false;
+            return true;
+        }).map(id => {
+            const sel = id === selectedId ? ' selected' : '';
+            return '<option value="' + esc(id) + '"' + sel + '>' + esc(STAT_TABS[id].label) + '</option>';
+        }).join('');
+        if (!opts) return '';
+        return '<optgroup label="' + esc(group.label) + '">' + opts + '</optgroup>';
+    }).join('');
+}
+
 // hideOn: the dimension that is already grouped (hidden from filter bar).
 // optional: hidden when the loaded bank has no values.
 const STAT_FILTER_DEFS = [
@@ -135,21 +396,21 @@ const STAT_FILTER_DEFS = [
     { key: 'chapter', label: '📖 Chapters', kind: 'chapter', logic: true, hideOn: ['chapters'] },
     { key: 'patterns', label: '🎯 題型', kind: 'patterns', hideOn: ['patterns'] },
     { key: 'stemPatterns', label: '🧩 題幹模式', kind: 'stemPatterns', hideOn: ['stemPatterns'] },
-    { key: 'qtype', label: '📝 題目類型', kind: 'qtype' },
-    { key: 'exam', label: '📝 考試', kind: 'exam' },
-    { key: 'year', label: '📅 年份', kind: 'year' },
-    { key: 'paper', label: '📄 卷別', kind: 'paper' },
-    { key: 'section', label: '📝 Section', kind: 'section' },
+    { key: 'qtype', label: '📝 題目類型', kind: 'qtype', hideOn: ['qtype'] },
+    { key: 'exam', label: '📝 考試', kind: 'exam', hideOn: ['exam'] },
+    { key: 'year', label: '📅 年份', kind: 'year', hideOn: ['year', 'yearKind'] },
+    { key: 'paper', label: '📄 卷別', kind: 'paper', hideOn: ['paper'] },
+    { key: 'section', label: '📝 Section', kind: 'section', hideOn: ['section'] },
     { key: 'publisher', label: '🏢 出版商', kind: 'publisher', hideOn: ['publishers'] },
-    { key: 'feature', label: '🎯 特徵', kind: 'feature' },
-    { key: 'partPerformance', label: '📈 分題表現', kind: 'partPerformance' },
-    { key: 'graph', label: '📊 圖表類型', kind: 'scalar', field: 'graphType', optional: true },
-    { key: 'table', label: '📅 表格類型', kind: 'scalar', field: 'tableType', optional: true },
-    { key: 'calculation', label: '🧮 計算類型', kind: 'scalar', field: 'calculationType', optional: true },
-    { key: 'multipleSelection', label: '🔍 複選類型', kind: 'scalar', field: 'multipleSelectionType', optional: true },
-    { key: 'percentage', label: '📊 答對率', kind: 'range', range: 'percentage' },
-    { key: 'marks', label: '💯 分數', kind: 'range', range: 'marks' },
-    { key: 'qnum', label: '#️⃣ 題號', kind: 'range', range: 'qnum' },
+    { key: 'feature', label: '🎯 特徵', kind: 'feature', hideOn: ['feature', 'hasParts'] },
+    { key: 'partPerformance', label: '📈 分題表現', kind: 'partPerformance', hideOn: ['partPerformance'] },
+    { key: 'graph', label: '📊 圖表類型', kind: 'scalar', field: 'graphType', optional: true, hideOn: ['graph'] },
+    { key: 'table', label: '📅 表格類型', kind: 'scalar', field: 'tableType', optional: true, hideOn: ['table'] },
+    { key: 'calculation', label: '🧮 計算類型', kind: 'scalar', field: 'calculationType', optional: true, hideOn: ['calculation'] },
+    { key: 'multipleSelection', label: '🔍 複選類型', kind: 'scalar', field: 'multipleSelectionType', optional: true, hideOn: ['multipleSelection'] },
+    { key: 'percentage', label: '📊 答對率', kind: 'range', range: 'percentage', hideOn: ['percentageBin'] },
+    { key: 'marks', label: '💯 分數', kind: 'range', range: 'marks', hideOn: ['marksBin'] },
+    { key: 'qnum', label: '#️⃣ 題號', kind: 'range', range: 'qnum', hideOn: ['qnumBin'] },
     { key: 'ai', label: '🤖 AI 詳解', kind: 'ai', optional: true }
 ];
 
@@ -169,9 +430,6 @@ const STAT_SECTION_LABELS = {
     'C': '丙部（選修單元）',
     '-': 'NA'
 };
-
-const QNUM_MIN_STATS = (typeof QUESTION_NUMBER_RANGE !== 'undefined') ? QUESTION_NUMBER_RANGE.min : 1;
-const QNUM_MAX_STATS = (typeof QUESTION_NUMBER_RANGE !== 'undefined') ? QUESTION_NUMBER_RANGE.max : 60;
 
 const statsFilterState = {};
 const statsRenderGen = {};
@@ -194,6 +452,7 @@ function emptyStatsTriState() {
         patterns: {},
         stemPatterns: {},
         ai: {},
+        partPerformance: {},
         multipleSelection: {},
         graph: {},
         table: {},
@@ -275,6 +534,30 @@ function statsRowPresentation(tabId, value) {
             filterValue: padded
         };
     }
+    if (tabId === 'year') {
+        const label = (typeof yearFilterLabel === 'function') ? yearFilterLabel(text) : text;
+        return {
+            titleHtml: escapeHTML(label),
+            searchText: `${label} ${text}`,
+            filterValue: text
+        };
+    }
+    if (tabId === 'section') {
+        const label = STAT_SECTION_LABELS[text] || text;
+        return {
+            titleHtml: escapeHTML(label),
+            searchText: `${label} ${text}`,
+            filterValue: text
+        };
+    }
+    if (tabId === 'paper') {
+        const label = (typeof paperFilterLabel === 'function') ? paperFilterLabel(text) : text;
+        return {
+            titleHtml: escapeHTML(label),
+            searchText: `${label} ${text}`,
+            filterValue: text
+        };
+    }
     return {
         titleHtml: escapeHTML(text),
         searchText: text,
@@ -290,6 +573,9 @@ function statsSortOptions(tabId) {
     ];
     if (tabId === 'topics') options.unshift({ value: 'curriculum', label: '課程順序' });
     if (tabId === 'chapters') options.unshift({ value: 'number', label: '章節順序' });
+    if (tabId === 'year') options.unshift({ value: 'year-desc', label: '年份 (新→舊)' });
+    const cfg = STAT_TABS[tabId];
+    if (cfg && cfg.binOrder) options.unshift({ value: 'bin', label: '區間順序' });
     return options;
 }
 
@@ -1179,15 +1465,59 @@ function syncQuestionSearchFromStats(state) {
     window.searchScope = 'all';
 }
 
-function jumpStatsRowToQuestions(tabId, rawValue) {
-    const cfg = STAT_TABS[tabId];
-    if (!cfg) return;
-    const state = getStatsTabState(tabId);
-    const presentation = statsRowPresentation(tabId, rawValue);
-    const tri = JSON.parse(JSON.stringify(state.triState));
-    if (!tri[cfg.groupKey]) tri[cfg.groupKey] = {};
-    tri[cfg.groupKey][presentation.filterValue] = 'checked';
+function applyStatDimJumpToTri(tri, dimId, rawValue) {
+    const cfg = STAT_TABS[dimId];
+    if (!cfg) return { special: null };
+    const value = String(rawValue == null ? '' : rawValue).trim();
+    if (cfg.jumpKind === 'tri' && cfg.groupKey) {
+        const presentation = statsRowPresentation(dimId, value);
+        if (!tri[cfg.groupKey]) tri[cfg.groupKey] = {};
+        tri[cfg.groupKey][presentation.filterValue] = 'checked';
+        return { special: null };
+    }
+    if (cfg.jumpKind === 'hasParts') {
+        if (!tri.feature) tri.feature = {};
+        if (value === STAT_HAS_PARTS_YES) tri.feature['有分題'] = 'checked';
+        else if (value === STAT_HAS_PARTS_NO) tri.feature['有分題'] = 'excluded';
+        return { special: null };
+    }
+    if (cfg.jumpKind === 'range' && typeof cfg.rangeForBin === 'function') {
+        const range = cfg.rangeForBin(value);
+        if (range) return { special: 'range', rangeKey: cfg.rangeKey, range: range };
+        return { special: 'idSet', dimId: dimId, value: value };
+    }
+    if (cfg.jumpKind === 'yearKind') {
+        return { special: 'yearKind', value: value };
+    }
+    return { special: 'idSet', dimId: dimId, value: value };
+}
 
+function collectIdsForStatDimValue(questions, dimId, rawValue) {
+    const cfg = STAT_TABS[dimId];
+    if (!cfg) return [];
+    const needle = String(rawValue == null ? '' : rawValue).trim();
+    const ids = [];
+    (questions || []).forEach(q => {
+        const hit = cfg.valuesOf(q).some(v => String(v == null ? '' : v).trim() === needle);
+        if (!hit || !q || q.id == null) return;
+        ids.push(String(q.id));
+    });
+    return ids;
+}
+
+function collectYearsForYearKind(questions, kind) {
+    const years = {};
+    (questions || []).forEach(q => {
+        if (statsYearKind(q.year) !== kind) return;
+        const key = typeof normalizeYearFilterKey === 'function'
+            ? normalizeYearFilterKey(q.year)
+            : String(q.year == null ? '' : q.year).trim();
+        if (key) years[key] = true;
+    });
+    return Object.keys(years);
+}
+
+async function finishJumpToQuestions(state, tri, specials) {
     window.triStateFilters = tri;
     window.filterLogic = {
         curriculum: state.logic.curriculum || 'OR',
@@ -1196,6 +1526,55 @@ function jumpStatsRowToQuestions(tabId, rawValue) {
     window.percentageFilter = Object.assign({ min: 0, max: 100, active: false }, state.percentage);
     window.marksFilter = Object.assign({ min: 0, max: 30, active: false }, state.marks);
     window.questionNumberFilter = Object.assign({ min: QNUM_MIN_STATS, max: QNUM_MAX_STATS, active: false }, state.qnum);
+    window.idSetFilter = (typeof emptyIdSetFilter === 'function')
+        ? emptyIdSetFilter()
+        : { active: false, ids: null, label: '', source: '' };
+
+    const idNeedles = [];
+    for (let i = 0; i < (specials || []).length; i++) {
+        const spec = specials[i];
+        if (!spec || !spec.special) continue;
+        if (spec.special === 'range' && spec.range && spec.rangeKey) {
+            if (spec.rangeKey === 'percentage') window.percentageFilter = Object.assign({}, spec.range);
+            else if (spec.rangeKey === 'marks') window.marksFilter = Object.assign({}, spec.range);
+            else if (spec.rangeKey === 'qnum') window.questionNumberFilter = Object.assign({}, spec.range);
+        } else if (spec.special === 'yearKind') {
+            const all = window.storage ? await window.storage.getQuestions() : [];
+            const years = collectYearsForYearKind(all, spec.value);
+            if (!tri.year) tri.year = {};
+            years.forEach(y => { tri.year[y] = 'checked'; });
+            window.triStateFilters = tri;
+        } else if (spec.special === 'idSet') {
+            idNeedles.push(spec);
+        }
+    }
+
+    if (idNeedles.length) {
+        const all = window.storage ? await window.storage.getQuestions() : [];
+        let ids = null;
+        idNeedles.forEach(spec => {
+            const next = collectIdsForStatDimValue(all, spec.dimId, spec.value);
+            if (ids == null) ids = next.slice();
+            else {
+                const set = Object.create(null);
+                next.forEach(id => { set[id] = true; });
+                ids = ids.filter(id => set[id]);
+            }
+        });
+        const map = Object.create(null);
+        (ids || []).forEach(id => { map[id] = true; });
+        const count = Object.keys(map).length;
+        const labels = idNeedles.map(spec => {
+            const cfg = STAT_TABS[spec.dimId];
+            return (cfg ? cfg.label : spec.dimId) + '：' + spec.value;
+        }).join(' × ');
+        window.idSetFilter = {
+            active: count > 0,
+            ids: count > 0 ? map : null,
+            label: labels || ('指定題目 ' + count + ' 題'),
+            source: 'stats-dim'
+        };
+    }
 
     syncQuestionRangeWidgets();
     const curriculumToggle = document.getElementById('curriculum-logic-toggle');
@@ -1215,7 +1594,27 @@ function jumpStatsRowToQuestions(tabId, rawValue) {
     if (typeof scrollToTop === 'function') scrollToTop();
 }
 
+async function jumpStatsRowToQuestions(tabId, rawValue) {
+    const cfg = STAT_TABS[tabId];
+    if (!cfg) return;
+    const state = getStatsTabState(tabId);
+    const tri = JSON.parse(JSON.stringify(state.triState));
+    const result = applyStatDimJumpToTri(tri, tabId, rawValue);
+    const specials = result && result.special ? [result] : [];
+    await finishJumpToQuestions(state, tri, specials);
+}
+
 window.STAT_TABS = STAT_TABS;
+window.STAT_DIMENSION_GROUPS = STAT_DIMENSION_GROUPS;
+window.listStatDimensionIds = listStatDimensionIds;
+window.buildStatDimensionOptionsHtml = buildStatDimensionOptionsHtml;
+window.datasetHasStatDimension = datasetHasStatDimension;
+window.statsPercentageBin = statsPercentageBin;
+window.statsMarksBin = statsMarksBin;
+window.statsQnumBin = statsQnumBin;
+window.statsYearKind = statsYearKind;
+window.applyStatDimJumpToTri = applyStatDimJumpToTri;
+window.finishJumpToQuestions = finishJumpToQuestions;
 window.getStatsTabState = getStatsTabState;
 window.ensureStatsFilterBar = ensureStatsFilterBar;
 window.questionsMatchingStatsFilters = questionsMatchingStatsFilters;

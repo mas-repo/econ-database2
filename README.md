@@ -14,8 +14,11 @@ Records with reviewedByAI equal to Y must not be overwritten by builders that fi
 
 Top-level tabs are **題目** and **統計** (not separate 概念 / 課程分類 / 章節 / 題型 / 題幹模式 tabs). Inside **統計**:
 
-- **一維瀏覽** — dimension switcher (概念 / 課程分類 / 章節 / 題型 / 題幹模式 / 出版商) reuses `renderGroupedStats` + shared stats filters (`js/stats-filters.js`). Cards have **詳細統計** (breakdown modal) and **查看題目**.
-- **交叉分析** — row × column × metric (題數 / MC / 文字題 / 平均答對率 / 平均分數), presets, swap; multi-value fields may count a question in multiple cells; 答對率／分數 use bins. Cell click jumps to 題目 with intersection filters. Local aggregation only (`js/stats-explore.js`).
+- **一維瀏覽** — dimension switcher + **交叉分析** row/column axes share one registry (`STAT_TABS` / `STAT_DIMENSION_GROUPS` in `js/stats-filters.js`). Groups: 主題標籤 | 試卷／表現／特徵 | 區間／衍生.
+- Priority dims: 年份 / 考試 / 卷別 / Section / 題目類型 / 特徵 (admin blank features only when admin) / 分題表現 / 圖表·表格·計算·複選類型 (hidden when unused) / 出版商 + original 概念·課程·章節·題型·題幹模式.
+- Binned: 答對率區間 `[0,20)…[80,100]`, 分數區間 `0–2…16+`, 題號區間 from id last digits `1–10…51–60` (plus 無* buckets). Jump uses matching range filters; empty buckets use id-set.
+- Derived: 年份種類（日曆年 / Mock(MT) / 其他）, 有／無分題, 選項設計（skip if unused）. **Not** a grouping dim: AI 詳解 (filter only).
+- Cards have **詳細統計** and **查看題目**; crosstab cell click jumps with intersection filters. Local aggregation only (`js/stats-explore.js`).
 - Legacy `switchTab('concepts'|…)` aliases open 統計 on that dimension.
 
 ---
