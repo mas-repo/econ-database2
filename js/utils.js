@@ -118,8 +118,12 @@ function populateFeatureFilter() {
     const container = document.getElementById('feature-options');
     if (!container) return;
 
+    const items = (typeof effectiveFeatureItems === 'function')
+        ? effectiveFeatureItems()
+        : FEATURE_ITEMS;
+
     let html = '';
-    FEATURE_ITEMS.forEach(item => {
+    items.forEach(item => {
         const state = (window.triStateFilters && window.triStateFilters.feature)
             ? window.triStateFilters.feature[item]
             : null;
@@ -129,8 +133,12 @@ function populateFeatureFilter() {
         if (state === 'checked') { labelClass += ' checked'; checkboxClass += ' checked'; }
         else if (state === 'excluded') { labelClass += ' excluded'; checkboxClass += ' excluded'; }
 
+        const adminNote = (typeof isAdminBlankFeature === 'function' && isAdminBlankFeature(item))
+            ? ' data-admin-only="1"'
+            : '';
+
         html += `
-            <div class="${labelClass}" onclick="toggleTriState(this)" data-filter="feature" data-value="${escapeHTML(item)}">
+            <div class="${labelClass}" onclick="toggleTriState(this)" data-filter="feature" data-value="${escapeHTML(item)}"${adminNote}>
                 <div class="${checkboxClass}" data-filter="feature" data-value="${escapeHTML(item)}">
                     <span>${escapeHTML(item)}</span>
                 </div>
@@ -138,6 +146,35 @@ function populateFeatureFilter() {
         `;
     });
 
+    container.innerHTML = html;
+}
+
+function populatePartPerformanceFilter() {
+    const container = document.getElementById('part-performance-options');
+    if (!container) return;
+    const items = (typeof PART_PERFORMANCE_ITEMS !== 'undefined' && Array.isArray(PART_PERFORMANCE_ITEMS))
+        ? PART_PERFORMANCE_ITEMS
+        : [];
+
+    let html = '';
+    items.forEach(item => {
+        const state = (window.triStateFilters && window.triStateFilters.partPerformance)
+            ? window.triStateFilters.partPerformance[item]
+            : null;
+
+        let labelClass = 'tri-state-label';
+        let checkboxClass = 'tri-state-checkbox';
+        if (state === 'checked') { labelClass += ' checked'; checkboxClass += ' checked'; }
+        else if (state === 'excluded') { labelClass += ' excluded'; checkboxClass += ' excluded'; }
+
+        html += `
+            <div class="${labelClass}" onclick="toggleTriState(this)" data-filter="partPerformance" data-value="${escapeHTML(item)}">
+                <div class="${checkboxClass}" data-filter="partPerformance" data-value="${escapeHTML(item)}">
+                    <span>${escapeHTML(item)}</span>
+                </div>
+            </div>
+        `;
+    });
     container.innerHTML = html;
 }
 

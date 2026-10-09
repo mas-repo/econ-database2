@@ -23,7 +23,91 @@ function clearForm() {
     if (publisherField) {
         publisherField.value = DEFAULT_PUBLISHER;
     }
+    renderQuestionPartRows([]);
 }
+
+function partPerformanceOptionsHtml(selected) {
+    const items = (typeof PART_PERFORMANCE_ITEMS !== 'undefined' && Array.isArray(PART_PERFORMANCE_ITEMS))
+        ? PART_PERFORMANCE_ITEMS
+        : [];
+    const sel = String(selected || '');
+    let html = '<option value="">（未填）</option>';
+    items.forEach(item => {
+        html += `<option value="${escapeHTML(item)}"${item === sel ? ' selected' : ''}>${escapeHTML(item)}</option>`;
+    });
+    return html;
+}
+
+function questionPartRowHtml(part) {
+    const label = part && part.label != null ? part.label : '';
+    const marks = part && part.marks != null && part.marks !== '' ? part.marks : '';
+    const performance = part && part.performance ? part.performance : '';
+    return `
+        <div class="question-part-row" data-question-part-row="1" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+            <input type="text" data-part-label placeholder="分題（如 a）" value="${escapeHTML(String(label))}" style="width:5.5em;">
+            <input type="number" data-part-marks min="0" step="0.5" placeholder="分數" value="${marks === '' ? '' : escapeHTML(String(marks))}" style="width:6em;">
+            <select data-part-performance aria-label="分題表現">${partPerformanceOptionsHtml(performance)}</select>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="removeQuestionPartRow(this)" title="移除分題">✕</button>
+        </div>
+    `;
+}
+
+function renderQuestionPartRows(parts) {
+    const list = document.getElementById('question-parts-list');
+    if (!list) return;
+    const rows = (typeof normalizeQuestionParts === 'function')
+        ? normalizeQuestionParts(parts)
+        : (Array.isArray(parts) ? parts : []);
+    if (!rows.length) {
+        list.innerHTML = questionPartRowHtml({});
+        return;
+    }
+    list.innerHTML = rows.map(questionPartRowHtml).join('');
+}
+
+function addQuestionPartRow() {
+    const list = document.getElementById('question-parts-list');
+    if (!list) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = questionPartRowHtml({});
+    list.appendChild(wrap.firstElementChild);
+}
+
+function removeQuestionPartRow(button) {
+    const list = document.getElementById('question-parts-list');
+    if (!list || !button) return;
+    const row = button.closest('[data-question-part-row]');
+    if (!row) return;
+    if (list.querySelectorAll('[data-question-part-row]').length <= 1) {
+        row.querySelectorAll('input, select').forEach(el => {
+            if (el.tagName === 'SELECT') el.value = '';
+            else el.value = '';
+        });
+        return;
+    }
+    row.remove();
+}
+
+function readQuestionPartsFromForm() {
+    const list = document.getElementById('question-parts-list');
+    if (!list) return [];
+    const raw = [];
+    list.querySelectorAll('[data-question-part-row]').forEach(row => {
+        const labelEl = row.querySelector('[data-part-label]');
+        const marksEl = row.querySelector('[data-part-marks]');
+        const perfEl = row.querySelector('[data-part-performance]');
+        raw.push({
+            label: labelEl ? labelEl.value : '',
+            marks: marksEl ? marksEl.value : '',
+            performance: perfEl ? perfEl.value : ''
+        });
+    });
+    return (typeof normalizeQuestionParts === 'function') ? normalizeQuestionParts(raw) : raw;
+}
+
+window.addQuestionPartRow = addQuestionPartRow;
+window.removeQuestionPartRow = removeQuestionPartRow;
+window.renderQuestionPartRows = renderQuestionPartRows;
 
 // Dependencies: globals.js (window.editingId)
 function cancelEdit() {
@@ -93,6 +177,7 @@ function setupFormHandler() {
             optionDesign: document.getElementById('option-design').value.trim(),
             AIExplanation: aiExplanationValue,
             remarks: document.getElementById('remarks').value.trim(),
+            questionParts: readQuestionPartsFromForm(),
             dateAdded: window.editingId ? null : new Date().toISOString(),
             dateModified: new Date().toISOString()
         };
@@ -201,6 +286,7 @@ async function editQuestion(id) {
         aiExplanationInput.value = question.AIExplanation || '';
     }
     document.getElementById('remarks').value = question.remarks || '';
+    renderQuestionPartRows(question.questionParts || []);
     
     document.getElementById('form-section').classList.remove('hidden');
     document.getElementById('form-title').textContent = '編輯題目';

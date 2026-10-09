@@ -713,7 +713,9 @@
         list.innerHTML = '';
         if (!def || !def.autocomplete) {
             valueInput.removeAttribute('list');
-            valueInput.placeholder = '字串（題文自由輸入）';
+            valueInput.placeholder = def && def.kind === 'partMarks'
+                ? '分題分數（如 2）'
+                : '字串（題目／答案／評卷報告）';
             return;
         }
         valueInput.setAttribute('list', list.id);
@@ -736,7 +738,9 @@
         conditionRowSeq += 1;
         var listId = 'dc-ac-' + conditionRowSeq;
         var listAttr = def.autocomplete ? (' list="' + escapeAttr(listId) + '"') : '';
-        var placeholder = def.autocomplete ? '從已載入題庫選擇或輸入' : '字串（題文自由輸入）';
+        var placeholder = def.autocomplete
+            ? '從已載入題庫選擇或輸入'
+            : (def.kind === 'partMarks' ? '分題分數（如 2）' : '字串（題目／答案／評卷報告）');
         return ''
             + '<div class="data-checks-cond-row" data-dc-cond-row="1">'
             + '  <div class="data-checks-cond-pair" role="group" aria-label="包含或不包括">'

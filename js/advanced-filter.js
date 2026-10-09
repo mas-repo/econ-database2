@@ -86,7 +86,10 @@
         rowSeq += 1;
         var listId = 'af-ac-' + rowSeq;
         var listAttr = def && def.autocomplete ? (' list="' + escapeAttr(listId) + '"') : '';
-        var placeholder = def && def.autocomplete ? '從已載入題庫選擇或輸入' : '字串（題文自由輸入）';
+        var placeholder = '字串（題目／答案／評卷報告）';
+        if (def && def.kind === 'partMarks') placeholder = '分題分數（如 2）';
+        else if (def && def.autocomplete) placeholder = '從已載入題庫選擇或輸入';
+        else if (def && def.kind === 'text') placeholder = '字串（題目／答案／評卷報告）';
         return ''
             + '<div class="af-cond-row" data-af-cond-row="1">'
             + '  <div class="af-cond-pair" role="group" aria-label="包含或不包括">'
@@ -134,7 +137,8 @@
         list.innerHTML = '';
         if (!def || !def.autocomplete) {
             valueEl.removeAttribute('list');
-            valueEl.placeholder = '字串（題文自由輸入）';
+            if (def && def.kind === 'partMarks') valueEl.placeholder = '分題分數（如 2）';
+            else valueEl.placeholder = '字串（題目／答案／評卷報告）';
             return;
         }
         valueEl.setAttribute('list', list.id);

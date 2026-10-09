@@ -381,6 +381,31 @@ async function renderQuestions() {
                 ${renderCollapsibleSection('評卷報告：', q.markersReportChi)}
                 ${renderCollapsibleSection('Markers Report:', q.markersReportEng)}
 
+                ${(() => {
+                    const parts = (typeof normalizeQuestionParts === 'function')
+                        ? normalizeQuestionParts(q.questionParts)
+                        : (Array.isArray(q.questionParts) ? q.questionParts : []);
+                    if (!parts.length) return '';
+                    const rows = parts.map(part => {
+                        const bits = [];
+                        if (part.label) bits.push(escapeHTML(part.label));
+                        if (part.marks !== null && part.marks !== undefined) bits.push(`${escapeHTML(String(part.marks))}分`);
+                        if (part.performance) bits.push(escapeHTML(part.performance));
+                        return `<li>${bits.join(' · ') || '（空分題）'}</li>`;
+                    }).join('');
+                    const sum = typeof sumPartMarks === 'function' ? sumPartMarks(q) : null;
+                    const sumNote = sum !== null
+                        ? `<div class="info-item" style="margin-top:4px;color:var(--text-light);font-size:12px;">分題合計 ${escapeHTML(String(sum))} 分（總分仍以題目分數為準）</div>`
+                        : '';
+                    return `
+                        <div class="info-item" style="margin-top:8px;">
+                            <strong>分題：</strong>
+                            <ul style="margin:6px 0 0;padding-left:1.2em;">${rows}</ul>
+                            ${sumNote}
+                        </div>
+                    `;
+                })()}
+
                 <div class="question-info">             
                     ${q.correctPercentage !== null && q.correctPercentage !== undefined ? `<div class="info-item"><strong>答對率：</strong> ${escapeHTML(q.correctPercentage)}%</div>` : ''}
 

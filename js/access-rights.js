@@ -35,6 +35,12 @@ function applyAccessRights(rights) {
     document.querySelectorAll('[data-mock-only="1"]').forEach(function (node) {
         node.hidden = !window.accessRights.mockTests;
     });
+    if (!window.accessRights.admin && typeof clearAdminBlankFeatureFilters === 'function') {
+        clearAdminBlankFeatureFilters();
+    }
+    if (typeof populateFeatureFilter === 'function') {
+        populateFeatureFilter();
+    }
 }
 
 async function loadAccessRights(username) {

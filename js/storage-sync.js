@@ -62,6 +62,12 @@ class QuestionJsonSource {
             if (!question[field]) question[field] = [];
         });
 
+        if (Object.prototype.hasOwnProperty.call(raw, 'questionParts') || Array.isArray(question.questionParts)) {
+            question.questionParts = (typeof normalizeQuestionParts === 'function')
+                ? normalizeQuestionParts(question.questionParts || raw.questionParts)
+                : (Array.isArray(question.questionParts) ? question.questionParts : []);
+        }
+
         // plainText is the question wording column. Keep questionTextChi in sync
         // so existing search and card rendering still show the text.
         if (!question.plainText && question.questionTextChi) {

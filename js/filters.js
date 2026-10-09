@@ -33,7 +33,8 @@ if (!window.triStateFilters) {
     window.triStateFilters = { 
         curriculum: {}, 
         chapter: {}, 
-        feature: { 'Out syl': 'excluded' }, 
+        feature: { 'Out syl': 'excluded' },
+        partPerformance: {},
         publisher: {},
         exam: {}, 
         qtype: {},
@@ -49,6 +50,8 @@ if (!window.triStateFilters) {
         table: {},
         calculation: {}
     };
+} else if (!window.triStateFilters.partPerformance) {
+    window.triStateFilters.partPerformance = {};
 }
 
 // ============================================
@@ -61,6 +64,7 @@ const ARROW_MAP = {
     // Custom Grid Filters
     'curriculum-options': 'curriculum-arrow',
     'feature-options': 'feature-arrow',
+    'part-performance-options': 'part-performance-arrow',
     'chapter-options': 'chapter-arrow',
     'year-options': 'year-arrow',
     
@@ -99,8 +103,9 @@ function closeAllDropdowns() {
         d.classList.remove('active');
     });
 
-    ['curriculum', 'chapter', 'feature', 'year'].forEach(type => {
-        const section = document.getElementById(`${type}-options`);
+    ['curriculum', 'chapter', 'feature', 'partPerformance', 'year'].forEach(type => {
+        const sectionId = type === 'partPerformance' ? 'part-performance-options' : `${type}-options`;
+        const section = document.getElementById(sectionId);
         if (section) section.style.display = 'none';
     });
 
@@ -155,7 +160,7 @@ function toggleDropdown(dropdownId) {
     closeAllDropdowns();
 
     if (!wasOpen) {
-        const gridFilters = ['curriculum-options', 'feature-options', 'chapter-options', 'year-options'];
+        const gridFilters = ['curriculum-options', 'feature-options', 'part-performance-options', 'chapter-options', 'year-options'];
 
         if (gridFilters.includes(dropdownId)) {
             target.style.display = 'grid';
@@ -266,7 +271,7 @@ function updateFilterIndicators() {
     // graph/table/calculation/multipleSelection/concepts/patterns/stemPatterns
     // use modal trigger badges (filter-modal.js) instead of dot indicators.
     const triStateTypes = [
-        'publisher', 'exam', 'qtype', 'curriculum', 'chapter', 'feature', 'year',
+        'publisher', 'exam', 'qtype', 'curriculum', 'chapter', 'feature', 'partPerformance', 'year',
         'section', 'paper', 'ai'
     ];
     
@@ -860,6 +865,8 @@ function clearFilters() {
         const section = document.getElementById(`${type}-options`);
         if (section) section.style.display = 'none';
     });
+    const partPerfSection = document.getElementById('part-performance-options');
+    if (partPerfSection) partPerfSection.style.display = 'none';
 
     closeAllDropdowns();
 
@@ -896,7 +903,8 @@ function clearFilters() {
     window.triStateFilters = { 
         curriculum: {}, 
         chapter: {}, 
-        feature: { 'Out syl': 'excluded' },  
+        feature: { 'Out syl': 'excluded' },
+        partPerformance: {},
         publisher: {},
         exam: {}, 
         qtype: {},
@@ -1063,6 +1071,7 @@ function updateSearchInfo() {
         'curriculum': '課程',
         'chapter': 'Chapter',
         'feature': '特徵',
+        'partPerformance': '分題表現',
         'publisher': '出版商',
         'exam': '考試',
         'qtype': '題型',

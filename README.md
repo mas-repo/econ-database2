@@ -65,6 +65,16 @@ The button **AI出題** is hidden until Apps Script returns `ai: true` for the s
 
 **進階篩選** (`js/advanced-filter.js`) is an independent modal on the 題目 tab for every signed-in user. Rows are 包含／不包括 + field + value (AND), using the same `ConditionMatch` fields as 資料檢查. Applied conditions live in `window.advancedFilter` and intersect with search, tri-state, and range filters in `storage.applyFilters`. Local-only: memory and optional `localStorage` key `econ_advanced_filter_v1` for this browser — no GitHub / Apps Script / `syncDataChecks*` persistence. Clear with the green badge ✕, the modal’s **清除進階篩選**, or **重置篩選條件** (full reset). Bulk ID-set filters from 資料檢查 clear the same way (badge type 題目集合 / full reset).
 
+**字串** field searches 題目（`questionTextChi` / `questionTextEng` / `plainText`）、答案（`answerMC` / `answerChi` / `answerEng`）、評卷報告（`markersReportChi` / `markersReportEng`）. Saved rows with `field: 'text'` keep working. Also available: **分題表現** / **分題分數** against `questionParts`.
+
+## 分題 / questionParts
+
+SQ/LQ sub-parts store as `questionParts: [{ label, marks, performance }, …]` (`SCHEMA_VERSION` 2). **`marks` (total) stays authoritative** — the form does not auto-sum parts into total. `performance` values are exactly: 優異、優良、良好、令人滿意、尚可、欠佳. Filters: 特徵 **有分題**; dropdown **分題表現**; advanced **分題表現** / **分題分數**.
+
+## Admin blank filters (admin only)
+
+When `accessRights.admin === true`, 特徵 also offers **題目空白** / **答案空白** / **評卷報告空白** (`js/question-fields.js`). Blank means empty, whitespace-only, or `-`. 題目 = Chi/Eng/plainText; 答案 = answerMC + answerChi/Eng; 評卷報告 = markersReportChi/Eng. Non-admins do not see or apply these.
+
 **過往紀錄 (cross-device):** Successful generations still save in this browser (`IndexedDB` / `localStorage`). When GitHub AI backups are configured, opening the modal also calls `listAiBackups` (auth: `ai`, not `githubSync`) and merges that user's private `users/<username>/<GITHUB_AI_BACKUP_DIR>/` replies into the same list (deduped). List pages are lean (preview only); opening a row loads the full reply with `getAiBackup`, including chunked reads for very long text. Long `generateQuestions` replies may also arrive with `contentViaBackup` so the browser fetches the backup instead of parsing an oversized web-app body. Each request returns 30 backups, newest first; the modal can open older pages. Search matches only the page on screen. Remote failures stay non-blocking. Incomplete runs still stay in 使用紀錄. Details: `apps-script/README.md`.
 
 ## GitHub sync buttons (admin only)
@@ -82,7 +92,7 @@ Shared bank JSON (`shared/data/database.json`) carries an integer root field `sc
 - **Upload / auto-sync:** before `syncDataUpload`, the client reads the cloud file and **blocks** if local `SCHEMA_VERSION` &lt; cloud `schemaVersion`, with a Traditional Chinese error (cloud written by a newer app — update before uploading). No merge that strips unknown fields. **Apps Script `handleGitUpload_` enforces the same gate** (`schema_version_stale` + client/cloud versions) and preserves `schemaVersion` / unknown top-level keys on write. Redeploy `Code.gs` after that change.
 - **Load / download / file import:** if cloud/file `schemaVersion` &gt; local, show a **warning notification** asking the user to update. If the payload has no usable `questions` array, the load fails clearly instead of half-importing. `syncDataDownload` returns `schemaVersion` for client notify.
 - Writes stamp the current `SCHEMA_VERSION`.
-- **econ-database-data:** stamp live `shared/data/database.json` with `"schemaVersion": 1` when ready (private-repo follow-up; this public site does not write it).
+- **econ-database-data:** stamp live `shared/data/database.json` with the current client `SCHEMA_VERSION` when ready (now **2** after `questionParts`; private-repo follow-up; this public site does not write it).
 
 Set `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `GITHUB_DATA_PATH`, and `GITHUB_AI_BACKUP_DIR` in Apps Script Script properties, then redeploy. `GITHUB_TOKEN` is a fine-grained PAT with Contents **read and write** on the private data repository only — used only on the server for uploads and AI backups; never sent to the browser. For direct browser reads of large shared files, also set either the GitHub App trio (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`) or a separate Contents:**Read** PAT as `GITHUB_READ_TOKEN`. Never commit those values. Question-bank upload/download uses the **shared** path `<GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>` (recommended `GITHUB_DATA_PATH` = `data/database.json` → `shared/data/database.json`). Every `githubSync` user reads and writes that same file; username is for auth only and must not appear in the bank path. Personal AI出題 reply backups stay under `users/<username>/` plus `GITHUB_AI_BACKUP_DIR`. `<username>` is the trimmed, lowercased signed-in name. The page does not choose those paths.
 

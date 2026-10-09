@@ -6,7 +6,9 @@
 // or any UI. Advanced filter must stay local-only; data-checks keeps
 // its own GitHub sync.
 //
-// Dependencies: optional FEATURE_ITEMS / CURRICULUM_ITEMS / questionFeatureOn.
+// 字串 (field id text) searches 題目 + 答案 + 評卷報告 text groups.
+// Dependencies: optional FEATURE_ITEMS / CURRICULUM_ITEMS / questionFeatureOn /
+// question-fields.js helpers.
 
 (function (global) {
     'use strict';
@@ -28,6 +30,8 @@
         { id: 'paper', label: '卷別', kind: 'scalar', prop: 'paper', autocomplete: true },
         { id: 'section', label: 'Section', kind: 'scalar', prop: 'section', autocomplete: true },
         { id: 'publisher', label: '出版商', kind: 'scalar', prop: 'publisher', autocomplete: true },
+        { id: 'partPerformance', label: '分題表現', kind: 'partPerformance', autocomplete: true },
+        { id: 'partMarks', label: '分題分數', kind: 'partMarks', autocomplete: false },
         { id: 'feature', label: '特徵', kind: 'feature', autocomplete: true }
     ];
 
@@ -81,7 +85,13 @@
         paper: 'paper',
         section: 'section',
         publisher: 'publisher',
-        feature: 'feature'
+        feature: 'feature',
+        partPerformance: 'partPerformance',
+        partperformance: 'partPerformance',
+        '分題表現': 'partPerformance',
+        partMarks: 'partMarks',
+        partmarks: 'partMarks',
+        '分題分數': 'partMarks'
     };
 
     function resolveFieldId(rawField) {
@@ -152,10 +162,19 @@
     }
 
     function questionText(question) {
+        if (typeof questionSearchText === 'function') {
+            // 字串 searches 題目 + 答案 + 評卷報告 (not topic alone).
+            return questionSearchText(question, 'all');
+        }
         return [
             question && question.questionTextChi,
             question && question.questionTextEng,
-            question && question.plainText
+            question && question.plainText,
+            question && question.answerMC,
+            question && question.answerChi,
+            question && question.answerEng,
+            question && question.markersReportChi,
+            question && question.markersReportEng
         ].map(function (part) {
             return String(part == null ? '' : part);
         }).join('\n');
@@ -185,6 +204,18 @@
         if (featureName === '跨章節') {
             return !!(question.AristochapterClassification && Array.isArray(question.AristochapterClassification) && question.AristochapterClassification.length > 1);
         }
+        if (featureName === '有分題') {
+            return typeof questionHasParts === 'function' ? questionHasParts(question) : !!(question.questionParts && question.questionParts.length);
+        }
+        if (featureName === '題目空白') {
+            return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(question) : false;
+        }
+        if (featureName === '答案空白') {
+            return typeof isAnswerBlank === 'function' ? isAnswerBlank(question) : false;
+        }
+        if (featureName === '評卷報告空白') {
+            return typeof isMarkersReportBlank === 'function' ? isMarkersReportBlank(question) : false;
+        }
         if (featureName === '已刪除') return !!(question.answerMC && String(question.answerMC).trim() === '*');
         if (featureName === 'Out syl') return !!(question.outSyl && String(question.outSyl).trim().toUpperCase() === 'Y');
         return false;
@@ -206,7 +237,21 @@
             if (question[def.prop] === undefined || question[def.prop] === null) return false;
             return String(question[def.prop]).trim() === needle;
         }
+        if (def.kind === 'partPerformance') {
+            return typeof questionHasPartPerformance === 'function'
+                ? questionHasPartPerformance(question, needle)
+                : false;
+        }
+        if (def.kind === 'partMarks') {
+            return typeof questionHasPartMarks === 'function'
+                ? questionHasPartMarks(question, needle)
+                : false;
+        }
         if (def.kind === 'feature') {
+            if (typeof isAdminBlankFeature === 'function' && isAdminBlankFeature(needle) &&
+                !(typeof window !== 'undefined' && window.accessRights && window.accessRights.admin === true)) {
+                return false;
+            }
             return featureIsOn(question, needle);
         }
         return false;
@@ -232,8 +277,19 @@
         var def = CONDITION_FIELD_BY_ID[fieldId];
         if (!def || !def.autocomplete) return [];
         var set = {};
-        if (def.kind === 'feature' && typeof FEATURE_ITEMS !== 'undefined' && Array.isArray(FEATURE_ITEMS)) {
+        if (def.kind === 'feature' && typeof effectiveFeatureItems === 'function') {
+            effectiveFeatureItems().forEach(function (item) {
+                var text = String(item == null ? '' : item).trim();
+                if (text) set[text] = true;
+            });
+        } else if (def.kind === 'feature' && typeof FEATURE_ITEMS !== 'undefined' && Array.isArray(FEATURE_ITEMS)) {
             FEATURE_ITEMS.forEach(function (item) {
+                var text = String(item == null ? '' : item).trim();
+                if (text) set[text] = true;
+            });
+        }
+        if (def.kind === 'partPerformance' && typeof PART_PERFORMANCE_ITEMS !== 'undefined' && Array.isArray(PART_PERFORMANCE_ITEMS)) {
+            PART_PERFORMANCE_ITEMS.forEach(function (item) {
                 var text = String(item == null ? '' : item).trim();
                 if (text) set[text] = true;
             });

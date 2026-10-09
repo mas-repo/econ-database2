@@ -204,6 +204,17 @@ function renderFiltersTemplate() {
                     </div>
                 </div>
 
+                <!-- 📈 分題表現 -->
+                <div class="filter-item">
+                    <div class="dropdown-filter">
+                        <button class="dropdown-btn" onclick="toggleDropdown('part-performance-options')">
+                            <span>📈 分題表現</span><span class="arrow" id="part-performance-arrow">▶</span>
+                        </button>
+                        <span class="active-indicator" id="indicator-partPerformance"></span>
+                        <div class="custom-grid-dropdown" id="part-performance-options"></div>
+                    </div>
+                </div>
+
                 <!-- 📊 答對率 (range slider) -->
                 <div class="filter-item">
                     <div class="dropdown-filter">

@@ -102,6 +102,7 @@ const STAT_FILTER_DEFS = [
     { key: 'section', label: '📝 Section', kind: 'section' },
     { key: 'publisher', label: '🏢 出版商', kind: 'publisher' },
     { key: 'feature', label: '🎯 特徵', kind: 'feature' },
+    { key: 'partPerformance', label: '📈 分題表現', kind: 'partPerformance' },
     { key: 'graph', label: '📊 圖表類型', kind: 'scalar', field: 'graphType', optional: true },
     { key: 'table', label: '📅 表格類型', kind: 'scalar', field: 'tableType', optional: true },
     { key: 'calculation', label: '🧮 計算類型', kind: 'scalar', field: 'calculationType', optional: true },
@@ -286,6 +287,18 @@ function questionFeatureOn(q, value) {
     }
     if (value === '已刪除') return !!(q.answerMC && String(q.answerMC).trim() === '*');
     if (value === 'Out syl') return !!(q.outSyl && String(q.outSyl).trim().toUpperCase() === 'Y');
+    if (value === '有分題') {
+        return typeof questionHasParts === 'function' ? questionHasParts(q) : !!(q.questionParts && q.questionParts.length);
+    }
+    if (value === '題目空白') {
+        return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(q) : false;
+    }
+    if (value === '答案空白') {
+        return typeof isAnswerBlank === 'function' ? isAnswerBlank(q) : false;
+    }
+    if (value === '評卷報告空白') {
+        return typeof isMarkersReportBlank === 'function' ? isMarkersReportBlank(q) : false;
+    }
     return false;
 }
 
@@ -302,8 +315,21 @@ function valuesOnQuestion(q, def) {
             .filter(Boolean);
     }
     if (def.kind === 'feature') {
-        const items = (typeof FEATURE_ITEMS !== 'undefined') ? FEATURE_ITEMS : [];
+        const items = (typeof effectiveFeatureItems === 'function')
+            ? effectiveFeatureItems()
+            : ((typeof FEATURE_ITEMS !== 'undefined') ? FEATURE_ITEMS : []);
         return items.filter(item => questionFeatureOn(q, item));
+    }
+    if (def.kind === 'partPerformance') {
+        const parts = (typeof normalizeQuestionParts === 'function')
+            ? normalizeQuestionParts(q.questionParts)
+            : (Array.isArray(q.questionParts) ? q.questionParts : []);
+        const set = new Set();
+        parts.forEach(part => {
+            const perf = part && part.performance ? String(part.performance).trim() : '';
+            if (perf) set.add(perf);
+        });
+        return Array.from(set);
     }
     if (def.kind === 'ai') {
         return (q.AIExplanation && String(q.AIExplanation).trim() !== '') ? ['AI 詳解'] : [];
@@ -346,7 +372,9 @@ function staticFilterUniverse(def, counts) {
     else if (def.kind === 'exam' && typeof EXAMINATION_TYPES !== 'undefined') base = EXAMINATION_TYPES.slice();
     else if (def.kind === 'section') base = ['A', 'B', 'C', '-'];
     else if (def.kind === 'paper') base = ['1', '2'];
+    else if (def.kind === 'feature' && typeof effectiveFeatureItems === 'function') base = effectiveFeatureItems();
     else if (def.kind === 'feature' && typeof FEATURE_ITEMS !== 'undefined') base = FEATURE_ITEMS.slice();
+    else if (def.kind === 'partPerformance' && typeof PART_PERFORMANCE_ITEMS !== 'undefined') base = PART_PERFORMANCE_ITEMS.slice();
     else if (def.kind === 'ai') base = ['AI 詳解'];
     else base = Object.keys(counts);
 

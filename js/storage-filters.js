@@ -519,89 +519,38 @@ IndexedDBStorage.prototype.applyFilters = function(questions, filters) {
         // Feature filters
         if (filters.triState.feature) {
             const features = filters.triState.feature;
+            const adminOk = !!(typeof window !== 'undefined' && window.accessRights && window.accessRights.admin === true);
             
             Object.entries(features).forEach(([value, state]) => {
-                if (state === 'checked') {
+                if (typeof isAdminBlankFeature === 'function' && isAdminBlankFeature(value) && !adminOk) {
+                    return;
+                }
+                if (state === 'checked' || state === 'excluded') {
+                    const wantOn = state === 'checked';
                     questions = questions.filter(q => {
-                        if (value === '含圖表') {
-                            return q.graphType && 
-                                q.graphType !== '' && 
-                                q.graphType !== '-' && 
-                                q.graphType !== '沒有圖';
-                        } else if (value === '有內嵌圖') {
-                            return !!(q.inlineDiagrams && String(q.inlineDiagrams).trim());
-                        } else if (value === '含表格') {
-                            return q.tableType && 
-                                q.tableType !== '' && 
-                                q.tableType !== '-' && 
-                                q.tableType !== '沒有表格';
-                        } else if (value === '複選') {
-                            return q.multipleSelectionType && 
-                                q.multipleSelectionType !== '' && 
-                                q.multipleSelectionType !== '-' && 
-                                q.multipleSelectionType !== '並非複選型' && 
-                                q.multipleSelectionType !== '不適用';
-                        } else if (value === '含計算') {
-                            return q.calculationType && 
-                                q.calculationType !== '' && 
-                                q.calculationType !== '-' && 
-                                q.calculationType !== '沒有計算';
-                        } else if (value === '跨課題') {
-                            return q.curriculumClassification && 
-                                Array.isArray(q.curriculumClassification) && 
-                                q.curriculumClassification.length > 1;
-                        } else if (value === '跨章節') {
-                            return q.AristochapterClassification && 
-                                Array.isArray(q.AristochapterClassification) && 
-                                q.AristochapterClassification.length > 1;
-                        } else if (value === '已刪除') {
-                            return q.answerMC && q.answerMC.trim() === '*';
-                        } else if (value === 'Out syl') {
-                            // Show ONLY if it has 'Y'
-                            return q.outSyl && q.outSyl.trim().toUpperCase() === 'Y';
+                        if (typeof questionFeatureOn === 'function') {
+                            const on = questionFeatureOn(q, value);
+                            return wantOn ? on : !on;
                         }
                         return true;
                     });
+                }
+            });
+        }
+
+        if (filters.triState.partPerformance) {
+            Object.entries(filters.triState.partPerformance).forEach(([value, state]) => {
+                if (state === 'checked') {
+                    questions = questions.filter(q => {
+                        return typeof questionHasPartPerformance === 'function'
+                            ? questionHasPartPerformance(q, value)
+                            : false;
+                    });
                 } else if (state === 'excluded') {
                     questions = questions.filter(q => {
-                        if (value === '含圖表') {
-                            return !q.graphType || 
-                                q.graphType === '' || 
-                                q.graphType === '-' || 
-                                q.graphType === '沒有圖';
-                        } else if (value === '有內嵌圖') {
-                            return !(q.inlineDiagrams && String(q.inlineDiagrams).trim());
-                        } else if (value === '含表格') {
-                            return !q.tableType || 
-                                q.tableType === '' || 
-                                q.tableType === '-' || 
-                                q.tableType === '沒有表格';
-                        } else if (value === '複選') {
-                            return !q.multipleSelectionType || 
-                                q.multipleSelectionType === '' || 
-                                q.multipleSelectionType === '-' || 
-                                q.multipleSelectionType === '並非複選型' || 
-                                q.multipleSelectionType === '不適用';
-                        } else if (value === '含計算') {
-                            return !q.calculationType || 
-                                q.calculationType === '' || 
-                                q.calculationType === '-' || 
-                                q.calculationType === '沒有計算';
-                        } else if (value === '跨課題') {
-                            return !q.curriculumClassification || 
-                                !Array.isArray(q.curriculumClassification) || 
-                                q.curriculumClassification.length <= 1;
-                        } else if (value === '跨章節') {
-                            return !q.AristochapterClassification || 
-                                !Array.isArray(q.AristochapterClassification) || 
-                                q.AristochapterClassification.length <= 1;
-                        } else if (value === '已刪除') {
-                            return !q.answerMC || q.answerMC.trim() !== '*';
-                        } else if (value === 'Out syl') {
-                            // Hide if it has 'Y'
-                            return !q.outSyl || q.outSyl.trim().toUpperCase() !== 'Y';
-                        }                          
-                        return true;
+                        return typeof questionHasPartPerformance === 'function'
+                            ? !questionHasPartPerformance(q, value)
+                            : true;
                     });
                 }
             });

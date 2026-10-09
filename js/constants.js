@@ -5,14 +5,15 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.05.11';
+const APP_VERSION = '2026.10.09.1';
 console.log('Question bank version:', APP_VERSION);
 
 // Integer stamped on shared bank JSON as schemaVersion. Bump only when the
 // data shape changes so an older writer would drop fields. Missing field on
 // cloud/file payloads is treated as 0 (see js/schema-version.js).
 // Must stay aligned with Apps Script readBankSchemaVersion_ / upload gate.
-const SCHEMA_VERSION = 1;
+// v2: questionParts [{ label, marks, performance }] for SQ/LQ sub-parts.
+const SCHEMA_VERSION = 2;
 
 // Question-number slider (last digits of the id, e.g. …-01 → 1)
 const QUESTION_NUMBER_RANGE = {
@@ -83,8 +84,27 @@ const FEATURE_ITEMS = [
     '複選',
     '跨課題',
     '跨章節',
+    '有分題',
     '已刪除',
     'Out syl'
+];
+
+// Admin-only blank-content feature filters (見 js/question-fields.js).
+// Shown in 特徵 only when accessRights.admin === true.
+const ADMIN_BLANK_FEATURE_ITEMS = [
+    '題目空白',
+    '答案空白',
+    '評卷報告空白'
+];
+
+// Per-part performance labels (exact values stored on questionParts[].performance).
+const PART_PERFORMANCE_ITEMS = [
+    '優異',
+    '優良',
+    '良好',
+    '令人滿意',
+    '尚可',
+    '欠佳'
 ];
 
 // Chapter range (1-29)
