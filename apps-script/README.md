@@ -321,6 +321,10 @@ The sheet is the audit log, so usernames of people who sign in or generate quest
 
 Login and denied-generation rows are deduped so a public `/exec` URL cannot fill the tab as quickly. Successful generations are always logged.
 
+## Stem-pattern review (`reviewStemPatterns`)
+
+Separate from `generateQuestions`. Auth: `ai`. Reuses the same Poe/OpenRouter key resolution and `requestCompletion_`, with a dedicated system prompt (`STEM_REVIEW_SYSTEM_PROMPT_`) that asks for stemPatterns correctness, shared-template judgement, and suggested strings (prefer an optional `vocabulary` list from the client). Packs `{ id, question, stemPatterns, patterns, concepts, … }` — **not** the generateQuestions reference shape. **Does not** call `writeGitAiBackup_` and **does not** write a `GenerationBackup` sheet row; the browser keeps the transcript in `localStorage` (`econ_stem_review_history_v1`). UsageLog may store metadata only (no reply body). Interval slot key uses `review` (separate from generate/test). After changing `Code.gs`, redeploy the existing `/exec` web app.
+
 ## How a generation is built
 
 The user message starts with the 出題指示, then the reference questions. **Each reference includes stem + answer** (Chi-first: `plainText` / `questionTextChi` for the stem; `answerMC` + `answerChi`, with `answerEng` only when Chi/MC are empty — same fields as **複製篩選題目**). The client packs these as `{ question, explanation }` (`explanation` holds the answer text). Apps Script `packReferences_` / `buildPrompt_` keep both fields and label them `題目：` / `答案：` in the model prompt. An empty answer becomes `（沒有答案）`. Do not strip unknown reference fields.
