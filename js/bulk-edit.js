@@ -964,6 +964,35 @@
                 }
             }
 
+            if (changedProps.indexOf('AristochapterClassification') !== -1
+                && typeof validateChapterClassification === 'function') {
+                var chapterCheck = validateChapterClassification(merged.AristochapterClassification, {
+                    question: merged
+                });
+                if (!chapterCheck.ok) {
+                    errors.push(chapterCheck.error);
+                    return;
+                }
+            }
+
+            if (changedProps.indexOf('examination') !== -1
+                && typeof validateExaminationType === 'function') {
+                var examCheck = validateExaminationType(merged.examination, { question: merged });
+                if (!examCheck.ok) {
+                    errors.push(examCheck.error);
+                    return;
+                }
+            }
+
+            if (changedProps.indexOf('questionType') !== -1
+                && typeof validateQuestionTypeValue === 'function') {
+                var qtypeCheck = validateQuestionTypeValue(merged.questionType, { question: merged });
+                if (!qtypeCheck.ok) {
+                    errors.push(qtypeCheck.error);
+                    return;
+                }
+            }
+
             if (changedProps.indexOf('questionParts') !== -1 || changedProps.indexOf('partsStatus') !== -1) {
                 var partsErr = reconcilePartsFields(merged, row.draft);
                 if (partsErr) {
@@ -975,6 +1004,13 @@
             if (changedProps.indexOf('marks') !== -1
                 || changedProps.indexOf('questionParts') !== -1
                 || changedProps.indexOf('partsStatus') !== -1) {
+                if (typeof validateMarksNonNegative === 'function') {
+                    var marksSignCheck = validateMarksNonNegative(merged);
+                    if (!marksSignCheck.ok) {
+                        errors.push(marksSignCheck.error);
+                        return;
+                    }
+                }
                 if (typeof validatePartMarksSum === 'function') {
                     var marksCheck = validatePartMarksSum(merged);
                     if (!marksCheck.ok) {

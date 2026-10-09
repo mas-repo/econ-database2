@@ -308,6 +308,154 @@
         };
     }
 
+    function questionIdLabel_(question, options) {
+        options = options || {};
+        var id = String(question && question.id != null ? question.id : options.id || '').trim();
+        return id || '（無編號）';
+    }
+
+    /**
+     * Total marks and each part marks must be finite and ≥ 0 when present.
+     * Empty total → treated as 0 (same as form/bulk coerce). Does not run
+     * part-sum equality (use validatePartMarksSum).
+     */
+    function validateMarksNonNegative(question, options) {
+        options = options || {};
+        var idLabel = questionIdLabel_(question, options);
+        var total = parseTotalMarks(question && question.marks);
+        if (total === null) {
+            return { ok: false, error: '題目「' + idLabel + '」的總分無效，請輸入數字（可為 0）。' };
+        }
+        if (total < 0) {
+            return { ok: false, error: '題目「' + idLabel + '」的總分不能為負數。' };
+        }
+        var parts = normalizeQuestionParts(question && question.questionParts);
+        var bad = [];
+        parts.forEach(function (part, index) {
+            if (part.marks === null || part.marks === undefined) return;
+            if (!(Number(part.marks) >= 0)) {
+                bad.push(part.label || String(index + 1));
+            }
+        });
+        if (bad.length) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」分題分數不能為負數（' + bad.join('、') + '）。'
+            };
+        }
+        return { ok: true, error: '' };
+    }
+
+    /**
+     * correctPercentage: empty/null OK; otherwise finite number in [0, 100].
+     */
+    function validateCorrectPercentage(question, options) {
+        options = options || {};
+        var idLabel = questionIdLabel_(question, options);
+        var raw = question && question.correctPercentage;
+        if (raw === null || raw === undefined || String(raw).trim() === '') {
+            return { ok: true, error: '', value: null };
+        }
+        var num = parseFloat(String(raw).trim());
+        if (isNaN(num) || !isFinite(num)) {
+            return { ok: false, error: '題目「' + idLabel + '」的答對率必須是數字，或留空。', value: null };
+        }
+        if (num < 0 || num > 100) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」的答對率須介乎 0 至 100（目前：' + String(num) + '）。',
+                value: null
+            };
+        }
+        return { ok: true, error: '', value: num };
+    }
+
+    /**
+     * Accept Ch01 / Ch1 / 01 / 1 (and spaced variants). Returns padded "01"…"29"
+     * or '' if the token has no usable chapter number.
+     */
+    function parseChapterNumberToken(raw) {
+        var text = String(raw == null ? '' : raw).trim();
+        if (!text || text === '-') return '';
+        var mt = text.match(/^Ch\s*0*(\d{1,2})$/i);
+        if (mt) return String(parseInt(mt[1], 10)).padStart(2, '0');
+        if (/^\d{1,2}$/.test(text)) return String(parseInt(text, 10)).padStart(2, '0');
+        var digits = text.match(/(\d{1,2})/);
+        if (digits) return String(parseInt(digits[1], 10)).padStart(2, '0');
+        return '';
+    }
+
+    /**
+     * Each AristochapterClassification entry must map to CHAPTER_RANGE.
+     * Empty list OK. Does not rewrite stored labels.
+     */
+    function validateChapterClassification(list, options) {
+        options = options || {};
+        var idLabel = questionIdLabel_(options.question || null, options);
+        var items = Array.isArray(list) ? list : [];
+        if (!items.length) return { ok: true, error: '', invalid: [] };
+        var min = (typeof CHAPTER_RANGE !== 'undefined' && CHAPTER_RANGE.min) || 1;
+        var max = (typeof CHAPTER_RANGE !== 'undefined' && CHAPTER_RANGE.max) || 29;
+        var invalid = [];
+        items.forEach(function (item) {
+            var text = String(item == null ? '' : item).trim();
+            if (!text) return;
+            var padded = parseChapterNumberToken(text);
+            if (!padded) {
+                invalid.push(text);
+                return;
+            }
+            var num = parseInt(padded, 10);
+            if (num < min || num > max) invalid.push(text);
+        });
+        if (!invalid.length) return { ok: true, error: '', invalid: [] };
+        return {
+            ok: false,
+            error: '題目「' + idLabel + '」章節不在清單（Ch'
+                + String(min).padStart(2, '0') + '–Ch' + String(max).padStart(2, '0')
+                + '）：' + invalid.join('、'),
+            invalid: invalid
+        };
+    }
+
+    function validateExaminationType(value, options) {
+        options = options || {};
+        var idLabel = questionIdLabel_(options.question || null, options);
+        var text = String(value == null ? '' : value).trim();
+        if (!text) {
+            return { ok: false, error: '題目「' + idLabel + '」請選擇考試類型。' };
+        }
+        var allowed = (typeof EXAMINATION_TYPES !== 'undefined' && Array.isArray(EXAMINATION_TYPES))
+            ? EXAMINATION_TYPES
+            : [];
+        if (allowed.length && allowed.indexOf(text) === -1) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」考試類型須為：' + allowed.join('、') + '（目前：' + text + '）。'
+            };
+        }
+        return { ok: true, error: '' };
+    }
+
+    function validateQuestionTypeValue(value, options) {
+        options = options || {};
+        var idLabel = questionIdLabel_(options.question || null, options);
+        var text = String(value == null ? '' : value).trim();
+        if (!text) {
+            return { ok: false, error: '題目「' + idLabel + '」請選擇題目類型。' };
+        }
+        var allowed = (typeof QUESTION_TYPES !== 'undefined' && Array.isArray(QUESTION_TYPES))
+            ? QUESTION_TYPES
+            : [];
+        if (allowed.length && allowed.indexOf(text) === -1) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」題目類型須為：' + allowed.join('、') + '（目前：' + text + '）。'
+            };
+        }
+        return { ok: true, error: '' };
+    }
+
     // Compact parts text for bulk table: "a,2,良好 | b,3,優良"
     function serializeQuestionPartsCompact(parts) {
         return normalizeQuestionParts(parts).map(function (part) {
@@ -438,6 +586,12 @@
     global.sumPartMarks = sumPartMarks;
     global.validatePartMarksSum = validatePartMarksSum;
     global.validatePartMarksSumMany = validatePartMarksSumMany;
+    global.validateMarksNonNegative = validateMarksNonNegative;
+    global.validateCorrectPercentage = validateCorrectPercentage;
+    global.parseChapterNumberToken = parseChapterNumberToken;
+    global.validateChapterClassification = validateChapterClassification;
+    global.validateExaminationType = validateExaminationType;
+    global.validateQuestionTypeValue = validateQuestionTypeValue;
     global.serializeQuestionPartsCompact = serializeQuestionPartsCompact;
     global.parseQuestionPartsCompact = parseQuestionPartsCompact;
     global.normalizeYear = normalizeYear;

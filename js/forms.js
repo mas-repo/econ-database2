@@ -199,6 +199,28 @@ function setupFormHandler() {
         const graphType = document.getElementById('graph-type').value.trim() || '-';
         const tableType = document.getElementById('table-type').value.trim() || '-';
 
+        const marksRaw = document.getElementById('marks').value.trim();
+        let marksValue = 0;
+        if (marksRaw !== '') {
+            marksValue = parseFloat(marksRaw);
+            if (isNaN(marksValue) || !isFinite(marksValue)) {
+                alert('總分必須是數字（可為 0）。');
+                document.getElementById('marks').focus();
+                return;
+            }
+        }
+
+        const pctRaw = document.getElementById('correct-percentage').value.trim();
+        let percentageValue = null;
+        if (pctRaw !== '') {
+            percentageValue = parseFloat(pctRaw);
+            if (isNaN(percentageValue) || !isFinite(percentageValue)) {
+                alert('答對率必須是數字，或留空。');
+                document.getElementById('correct-percentage').focus();
+                return;
+            }
+        }
+
         const question = {
             id: window.editingId || document.getElementById('question-id').value.trim(),
             publisher: document.getElementById('publisher').value.trim(),
@@ -208,7 +230,7 @@ function setupFormHandler() {
                 : document.getElementById('year').value.trim(),
             paper: document.getElementById('paper').value.trim(),
             questionType: document.getElementById('question-type').value,
-            marks: parseFloat(document.getElementById('marks').value) || 0,
+            marks: marksValue,
             section: document.getElementById('section').value.trim(),
             questionNumber: document.getElementById('question-number').value.trim(),
             questionTextChi: document.getElementById('question-text-chi').value.trim(),
@@ -220,7 +242,7 @@ function setupFormHandler() {
             answerMC: document.getElementById('answer-mc').value.trim(),
             answerChi: document.getElementById('answer-chi').value.trim(),
             answerEng: document.getElementById('answer-eng').value.trim(),
-            correctPercentage: parseFloat(document.getElementById('correct-percentage').value) || null,
+            correctPercentage: percentageValue,
             markersReportChi: document.getElementById('markers-report-chi').value.trim(),
             markersReportEng: document.getElementById('markers-report-eng').value.trim(),
             curriculumClassification: document.getElementById('curriculum-classification').value.split(',').map(s => s.trim()).filter(s => s),
@@ -263,11 +285,59 @@ function setupFormHandler() {
             return;
         }
 
+        if (typeof validateExaminationType === 'function') {
+            const examCheck = validateExaminationType(question.examination, { question: question });
+            if (!examCheck.ok) {
+                alert(examCheck.error);
+                document.getElementById('examination').focus();
+                return;
+            }
+        }
+
+        if (typeof validateQuestionTypeValue === 'function') {
+            const qtypeCheck = validateQuestionTypeValue(question.questionType, { question: question });
+            if (!qtypeCheck.ok) {
+                alert(qtypeCheck.error);
+                document.getElementById('question-type').focus();
+                return;
+            }
+        }
+
         const invalidCurriculum = question.curriculumClassification.filter(item => !CURRICULUM_ITEMS.includes(item));
         if (invalidCurriculum.length) {
             alert('課程分類包含不在清單中的項目：' + invalidCurriculum.join('、'));
             document.getElementById('curriculum-classification').focus();
             return;
+        }
+
+        if (typeof validateChapterClassification === 'function') {
+            const chapterCheck = validateChapterClassification(question.AristochapterClassification, {
+                question: question
+            });
+            if (!chapterCheck.ok) {
+                alert(chapterCheck.error);
+                document.getElementById('chapter-classification').focus();
+                return;
+            }
+        }
+
+        if (typeof validateMarksNonNegative === 'function') {
+            const marksSignCheck = validateMarksNonNegative(question);
+            if (!marksSignCheck.ok) {
+                alert(marksSignCheck.error);
+                document.getElementById('marks').focus();
+                return;
+            }
+        }
+
+        if (typeof validateCorrectPercentage === 'function') {
+            const pctCheck = validateCorrectPercentage(question);
+            if (!pctCheck.ok) {
+                alert(pctCheck.error);
+                document.getElementById('correct-percentage').focus();
+                return;
+            }
+            question.correctPercentage = pctCheck.value;
         }
 
         if (typeof validatePartMarksSum === 'function') {
@@ -281,6 +351,21 @@ function setupFormHandler() {
 
         // Check for duplicates (only when adding new questions)
         if (!window.editingId) {
+            // Hard block: IndexedDB keyPath is id — duplicate would throw ConstraintError.
+            try {
+                const allRows = (typeof window.storage.getAllQuestions === 'function')
+                    ? await window.storage.getAllQuestions()
+                    : await window.storage.getQuestions();
+                const idTaken = (allRows || []).some(q => String(q && q.id) === String(question.id));
+                if (idTaken) {
+                    alert('題目 ID「' + question.id + '」已存在，請改用其他編號。');
+                    document.getElementById('question-id').focus();
+                    return;
+                }
+            } catch (dupErr) {
+                console.warn('duplicate-id check failed', dupErr);
+            }
+
             const isDuplicate = await checkDuplicate(question);
             if (isDuplicate) {
                 const confirmMsg = `已存在相同的題目：\n\n` +
