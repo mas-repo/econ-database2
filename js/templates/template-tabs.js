@@ -2,17 +2,22 @@
 // Generates the tab navigation and all tab content containers.
 // Dependencies: renderFiltersTemplate (template-filters.js), renderFormTemplate (template-form.js)
 
-// Tab registry. To publish a hidden tab, just flip `visible` to true.
-// (Replaces the old commented-out <button> block — do not delete.)
+// Tab registry. Stats grids live under one 「統計」tab (dimension switcher inside).
+// Legacy ids (concepts/topics/…) stay as aliases via switchTab → stats + dimension.
 const TAB_DEFINITIONS = [
-    { id: 'questions',  label: '題目',        visible: true  },
-    { id: 'publishers', label: '出版商統計',   visible: false },
-    { id: 'concepts',   label: '概念',     visible: true  },
-    { id: 'topics',     label: '課程分類', visible: true  },
-    { id: 'chapters',   label: '章節', visible: true  },
-    { id: 'patterns',      label: '題型',     visible: true  },
-    { id: 'stemPatterns',  label: '題幹模式', visible: true  },
+    { id: 'questions', label: '題目', visible: true },
+    { id: 'stats', label: '統計', visible: true }
 ];
+
+// Old top-level stats tab ids → dimension key inside 統計.
+const STAT_TAB_ALIASES = {
+    concepts: 'concepts',
+    topics: 'topics',
+    chapters: 'chapters',
+    patterns: 'patterns',
+    stemPatterns: 'stemPatterns',
+    publishers: 'publishers'
+};
 
 function renderTabsNavTemplate() {
     const visibleTabs = TAB_DEFINITIONS.filter(t => t.visible);
@@ -107,45 +112,27 @@ function renderTabContentsTemplate() {
         </div>
     </div>
 
-    <!-- ===== Statistics Tabs (hidden until published via TAB_DEFINITIONS) ===== -->
-    <div id="publishers-tab" class="tab-content">
-        <h2>出版商統計</h2>
-        <div class="stats-grid" id="publishers-grid"></div>
-    </div>
-
-    <div id="topics-tab" class="tab-content">
-        <h2>課程分類</h2>
-        <div id="topics-stats-filters"></div>
-        <div class="stats-grid" id="topics-grid"></div>
-        <div id="topics-stats-pager" class="pagination-container"></div>
-    </div>
-
-    <div id="chapters-tab" class="tab-content">
-        <h2>章節</h2>
-        <div id="chapters-stats-filters"></div>
-        <div class="stats-grid" id="chapters-grid"></div>
-        <div id="chapters-stats-pager" class="pagination-container"></div>
-    </div>
-
-    <div id="concepts-tab" class="tab-content">
-        <h2>概念</h2>
-        <div id="concepts-stats-filters"></div>
-        <div class="stats-grid" id="concepts-grid"></div>
-        <div id="concepts-stats-pager" class="pagination-container"></div>
-    </div>
-
-    <div id="patterns-tab" class="tab-content">
-        <h2>題型</h2>
-        <div id="patterns-stats-filters"></div>
-        <div class="stats-grid" id="patterns-grid"></div>
-        <div id="patterns-stats-pager" class="pagination-container"></div>
-    </div>
-
-    <div id="stemPatterns-tab" class="tab-content">
-        <h2>題幹模式</h2>
-        <div id="stemPatterns-stats-filters"></div>
-        <div class="stats-grid" id="stemPatterns-grid"></div>
-        <div id="stemPatterns-stats-pager" class="pagination-container"></div>
+    <!-- ===== Unified Statistics Tab ===== -->
+    <div id="stats-tab" class="tab-content">
+        <div class="stats-shell">
+            <div class="stats-shell-head">
+                <h2 id="stats-heading">統計</h2>
+                <div class="stats-mode-toggle" role="group" aria-label="統計模式">
+                    <button type="button" class="stats-mode-btn is-active" data-stats-mode="browse" aria-pressed="true">一維瀏覽</button>
+                    <button type="button" class="stats-mode-btn" data-stats-mode="crosstab" aria-pressed="false">交叉分析</button>
+                </div>
+            </div>
+            <div id="stats-filters"></div>
+            <div id="stats-browse-panel" class="stats-browse-panel">
+                <div class="stats-dimension-bar">
+                    <label for="stats-dimension">分組維度</label>
+                    <select id="stats-dimension" aria-label="統計分組維度"></select>
+                </div>
+                <div class="stats-grid" id="stats-grid"></div>
+                <div id="stats-pager" class="pagination-container"></div>
+            </div>
+            <div id="stats-crosstab-panel" class="stats-crosstab-panel" hidden></div>
+        </div>
     </div>`;
 }
 

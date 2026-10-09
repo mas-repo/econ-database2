@@ -1,39 +1,49 @@
 // tabs.js
 // Tab content renderers for the statistics views.
 //
-// REFACTORED: The old metadata-based renderers (with the "添加備註"
-// textareas) have been removed. Those comments were stored only in the
-// local IndexedDB, which is wiped and rebuilt from the JSON file on every
-// load — so they were never actually persisted. The tab functions
-// now simply delegate to the read-only stat renderers in statistics.js.
+// Unified 「統計」tab: renderStats() refreshes the active dimension / mode.
+// Legacy names (renderConcepts, …) remain for switchTab aliases.
 //
-// Function names are kept identical (renderPublishers, renderTopics, ...)
-// so switchTab() in main.js requires no changes.
-//
-// Dependencies: statistics.js (renderPublisherStats, renderTopicStats,
-//               renderChapterStats, renderConceptStats, renderPatternStats,
-//               renderStemPatternStats)
+// Dependencies: statistics.js, stats-explore.js, stats-filters.js
+
+async function renderStats() {
+    if (typeof initStatsExplore === 'function') initStatsExplore();
+    if (window.statsViewMode === 'crosstab' && typeof renderStatsCrosstab === 'function') {
+        await renderStatsCrosstab();
+        return;
+    }
+    const dim = (typeof getStatsActiveDimension === 'function')
+        ? getStatsActiveDimension()
+        : 'concepts';
+    if (typeof renderGroupedStats === 'function') await renderGroupedStats(dim);
+}
 
 async function renderPublishers() {
-    if (typeof renderPublisherStats === 'function') await renderPublisherStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('publishers');
+    await renderStats();
 }
 
 async function renderTopics() {
-    if (typeof renderTopicStats === 'function') await renderTopicStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('topics');
+    await renderStats();
 }
 
 async function renderChapters() {
-    if (typeof renderChapterStats === 'function') await renderChapterStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('chapters');
+    await renderStats();
 }
 
 async function renderConcepts() {
-    if (typeof renderConceptStats === 'function') await renderConceptStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('concepts');
+    await renderStats();
 }
 
 async function renderPatterns() {
-    if (typeof renderPatternStats === 'function') await renderPatternStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('patterns');
+    await renderStats();
 }
 
 async function renderStemPatterns() {
-    if (typeof renderStemPatternStats === 'function') await renderStemPatternStats();
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('stemPatterns');
+    await renderStats();
 }

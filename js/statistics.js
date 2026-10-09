@@ -1,5 +1,6 @@
 // Statistics functions
-// Dependencies: storage-core.js (window.storage), constants.js (CURRICULUM_NAMES, CURRICULUM_DISPLAY, CURRICULUM_ORDER, CHAPTER_DESCRIPTIONS)
+// Dependencies: storage-core.js (window.storage), constants.js (CURRICULUM_NAMES, CURRICULUM_DISPLAY, CURRICULUM_ORDER, CHAPTER_DESCRIPTIONS),
+// stats-filters.js (STAT_TABS, filter helpers), stats-explore.js (detail / crosstab)
 
 // Get curriculum sort key (extracts letter/code from full name)
 // Dependencies: None
@@ -8,52 +9,18 @@ function getCurriculumSortKey(topic) {
     if (topic.match(/^[A-J]$|^E[12]$/)) {
         return topic;
     }
-    
+
     // Extract the letter/code from the full name
     const match = topic.match(/^([A-J]|E[12])\s/);
     return match ? match[1] : topic;
 }
 
-
-// Dependencies: storage-core.js (window.storage)
+// Legacy entry points (aliases still call these).
 async function renderPublisherStats() {
-    const questions = await window.storage.getQuestions();
-    const stats = {};
-    
-    questions.forEach(q => {
-        const publisher = q.publisher || 'Unknown';
-        if (!stats[publisher]) {
-            stats[publisher] = { total: 0, mc: 0, text: 0 };
-        }
-        stats[publisher].total++;
-        if (q.questionType === 'MC') stats[publisher].mc++;
-        if (q.questionType === '文字題 (SQ/LQ)') stats[publisher].text++;
-    });
-    
-    const grid = document.getElementById('publishers-grid');
-    if (!grid) return;
-    
-    if (Object.keys(stats).length === 0) {
-        grid.innerHTML = '<p class="empty-state">暫無出版社資料</p>';
-        return;
-    }
-    
-    grid.innerHTML = Object.entries(stats)
-        .sort((a, b) => b[1].total - a[1].total)
-        .map(([publisher, data]) => `
-            <div class="stat-card">
-                <h3>${publisher}</h3>
-                <div class="stat-details">
-                    <div>總題目: ${data.total}</div>
-                    <div>MC: ${data.mc}</div>
-                    <div>文字題: ${data.text}</div>
-                </div>
-            </div>
-        `).join('');
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension('publishers');
+    await renderGroupedStats('publishers');
 }
 
-// Grouped statistics (概念 / 課程分類 / Chapters / 題型 / 題幹).
-// Filters and the 「查看題目」 jump live in stats-filters.js.
 async function renderTopicStats() {
     await renderGroupedStats('topics');
 }
@@ -137,17 +104,20 @@ function renderStatsPager(tabId, page, pageSize, rowCount) {
 }
 
 async function renderGroupedStats(tabId, gen) {
-    const cfg = (typeof STAT_TABS !== 'undefined') ? STAT_TABS[tabId] : null;
+    const dim = (typeof resolveStatsDimension === 'function') ? resolveStatsDimension(tabId) : tabId;
+    const cfg = (typeof STAT_TABS !== 'undefined') ? STAT_TABS[dim] : null;
     const grid = cfg && document.getElementById(cfg.gridId);
     if (!cfg || !grid || !window.storage) return;
 
-    if (typeof ensureStatsFilterBar === 'function') ensureStatsFilterBar(tabId);
+    if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension(dim);
+    if (typeof ensureStatsFilterBar === 'function') ensureStatsFilterBar(dim);
+    if (typeof syncStatsDimensionControl === 'function') syncStatsDimensionControl(dim);
 
     const all = await window.storage.getQuestions();
-    if (typeof statsRenderIsCurrent === 'function' && typeof gen === 'number' && !statsRenderIsCurrent(tabId, gen)) return;
+    if (typeof statsRenderIsCurrent === 'function' && typeof gen === 'number' && !statsRenderIsCurrent(dim, gen)) return;
 
     const filtered = (typeof questionsMatchingStatsFilters === 'function')
-        ? questionsMatchingStatsFilters(tabId, all)
+        ? questionsMatchingStatsFilters(dim, all)
         : all;
 
     const counts = new Map();
@@ -165,17 +135,17 @@ async function renderGroupedStats(tabId, gen) {
         });
     });
 
-    const query = (typeof statsNameQuery === 'function') ? statsNameQuery(tabId) : '';
+    const query = (typeof statsNameQuery === 'function') ? statsNameQuery(dim) : '';
     let rows = Array.from(counts.entries()).map(([value, data]) => {
-        const presentation = statsRowPresentation(tabId, value);
+        const presentation = statsRowPresentation(dim, value);
         return { value, data, ...presentation };
     });
     if (query) {
         rows = rows.filter(row => row.searchText.toLowerCase().includes(query));
     }
-    rows = sortStatRows(tabId, rows);
+    rows = sortStatRows(dim, rows);
 
-    const state = getStatsTabState(tabId);
+    const state = getStatsTabState(dim);
     const pageSize = state.pageSize;
     const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(rows.length / pageSize) || 1);
     if (state.page > totalPages) state.page = totalPages;
@@ -183,7 +153,7 @@ async function renderGroupedStats(tabId, gen) {
     const pageRows = pageSize === -1 ? rows : rows.slice((state.page - 1) * pageSize, state.page * pageSize);
 
     window._statsRowIndex = window._statsRowIndex || {};
-    window._statsRowIndex[tabId] = pageRows.map(row => row.value);
+    window._statsRowIndex[dim] = pageRows.map(row => row.value);
 
     const taggedInAll = all.some(q => cfg.valuesOf(q).some(value => String(value == null ? '' : value).trim()));
     if (!pageRows.length) {
@@ -199,28 +169,33 @@ async function renderGroupedStats(tabId, gen) {
                     <div>文字題: ${row.data.text}</div>
                 </div>
                 <div class="stat-card-footer">
-                    <button type="button" class="btn btn-outline-primary btn-sm" data-stats-jump="${tabId}" data-stats-idx="${index}" title="在題目分頁顯示這 ${row.data.total} 題">查看題目</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-stats-detail="${dim}" data-stats-idx="${index}" title="查看此項目的詳細統計">詳細統計</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-stats-jump="${dim}" data-stats-idx="${index}" title="在題目分頁顯示這 ${row.data.total} 題">查看題目</button>
                 </div>
             </div>`).join('');
     }
 
-    renderStatsPager(tabId, state.page, pageSize, rows.length);
-    if (typeof refreshStatsFilterVisibility === 'function') refreshStatsFilterVisibility(tabId, all);
+    renderStatsPager(dim, state.page, pageSize, rows.length);
+    if (typeof refreshStatsFilterVisibility === 'function') refreshStatsFilterVisibility(dim, all);
     if (typeof updateStatsFilterChrome === 'function') {
-        updateStatsFilterChrome(tabId, { questionCount: filtered.length, rowCount: rows.length });
+        updateStatsFilterChrome(dim, { questionCount: filtered.length, rowCount: rows.length });
     }
+    const heading = document.getElementById('stats-heading');
+    if (heading) heading.textContent = '統計 · ' + cfg.label;
 }
 
 window.renderStatsTab = function (tabId, gen) {
     return renderGroupedStats(tabId, gen);
 };
 
-// Dependencies: None (calls all render functions)
 async function refreshStatistics() {
-    await renderPublisherStats();
-    await renderTopicStats();
-    await renderChapterStats();
-    await renderConceptStats();
-    await renderPatternStats();
-    await renderStemPatternStats();
+    if (typeof window.statsViewMode !== 'undefined' && window.statsViewMode === 'crosstab'
+        && typeof window.renderStatsCrosstab === 'function') {
+        await window.renderStatsCrosstab();
+        return;
+    }
+    const dim = (typeof getStatsActiveDimension === 'function')
+        ? getStatsActiveDimension()
+        : 'concepts';
+    await renderGroupedStats(dim);
 }
