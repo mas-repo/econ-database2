@@ -334,10 +334,15 @@ function valuesOnQuestion(q, def) {
     if (def.kind === 'ai') {
         return (q.AIExplanation && String(q.AIExplanation).trim() !== '') ? ['AI 詳解'] : [];
     }
+    if (def.kind === 'year') {
+        const key = typeof normalizeYearFilterKey === 'function'
+            ? normalizeYearFilterKey(q.year)
+            : String(q.year == null ? '' : q.year).trim();
+        return key ? [key] : [];
+    }
     const field = def.field || (
         def.kind === 'qtype' ? 'questionType'
             : def.kind === 'exam' ? 'examination'
-            : def.kind === 'year' ? 'year'
             : def.kind === 'paper' ? 'paper'
             : def.kind === 'section' ? 'section'
             : def.kind === 'publisher' ? 'publisher'
@@ -415,8 +420,11 @@ function sortFilterValues(def, values, state) {
         }
         if (def.kind === 'year') {
             const yearRank = (value) => {
-                if (/^\d{4}$/.test(value)) return 30000 - parseInt(value, 10);
-                if (/^\d{1,3}$/.test(value)) return 10000 - parseInt(value, 10);
+                const key = typeof normalizeYearFilterKey === 'function'
+                    ? normalizeYearFilterKey(value)
+                    : String(value);
+                if (/^\d{4}$/.test(key)) return 30000 - parseInt(key, 10);
+                if (/^\d{1,3}$/.test(key)) return 10000 - parseInt(key, 10);
                 return 20000;
             };
             const diff = yearRank(a) - yearRank(b);

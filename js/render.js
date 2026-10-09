@@ -351,7 +351,18 @@ async function renderQuestions() {
                 <div class="question-badges">
                     ${q.reviewedByAI === 'Y' ? `<span class="badge" title="上次覆核 ${escapeHTML(q.lastReviewDate || '')}">AI已覆核</span>` : `<span class="badge" title="尚未人工覆核">未覆核</span>`}
                     ${q.publisher && q.publisher !== '-' ? `<span class="badge" style="cursor: pointer;" data-action="filter" data-type="publisher" data-value="${escapeHTML(q.publisher)}" title="點擊以篩選此出版商">${escapeHTML(q.publisher)}</span>` : ''}
-                    ${q.year && q.year !== '-' ? `<span class="badge badge-year" style="cursor: pointer;" data-action="filter" data-type="year" data-value="${escapeHTML(q.year)}" title="點擊以篩選此年份">${escapeHTML(/^\d{1,3}$/.test(String(q.year).trim()) ? `MT${String(q.year).trim()}` : q.year)}</span>` : ''}
+                    ${q.year && q.year !== '-' ? (() => {
+                        const yearKey = typeof normalizeYearFilterKey === 'function'
+                            ? normalizeYearFilterKey(q.year)
+                            : String(q.year).trim();
+                        const yearLabel = typeof yearFilterLabel === 'function'
+                            ? yearFilterLabel(yearKey || q.year)
+                            : (/^\d{1,3}$/.test(String(yearKey || q.year).trim())
+                                ? `MT${String(yearKey || q.year).trim()}`
+                                : String(q.year));
+                        const yearValue = yearKey || String(q.year).trim();
+                        return `<span class="badge badge-year" style="cursor: pointer;" data-action="filter" data-type="year" data-value="${escapeHTML(yearValue)}" title="點擊以篩選此年份">${escapeHTML(yearLabel)}</span>`;
+                    })() : ''}
                     ${q.questionType && q.questionType !== '-' ? `<span class="badge badge-type" style="cursor: pointer;" data-action="filter" data-type="qtype" data-value="${escapeHTML(q.questionType)}" title="點擊以篩選此題型">${escapeHTML(q.questionType)}</span>` : ''}
                     ${q.marks > 0 ? `<span class="badge badge-marks" style="cursor: pointer;" data-action="filter-marks" data-value="${q.marks}" title="點擊以篩選此分數">${q.marks}分</span>` : ''}
                     ${q.section && q.section !== '-' ? `<span class="badge badge-section" style="cursor: pointer;" data-action="filter" data-type="section" data-value="${escapeHTML(q.section)}" title="點擊以篩選此部分">${escapeHTML(sectionDisplay)}</span>` : ''}
