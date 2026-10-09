@@ -1,8 +1,9 @@
 # Filter system map — econ-database2
 
 Checkout: `main` @ `30d228f` (branch `cursor/filters-review-d2f5` tracks `origin/main`).  
+**Prioritized improvement list:** [`docs/filters-review-2026-10-09.md`](./filters-review-2026-10-09.md).  
 Scope: how 題目 / 統計 / 進階篩選 / ConditionMatch / partsStatus / admin blanks / AI解釋 filters relate.  
-Constraint: map + pain points + bugs; prefer consolidations and small fixes over UI rewrites.
+Constraint: map + pain points + bugs; prefer consolidations and small fixes over UI rewrites. No drive-by UI rewrite.
 
 ---
 
