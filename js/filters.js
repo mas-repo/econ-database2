@@ -96,17 +96,76 @@ const PRIORITY_CONFIG = {
 };
 
 /**
+ * Clear viewport-clamping styles applied by positionFilterDropdownInViewport.
+ */
+function clearFilterDropdownPosition(panel) {
+    if (!panel || !panel.style) return;
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.maxWidth = '';
+    panel.classList.remove('dropdown-align-end');
+}
+
+/**
+ * Keep an open filter panel inside the viewport.
+ * Wide panels (Chapters / Years) use min-width larger than their column; when
+ * the trigger sits on the far right they would otherwise overflow. Flip to
+ * right-align, then clamp left / max-width if still needed.
+ */
+function positionFilterDropdownInViewport(panel) {
+    if (!panel) return;
+    clearFilterDropdownPosition(panel);
+
+    const computed = window.getComputedStyle(panel);
+    if (computed.position === 'static') return;
+
+    const anchor = panel.closest('.dropdown-filter') || panel.parentElement;
+    if (!anchor) return;
+
+    const margin = 8;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    if (vw <= 0) return;
+
+    const maxWidth = Math.max(120, vw - margin * 2);
+    panel.style.maxWidth = maxWidth + 'px';
+
+    // Default: align to the trigger's left edge.
+    panel.style.left = '0';
+    panel.style.right = 'auto';
+
+    let rect = panel.getBoundingClientRect();
+    if (rect.right > vw - margin) {
+        panel.style.left = 'auto';
+        panel.style.right = '0';
+        panel.classList.add('dropdown-align-end');
+        rect = panel.getBoundingClientRect();
+    }
+
+    if (rect.left < margin) {
+        const anchorRect = anchor.getBoundingClientRect();
+        const nextLeft = Math.round(margin - anchorRect.left);
+        panel.style.right = 'auto';
+        panel.style.left = nextLeft + 'px';
+        panel.classList.remove('dropdown-align-end');
+    }
+}
+
+/**
  * Helper: Closes ALL dropdowns and resets all arrow icons.
  */
 function closeAllDropdowns() {
     document.querySelectorAll('.dropdown-content').forEach(d => {
         d.classList.remove('active');
+        clearFilterDropdownPosition(d);
     });
 
     ['curriculum', 'chapter', 'feature', 'partPerformance', 'year'].forEach(type => {
         const sectionId = type === 'partPerformance' ? 'part-performance-options' : `${type}-options`;
         const section = document.getElementById(sectionId);
-        if (section) section.style.display = 'none';
+        if (section) {
+            section.style.display = 'none';
+            clearFilterDropdownPosition(section);
+        }
     });
 
     Object.values(ARROW_MAP).forEach(arrowId => {
@@ -196,6 +255,11 @@ function toggleDropdown(dropdownId) {
                 }
             }
         }
+
+        // Position after layout so wide panels (Chapters / Years) stay on-screen.
+        requestAnimationFrame(function () {
+            positionFilterDropdownInViewport(target);
+        });
     }
 
     updateDynamicDropdowns();
@@ -210,6 +274,26 @@ document.addEventListener('click', function(event) {
         closeAllDropdowns();
         updateDynamicDropdowns();
     }
+});
+
+// Re-clamp open filter panels when the viewport size changes.
+window.addEventListener('resize', function () {
+    const openIds = [
+        'curriculum-options',
+        'feature-options',
+        'part-performance-options',
+        'chapter-options',
+        'year-options'
+    ];
+    openIds.forEach(function (id) {
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const shown = panel.style.display === 'grid' || panel.style.display === 'block';
+        if (shown) positionFilterDropdownInViewport(panel);
+    });
+    document.querySelectorAll('.dropdown-content.active').forEach(function (panel) {
+        positionFilterDropdownInViewport(panel);
+    });
 });
 
 function toggleTriState(element) {
