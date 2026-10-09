@@ -65,6 +65,7 @@ function renderTabContentsTemplate() {
         <div class="action-bar">
             <div>
                 <button class="btn btn-success btn-admin-only" onclick="toggleForm()">➕ 新增題目</button>
+                <button class="btn btn-outline-primary btn-admin-only" onclick="openBulkEditModal()">📋 批量編輯</button>
                 <button class="btn btn-outline-primary btn-admin-only" onclick="exportJSON()">📥 匯出 JSON</button>
                 <button class="btn btn-outline-primary btn-admin-only" onclick="importJSON()">📤 匯入 JSON</button>
                 <button class="btn btn-outline-danger btn-admin-only" onclick="clearDatabase()">🗑️ 清除資料庫</button>

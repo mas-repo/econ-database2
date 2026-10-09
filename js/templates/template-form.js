@@ -46,7 +46,7 @@ function renderFormTemplate() {
                 <div class="form-group">
                     <label for="marks">分數</label>
                     <input type="number" id="marks" min="0" step="0.5">
-                    <small style="display:block;margin-top:4px;color:var(--text-light);font-size:12px;">總分以本欄為準；下方分題分數只作明細，不會自動加總覆寫。</small>
+                    <small style="display:block;margin-top:4px;color:var(--text-light);font-size:12px;">總分以本欄為準；有分題時各分分數合計必須等於總分（不會自動加總覆寫）。</small>
                 </div>
                 <div class="form-group">
                     <label for="section">Section</label>
@@ -72,7 +72,7 @@ function renderFormTemplate() {
             <div class="form-group" style="grid-column: 1 / -1;">
                 <label>分題分數／表現（選填）</label>
                 <p style="margin:0 0 8px;color:var(--text-light);font-size:12px;line-height:1.45;">
-                    用於 SQ/LQ 分題。每列可填分題標籤（如 a、b）、該分分數，以及表現等級。總分仍以「分數」欄為準。
+                    用於 SQ/LQ 分題。每列可填分題標籤（如 a、b）、該分分數，以及表現等級。有分題時每一分都必須有分數，且合計須等於上方「分數」總分。
                 </p>
                 <div id="question-parts-list" class="question-parts-list"></div>
                 <button type="button" class="btn btn-outline-primary btn-sm" id="question-parts-add" onclick="addQuestionPartRow()">＋ 新增分題</button>

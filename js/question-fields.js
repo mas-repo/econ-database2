@@ -9,6 +9,8 @@
 //
 // questionParts: [{ label, marks, performance }, ...]
 // Total marks (question.marks) stays authoritative — parts do not auto-sum into it.
+// When parts exist, validatePartMarksSum requires every part to have marks and
+// sum(part.marks) === marks (tolerance PART_MARKS_SUM_TOLERANCE).
 
 (function (global) {
     'use strict';
@@ -145,6 +147,109 @@
         return any ? total : null;
     }
 
+    // Float tolerance for 0.5-step marks (and minor float noise).
+    var PART_MARKS_SUM_TOLERANCE = 0.001;
+
+    function parseTotalMarks(raw) {
+        if (raw === null || raw === undefined || String(raw).trim() === '') return 0;
+        var num = parseFloat(String(raw).trim());
+        if (isNaN(num) || !isFinite(num)) return null;
+        return num;
+    }
+
+    /**
+     * When questionParts is empty/absent → ok (no sum check).
+     * When one or more parts exist:
+     *   - every part must have a numeric marks value
+     *   - sum(part.marks) must equal top-level marks within PART_MARKS_SUM_TOLERANCE
+     * Does not mutate marks; validation only.
+     * Returns { ok, error, sum, total, partsCount } with Traditional Chinese error text.
+     */
+    function validatePartMarksSum(question, options) {
+        options = options || {};
+        var id = String(question && question.id != null ? question.id : options.id || '').trim();
+        var idLabel = id || '（無編號）';
+        var parts = normalizeQuestionParts(question && question.questionParts);
+        if (!parts.length) {
+            return { ok: true, error: '', sum: null, total: parseTotalMarks(question && question.marks), partsCount: 0 };
+        }
+        var missing = [];
+        parts.forEach(function (part, index) {
+            if (part.marks === null || part.marks === undefined) {
+                missing.push(part.label || String(index + 1));
+            }
+        });
+        if (missing.length) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」有分題但缺少分數（' + missing.join('、') + '）。有分題時每一分題都必須填分數，且合計須等於總分。',
+                sum: null,
+                total: parseTotalMarks(question && question.marks),
+                partsCount: parts.length
+            };
+        }
+        var sum = 0;
+        parts.forEach(function (part) { sum += Number(part.marks); });
+        var total = parseTotalMarks(question && question.marks);
+        if (total === null) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」的總分無效；有分題時總分必須是數字，且等於各分題分數合計。',
+                sum: sum,
+                total: null,
+                partsCount: parts.length
+            };
+        }
+        if (Math.abs(sum - total) > PART_MARKS_SUM_TOLERANCE) {
+            return {
+                ok: false,
+                error: '題目「' + idLabel + '」分題分數合計為 ' + String(sum) + '，與總分 ' + String(total) + ' 不符。請修正後再儲存（總分不會自動覆寫）。',
+                sum: sum,
+                total: total,
+                partsCount: parts.length
+            };
+        }
+        return { ok: true, error: '', sum: sum, total: total, partsCount: parts.length };
+    }
+
+    function validatePartMarksSumMany(questions) {
+        var errors = [];
+        (questions || []).forEach(function (question) {
+            var result = validatePartMarksSum(question);
+            if (!result.ok) errors.push(result.error);
+        });
+        return {
+            ok: errors.length === 0,
+            errors: errors,
+            error: errors.length ? errors.join('\n') : ''
+        };
+    }
+
+    // Compact parts text for bulk table: "a,2,良好 | b,3,優良"
+    function serializeQuestionPartsCompact(parts) {
+        return normalizeQuestionParts(parts).map(function (part) {
+            var marks = part.marks === null || part.marks === undefined ? '' : String(part.marks);
+            return [part.label || '', marks, part.performance || ''].join(',');
+        }).join(' | ');
+    }
+
+    function parseQuestionPartsCompact(text) {
+        var raw = String(text == null ? '' : text).trim();
+        if (!raw) return [];
+        var chunks = raw.split('|');
+        var list = [];
+        chunks.forEach(function (chunk) {
+            var piece = String(chunk || '').trim();
+            if (!piece) return;
+            var bits = piece.split(',');
+            var label = (bits[0] == null ? '' : String(bits[0])).trim();
+            var marks = bits.length > 1 ? String(bits[1]).trim() : '';
+            var performance = bits.length > 2 ? bits.slice(2).join(',').trim() : '';
+            list.push({ label: label, marks: marks, performance: performance });
+        });
+        return normalizeQuestionParts(list);
+    }
+
     function questionSearchText(question, scope) {
         scope = scope || 'all';
         var parts = [];
@@ -186,6 +291,11 @@
     global.questionHasPartPerformance = questionHasPartPerformance;
     global.questionHasPartMarks = questionHasPartMarks;
     global.sumPartMarks = sumPartMarks;
+    global.validatePartMarksSum = validatePartMarksSum;
+    global.validatePartMarksSumMany = validatePartMarksSumMany;
+    global.serializeQuestionPartsCompact = serializeQuestionPartsCompact;
+    global.parseQuestionPartsCompact = parseQuestionPartsCompact;
     global.questionSearchText = questionSearchText;
     global.ADMIN_BLANK_FEATURE_ITEMS = ADMIN_BLANK_FEATURES;
+    global.PART_MARKS_SUM_TOLERANCE = PART_MARKS_SUM_TOLERANCE;
 })(window);

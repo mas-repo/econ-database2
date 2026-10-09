@@ -199,6 +199,15 @@ function setupFormHandler() {
             return;
         }
 
+        if (typeof validatePartMarksSum === 'function') {
+            const marksCheck = validatePartMarksSum(question);
+            if (!marksCheck.ok) {
+                alert(marksCheck.error);
+                document.getElementById('marks').focus();
+                return;
+            }
+        }
+
         // Check for duplicates (only when adding new questions)
         if (!window.editingId) {
             const isDuplicate = await checkDuplicate(question);

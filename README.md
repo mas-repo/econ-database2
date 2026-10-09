@@ -69,7 +69,11 @@ The button **AI出題** is hidden until Apps Script returns `ai: true` for the s
 
 ## 分題 / questionParts
 
-SQ/LQ sub-parts store as `questionParts: [{ label, marks, performance }, …]` (`SCHEMA_VERSION` 2). **`marks` (total) stays authoritative** — the form does not auto-sum parts into total. `performance` values are exactly: 優異、優良、良好、令人滿意、尚可、欠佳. Filters: 特徵 **有分題**; dropdown **分題表現**; advanced **分題表現** / **分題分數**.
+SQ/LQ sub-parts store as `questionParts: [{ label, marks, performance }, …]` (`SCHEMA_VERSION` 2). **`marks` (total) stays authoritative** — the form does not auto-sum parts into total. When one or more parts exist, **every part must have numeric `marks` and `sum(part.marks)` must equal total `marks`** (tolerance `0.001`; see `validatePartMarksSum` in `js/question-fields.js`). Empty/absent parts skip the sum check. Validation runs on the single-question form and the admin **批量編輯** modal. `performance` values are exactly: 優異、優良、良好、令人滿意、尚可、欠佳. Filters: 特徵 **有分題**; dropdown **分題表現**; advanced **分題表現** / **分題分數**.
+
+## 批量編輯 / Bulk edit (admin mode)
+
+**批量編輯** (`js/bulk-edit.js`) is an independent modal shown only with `accessRights.admin` **and** 管理員模式 (`btn-admin-only`). It loads the **current filtered** 題目 list (cap 300 rows), one editable row per question, for Chapters (`AristochapterClassification`), 課程分類 (`curriculumClassification`), total `marks`, and compact `questionParts` (`a,2,良好 | b,3,優良`). Save writes only changed rows after confirm; curriculum must match `CURRICULUM_ITEMS`; part-sum validation applies. Uses existing IndexedDB update + optional 自動同步 — no separate upload path.
 
 ## Admin blank filters (admin only)
 
