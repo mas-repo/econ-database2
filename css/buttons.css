@@ -368,28 +368,30 @@ header .header-toolbar-btn[hidden] {
     display: none !important;
 }
 
-/* Admin / account chips on the purple–blue header gradient: light text +
-   translucent fill (same family as .btn-info / 重新載入), not teal outline. */
+/* Admin / account chips on the purple–blue header gradient.
+   Screenshot reference: teal-on-purple outline chips were unreadable;
+   match .btn-info /「重新載入資料」(light fill + white label + light border). */
 header .btn.btn-outline-primary,
 header .header-toolbar-btn {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.22);
     color: #ffffff;
     border: 2px solid rgba(255, 255, 255, 0.55);
-    text-shadow: 0 1px 1px rgba(40, 20, 70, 0.25);
+    text-shadow: 0 1px 1px rgba(40, 20, 70, 0.28);
 }
 
 header .btn.btn-outline-primary:hover,
 header .header-toolbar-btn:hover {
-    background: rgba(255, 255, 255, 0.32);
+    background: rgba(255, 255, 255, 0.34);
     color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.9);
     box-shadow: 0 4px 12px rgba(30, 16, 60, 0.22);
 }
 
 header .btn.btn-outline-primary:active,
 header .header-toolbar-btn:active {
-    background: rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.26);
     color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.75);
 }
 
 /* Logout stays available after sign-in. */
