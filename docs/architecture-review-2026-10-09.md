@@ -63,6 +63,7 @@ Entry: `doPost` → `handlePost_` (`apps-script/Code.gs`).
 | `checkAccess` / `checkRights`, `logLogin` | known hash lists | none / log |
 | `generateQuestions`, `continueGeneration`, `testModel` | `ai` (+ key rules) | usage log; optional AI backup under `users/` |
 | `generateAiExplanation`, `voteAiExplanation`, `feedbackAiExplanation` | `ai` | `shared/data/ai-explanations.json` |
+| `deleteAiExplanation` | `admin` | `shared/data/ai-explanations.json` |
 | `listAiExplanationFeedback` | `admin` | read side file |
 | `reportIssue` | `known` | `shared/data/issue-reports.json` |
 | `listIssueReports` | `admin` | read side file |

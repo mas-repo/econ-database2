@@ -114,6 +114,7 @@
  *   generateAiExplanation     → handleGenerateAiExplanation_  (ai)
  *   voteAiExplanation         → handleVoteAiExplanation_      (ai)
  *   feedbackAiExplanation     → handleFeedbackAiExplanation_  (ai)
+ *   deleteAiExplanation       → handleDeleteAiExplanation_    (admin)
  *   listAiExplanationFeedback → handleListAiExplanationFeedback_ (admin)
  *   updateAiExplanationFeedbackStatus → handleUpdateAiExplanationFeedbackStatus_ (admin)
  *   bulkUpdateAiExplanationFeedbackStatus → handleBulkUpdateAiExplanationFeedbackStatus_ (admin)
@@ -217,6 +218,7 @@ function handlePost_(e) {
   if (action === 'generateAiExplanation') return handleGenerateAiExplanation_(body);
   if (action === 'voteAiExplanation') return handleVoteAiExplanation_(body);
   if (action === 'feedbackAiExplanation') return handleFeedbackAiExplanation_(body);
+  if (action === 'deleteAiExplanation') return handleDeleteAiExplanation_(body);
   if (action === 'listAiExplanationFeedback') return handleListAiExplanationFeedback_(body);
   if (action === 'updateAiExplanationFeedbackStatus') return handleUpdateAiExplanationFeedbackStatus_(body);
   if (action === 'bulkUpdateAiExplanationFeedbackStatus') return handleBulkUpdateAiExplanationFeedbackStatus_(body);
@@ -853,7 +855,9 @@ var AI_EXPLANATIONS_MAX_PER_QUESTION_ = 30;
 var AI_EXPLANATIONS_MAX_FEEDBACK_ = 40;
 var AI_EXPLANATION_SYSTEM_PROMPT_ = [
   '你是香港 DSE／公開試經濟科導師。請根據使用者提供的題幹與答案撰寫「AI解釋」。',
-  '用繁體中文（香港）。解說要正確、清楚，適合學生閱讀。',
+  '必須以中英雙語撰寫解釋：先繁體中文（香港），再英文；可用清楚標題分段（例如「中文」「English」）。',
+  '題目與答案可能同時提供中文與英文版本；兩者都要參考，不要只根據其中一種語言。',
+  '解說要正確、清楚，適合學生閱讀。',
   '不要虛構題目沒有的資料；若答案資料不足，請明確說明。',
   '不要輸出外部連結。'
 ].join('');
@@ -946,7 +950,9 @@ function mutateAiExplanationsStore_(username, message, mutator) {
       path: written.path,
       explanation: result.explanation || null,
       explanations: result.explanations || null,
-      feedback: result.feedback || null
+      feedback: result.feedback || null,
+      deletedId: result.deletedId || null,
+      questionId: result.questionId || null
     };
   } catch (err) {
     if (held) {
@@ -1000,14 +1006,72 @@ function publicExplanationView_(exp, viewer) {
   };
 }
 
+function blankAiField_(value) {
+  var text = String(value == null ? '' : value).trim();
+  if (!text || text === '-') return '';
+  return text;
+}
+
+// Pack one bank row for AI解釋: always keep Chinese + English stem/answer
+// (plus MC letter) so the model sees both languages. Falls back to legacy
+// `question` / `explanation` fields when bilingual fields are absent.
+function packAiExplanationQuestion_(raw) {
+  var item = raw && typeof raw === 'object' ? raw : {};
+  var questionChi = blankAiField_(
+    item.questionChi || item.questionTextChi || item.question || item.plainText
+  );
+  var questionEng = blankAiField_(item.questionEng || item.questionTextEng);
+  if (questionChi) questionChi = clip_(questionChi, 6000);
+  if (questionEng) questionEng = clip_(questionEng, 6000);
+  if (!questionChi && !questionEng) return null;
+
+  var answerMC = blankAiField_(item.answerMC);
+  if (answerMC) answerMC = clip_(answerMC, 40);
+  var answerChi = blankAiField_(item.answerChi);
+  var answerEng = blankAiField_(item.answerEng);
+  if (answerChi) answerChi = clip_(answerChi, 6000);
+  if (answerEng) answerEng = clip_(answerEng, 6000);
+  var legacyAnswer = blankAiField_(item.explanation || item.answer);
+  if (legacyAnswer) legacyAnswer = clip_(legacyAnswer, 6000);
+  if (!answerChi && !answerEng && !answerMC && legacyAnswer) {
+    answerChi = legacyAnswer;
+  }
+
+  return {
+    id: clip_(item.id, 80),
+    examination: clip_(item.examination, 40),
+    year: clip_(item.year, 20),
+    questionType: clip_(item.questionType, 40),
+    concepts: clip_(item.concepts, 300),
+    questionChi: questionChi,
+    questionEng: questionEng,
+    answerMC: answerMC,
+    answerChi: answerChi,
+    answerEng: answerEng,
+    // Legacy aliases kept for older clients / logs.
+    question: questionChi || questionEng,
+    explanation: answerChi || answerEng || answerMC || ''
+  };
+}
+
+function formatAiAnswerBlock_(mc, written) {
+  var letter = blankAiField_(mc);
+  var text = blankAiField_(written);
+  if (letter && text) {
+    return text.indexOf(letter) !== -1 ? text : letter + '\n' + text;
+  }
+  return letter || text || '';
+}
+
 function buildAiExplanationPrompt_(question, detailLevel) {
   var levelLabel = detailLevel === 'detailed' ? '詳盡' : '簡短';
   var lines = [];
   lines.push('請為以下經濟科題目撰寫「' + levelLabel + '」AI解釋。');
+  lines.push('輸出必須為中英雙語（Chinese + English）：先寫繁體中文解釋，再寫對應的英文解釋。');
   if (detailLevel === 'detailed') {
-    lines.push('要求：完整解題步驟、關鍵概念、常見陷阱，以及對照標準答案的說明。篇幅可較長。');
+    lines.push('詳盡要求：完整解題步驟、關鍵概念、常見陷阱，以及對照標準答案的說明；中文與英文兩部分都要涵蓋上述要點，篇幅可較長。');
   } else {
-    lines.push('要求：精簡重點（核心概念 + 答案要點），約 150–350 字，避免冗長。');
+    lines.push('簡短要求：精簡重點（核心概念 + 答案要點）；中文與英文各約精簡一段，避免冗長。');
   }
   lines.push('');
   if (question.id) lines.push('題號：' + question.id);
@@ -1015,10 +1079,14 @@ function buildAiExplanationPrompt_(question, detailLevel) {
   if (question.year) lines.push('年份：' + question.year);
   if (question.questionType) lines.push('題型：' + question.questionType);
   if (question.concepts) lines.push('概念：' + question.concepts);
-  lines.push('題幹：');
-  lines.push(String(question.question || '').trim() || '（沒有題幹）');
-  lines.push('答案：');
-  lines.push(String(question.explanation || '').trim() || '（沒有答案）');
+  lines.push('題幹（中文）：');
+  lines.push(blankAiField_(question.questionChi || question.question) || '（沒有中文題幹）');
+  lines.push('Question (English):');
+  lines.push(blankAiField_(question.questionEng) || '(No English stem)');
+  lines.push('答案（中文）：');
+  lines.push(formatAiAnswerBlock_(question.answerMC, question.answerChi || question.explanation) || '（沒有中文答案）');
+  lines.push('Answer (English):');
+  lines.push(formatAiAnswerBlock_(question.answerMC, question.answerEng) || '(No English answer)');
   return lines.join('\n');
 }
 
@@ -1034,9 +1102,8 @@ function handleGenerateAiExplanation_(body) {
   var questionId = String(body.questionId || (body.question && body.question.id) || '').trim();
   if (!questionId || questionId.length > 80) return { ok: false, error: 'bad_request' };
   var detailLevel = normalizeAiDetailLevel_(body.detailLevel);
-  var packed = packReferences_([body.question || body], 1, 20000);
-  if (!packed.questions.length) return { ok: false, error: 'no_reference_questions' };
-  var qref = packed.questions[0];
+  var qref = packAiExplanationQuestion_(body.question || body);
+  if (!qref) return { ok: false, error: 'no_reference_questions' };
   qref.id = questionId;
 
   var dailyLimit = nonNegativeInt_(props_().getProperty('POE_DAILY_LIMIT'), 40);
@@ -1155,6 +1222,56 @@ function handleGenerateAiExplanation_(body) {
     }, true);
     return { ok: false, error: code };
   }
+}
+
+function handleDeleteAiExplanation_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var questionId = String(body.questionId || '').trim();
+  var explanationId = String(body.explanationId || '').trim();
+  if (!questionId || !explanationId) return { ok: false, error: 'bad_request' };
+  if (questionId.length > 80 || explanationId.length > 80) return { ok: false, error: 'bad_request' };
+
+  var saved = mutateAiExplanationsStore_(username, 'Delete AI explanation ' + explanationId, function (store) {
+    var list = listExplanationsForQuestion_(store, questionId);
+    var next = [];
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && String(list[i].id) === explanationId) {
+        found = true;
+        continue;
+      }
+      next.push(list[i]);
+    }
+    if (!found) return { ok: false, error: 'not_found' };
+    if (!next.length) {
+      delete store.byQuestion[questionId];
+    } else {
+      if (!store.byQuestion[questionId] || typeof store.byQuestion[questionId] !== 'object') {
+        store.byQuestion[questionId] = { explanations: [] };
+      }
+      store.byQuestion[questionId].explanations = next;
+    }
+    return {
+      ok: true,
+      questionId: questionId,
+      deletedId: explanationId,
+      explanations: next.map(function (item) {
+        return publicExplanationView_(item, username);
+      })
+    };
+  });
+  if (!saved || saved.ok !== true) {
+    return { ok: false, error: (saved && saved.error) || 'github_error' };
+  }
+  return {
+    ok: true,
+    questionId: questionId,
+    deletedId: saved.deletedId || explanationId,
+    explanations: Array.isArray(saved.explanations) ? saved.explanations : [],
+    sha: saved.sha,
+    path: saved.path
+  };
 }
 
 function handleVoteAiExplanation_(body) {
