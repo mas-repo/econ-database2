@@ -305,6 +305,23 @@
     gap: 8px 12px;
 }
 
+/* Detail meta strip: 詳盡 / model / datetime — light text on purple. */
+.ai-explain-card-head {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
+    color: #f7f2ff;
+}
+
+.ai-explain-card-head .ai-explain-pill {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.ai-explain-card-head .ai-explain-meta {
+    color: #e8ddff;
+}
+
 .ai-explain-pill {
     display: inline-block;
     padding: 2px 8px;
@@ -316,7 +333,7 @@
 }
 
 .ai-explain-meta {
-    color: var(--text-light, #667788);
+    color: #445566;
     font-size: 0.82rem;
 }
 
