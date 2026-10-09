@@ -462,13 +462,18 @@
     function bindEscape() {
         if (escapeHandlerBound) return;
         escapeHandlerBound = true;
+        // Capture phase: see settings while it is still open. Bubble-phase
+        // listeners run after settings Esc has already closed it, which would
+        // incorrectly close AI解釋 on the same keypress.
         document.addEventListener('keydown', function (event) {
             if (event.key !== 'Escape') return;
-            // Settings overlay (z-index above) owns Escape while open.
             if (global.PoeGenerate && typeof PoeGenerate.isSettingsModalOpen === 'function'
                 && PoeGenerate.isSettingsModalOpen()) {
                 return;
             }
+            if (document.body.classList.contains('poe-settings-open')) return;
+            var settingsOverlay = document.getElementById('poe-settings-overlay');
+            if (settingsOverlay && !settingsOverlay.hidden) return;
             if (feedbackOverlay && !feedbackOverlay.hidden) {
                 closeFeedbackPrompt();
                 return;
@@ -478,7 +483,7 @@
                 return;
             }
             if (overlay && !overlay.hidden) closeModal();
-        });
+        }, true);
     }
 
     function selectedExplanation() {
