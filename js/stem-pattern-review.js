@@ -18,12 +18,16 @@
     var HISTORY_LIMIT = 20;
     var SEND_CAP = 20;
     var LIST_CAP = 400;
+    var EMPTY_STEM_KEY = '__empty_stem__';
+    var EMPTY_PATTERN_KEY = '__empty_pattern__';
     var overlay = null;
     var selectedIds = {}; // id → true
     var loadedQuestions = []; // current picker rows
     var reviewBusy = false;
     var lastReply = '';
     var applyDraft = {}; // id → comma string for suggested stemPatterns
+    var bulkGroupMode = 'stem'; // 'stem' | 'pattern'
+    var bulkGroupOptions = []; // [{ key, label, ids }]
 
     function Poe() {
         return window.PoeGenerate || null;
@@ -57,9 +61,23 @@
         ).trim();
     }
 
+    function normalizeStemKey(question) {
+        var text = stemText(question).replace(/\s+/g, ' ').trim();
+        return text || EMPTY_STEM_KEY;
+    }
+
     function stemSnippet(question, maxLen) {
         var text = stemText(question).replace(/\s+/g, ' ');
         var limit = maxLen || 80;
+        if (text.length <= limit) return text;
+        return text.slice(0, limit - 1) + '…';
+    }
+
+    function snippetFromKey(key, maxLen) {
+        if (key === EMPTY_STEM_KEY) return '（無題幹）';
+        if (key === EMPTY_PATTERN_KEY) return '（無 stemPatterns）';
+        var text = String(key || '').replace(/\s+/g, ' ').trim();
+        var limit = maxLen || 56;
         if (text.length <= limit) return text;
         return text.slice(0, limit - 1) + '…';
     }
@@ -226,6 +244,16 @@
             + '        <h3>選擇題目</h3>'
             + '        <input type="search" id="spr-search" placeholder="搜尋編號或題幹…" autocomplete="off">'
             + '      </div>'
+            + '      <div class="spr-bulk-group" aria-label="依題幹或題幹模式批量選取">'
+            + '        <div class="spr-mode-toggle" role="group" aria-label="批量選取模式">'
+            + '          <button type="button" class="spr-mode-btn is-active" data-spr-mode="stem" aria-pressed="true">題幹</button>'
+            + '          <button type="button" class="spr-mode-btn" data-spr-mode="pattern" aria-pressed="false">題幹模式</button>'
+            + '        </div>'
+            + '        <select id="spr-group-select" class="spr-group-select" aria-label="批量選取項目">'
+            + '          <option value="">選擇以加入選取…</option>'
+            + '        </select>'
+            + '        <span id="spr-group-hint" class="spr-muted"></span>'
+            + '      </div>'
             + '      <div class="spr-picker-actions">'
             + '        <button type="button" class="btn btn-secondary btn-sm" id="spr-select-visible">全選可見</button>'
             + '        <button type="button" class="btn btn-secondary btn-sm" id="spr-clear-selected">清除選取</button>'
@@ -283,7 +311,13 @@
             + '.spr-panel-head h3{margin:0;font-size:15px;}'
             + '.spr-muted{font-size:12px;color:var(--text-light,#7f8c8d);}'
             + '#spr-search{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d7e3ef;border-radius:6px;font:inherit;}'
-            + '.spr-picker-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;}'
+            + '.spr-bulk-group{display:flex;flex-direction:column;gap:6px;margin:0 0 8px;padding:8px;border:1px solid #e7eef5;border-radius:8px;background:#f8fafc;}'
+            + '.spr-mode-toggle{display:inline-flex;align-self:flex-start;border:1px solid #d7e3ef;border-radius:8px;overflow:hidden;background:#fff;}'
+            + '.spr-mode-btn{appearance:none;border:0;background:#fff;color:var(--text-color,#2c3e50);font:inherit;font-size:12px;padding:5px 10px;cursor:pointer;}'
+            + '.spr-mode-btn+.spr-mode-btn{border-left:1px solid #d7e3ef;}'
+            + '.spr-mode-btn.is-active{background:#e8f1ff;font-weight:700;}'
+            + '.spr-group-select{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d7e3ef;border-radius:6px;font:inherit;font-size:12px;background:#fff;}'
+            + '.spr-picker-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;}'
             + '.spr-list{flex:1;min-height:0;overflow:auto;border:1px solid #e7eef5;border-radius:8px;background:#f8fafc;}'
             + '.spr-item{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid #e7eef5;cursor:pointer;font-size:12px;}'
             + '.spr-item:hover{background:#eef5ff;}'
@@ -325,12 +359,21 @@
         overlay.querySelector('#spr-search').addEventListener('input', function () {
             renderPickerList();
         });
+        overlay.querySelectorAll('[data-spr-mode]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                setBulkGroupMode(btn.getAttribute('data-spr-mode'));
+            });
+        });
+        overlay.querySelector('#spr-group-select').addEventListener('change', function () {
+            applyBulkGroupSelection();
+        });
         overlay.querySelector('#spr-select-visible').addEventListener('click', selectVisible);
         overlay.querySelector('#spr-clear-selected').addEventListener('click', function () {
             selectedIds = {};
             renderPickerList();
             renderApplyRows();
             updateSelectedCount();
+            updateGroupHint('');
         });
         overlay.querySelector('#spr-run').addEventListener('click', runReview);
         overlay.querySelector('#spr-cancel-run').addEventListener('click', cancelReview);
@@ -361,6 +404,108 @@
             if (String(loadedQuestions[i].id) === String(id)) return loadedQuestions[i];
         }
         return null;
+    }
+
+    function updateGroupHint(text) {
+        var node = document.getElementById('spr-group-hint');
+        if (node) node.textContent = text || '';
+    }
+
+    function setBulkGroupMode(mode) {
+        bulkGroupMode = mode === 'pattern' ? 'pattern' : 'stem';
+        overlay.querySelectorAll('[data-spr-mode]').forEach(function (btn) {
+            var active = btn.getAttribute('data-spr-mode') === bulkGroupMode;
+            btn.classList.toggle('is-active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        renderGroupSelect();
+        updateGroupHint('');
+    }
+
+    function buildBulkGroups() {
+        var map = {};
+        loadedQuestions.forEach(function (q) {
+            var id = String(q.id != null ? q.id : '').trim();
+            if (!id) return;
+            if (bulkGroupMode === 'pattern') {
+                var tags = Array.isArray(q.stemPatterns)
+                    ? q.stemPatterns.map(function (item) { return String(item == null ? '' : item).trim(); }).filter(Boolean)
+                    : [];
+                if (!tags.length) {
+                    if (!map[EMPTY_PATTERN_KEY]) {
+                        map[EMPTY_PATTERN_KEY] = { key: EMPTY_PATTERN_KEY, label: '（無 stemPatterns）', ids: [] };
+                    }
+                    map[EMPTY_PATTERN_KEY].ids.push(id);
+                    return;
+                }
+                tags.forEach(function (tag) {
+                    if (!map[tag]) {
+                        map[tag] = { key: tag, label: tag, ids: [] };
+                    }
+                    if (map[tag].ids.indexOf(id) === -1) map[tag].ids.push(id);
+                });
+                return;
+            }
+            var key = normalizeStemKey(q);
+            if (!map[key]) {
+                map[key] = {
+                    key: key,
+                    label: key === EMPTY_STEM_KEY ? '（無題幹）' : snippetFromKey(key, 56),
+                    ids: []
+                };
+            }
+            if (map[key].ids.indexOf(id) === -1) map[key].ids.push(id);
+        });
+        var groups = Object.keys(map).map(function (key) { return map[key]; });
+        groups.sort(function (a, b) {
+            if (b.ids.length !== a.ids.length) return b.ids.length - a.ids.length;
+            return String(a.label).localeCompare(String(b.label), 'zh-HK');
+        });
+        return groups;
+    }
+
+    function renderGroupSelect() {
+        var select = document.getElementById('spr-group-select');
+        if (!select) return;
+        bulkGroupOptions = buildBulkGroups();
+        var placeholder = bulkGroupMode === 'pattern'
+            ? '選擇題幹模式以加入選取…'
+            : '選擇題幹以加入選取…';
+        select.innerHTML = '<option value="">' + escapeHtml(placeholder) + '</option>'
+            + bulkGroupOptions.map(function (group, index) {
+                var label = group.label + '（' + group.ids.length + '）';
+                return '<option value="' + index + '">' + escapeHtml(label) + '</option>';
+            }).join('');
+    }
+
+    function applyBulkGroupSelection() {
+        var select = document.getElementById('spr-group-select');
+        if (!select) return;
+        var index = parseInt(select.value, 10);
+        if (isNaN(index) || !bulkGroupOptions[index]) {
+            select.value = '';
+            return;
+        }
+        var group = bulkGroupOptions[index];
+        var added = 0;
+        group.ids.forEach(function (id) {
+            if (!selectedIds[id]) {
+                selectedIds[id] = true;
+                added += 1;
+            }
+        });
+        select.value = '';
+        renderPickerList();
+        renderApplyRows();
+        updateSelectedCount();
+        var hint = '已加入「' + snippetFromKey(group.key, 40) + '」共 '
+            + group.ids.length + ' 題'
+            + (added !== group.ids.length ? '（新選 ' + added + '）' : '');
+        if (group.ids.length > SEND_CAP) {
+            hint += '；送審上限 ' + SEND_CAP + ' 題';
+        }
+        updateGroupHint(hint);
+        setStatus(hint);
     }
 
     function renderPickerList() {
@@ -515,9 +660,11 @@
         Object.keys(selectedIds).forEach(function (id) {
             if (!alive[id]) delete selectedIds[id];
         });
+        renderGroupSelect();
         renderPickerList();
         renderApplyRows();
         updateSelectedCount();
+        updateGroupHint('');
         renderHistory();
     }
 
