@@ -269,14 +269,22 @@
     }
 
     function saveDetailPrefs(prefs) {
+        var payload = {
+            sortMode: prefs.sortMode === 'natural' ? 'natural' : 'count',
+            expandAll: !!prefs.expandAll,
+            topN: Number(prefs.topN) > 0 ? Number(prefs.topN) : DETAIL_TOP_N,
+            visible: prefs.visible || {}
+        };
         try {
-            localStorage.setItem(DETAIL_PREFS_KEY, JSON.stringify({
-                sortMode: prefs.sortMode === 'natural' ? 'natural' : 'count',
-                expandAll: !!prefs.expandAll,
-                topN: Number(prefs.topN) > 0 ? Number(prefs.topN) : DETAIL_TOP_N,
-                visible: prefs.visible || {}
-            }));
+            localStorage.setItem(DETAIL_PREFS_KEY, JSON.stringify(payload));
         } catch (e) { /* ignore quota / private mode */ }
+        if (window.UserSettings && typeof UserSettings.get === 'function') {
+            try {
+                var s = UserSettings.get();
+                s.stats.detailPrefs = payload;
+                if (typeof UserSettings.scheduleSave === 'function') UserSettings.scheduleSave();
+            } catch (ignore) { /* optional sync */ }
+        }
     }
 
     function listDetailSectionIds() {
@@ -897,12 +905,47 @@
         setStatsViewMode(window.statsViewMode || 'browse');
     }
 
+    function getStatsCrosstabState() {
+        return {
+            row: crosstabState.row,
+            col: crosstabState.col,
+            metric: crosstabState.metric
+        };
+    }
+
+    function setStatsCrosstabState(next) {
+        if (!next || typeof next !== 'object') return getStatsCrosstabState();
+        if (next.row) crosstabState.row = String(next.row);
+        if (next.col) crosstabState.col = String(next.col);
+        if (next.metric) crosstabState.metric = String(next.metric);
+        var rowEl = document.getElementById('ct-row');
+        var colEl = document.getElementById('ct-col');
+        var metricEl = document.getElementById('ct-metric');
+        if (rowEl) rowEl.value = crosstabState.row;
+        if (colEl) colEl.value = crosstabState.col;
+        if (metricEl) metricEl.value = crosstabState.metric;
+        return getStatsCrosstabState();
+    }
+
+    function getStatsDetailPrefs() {
+        return loadDetailPrefs();
+    }
+
+    function applyStatsDetailPrefs(prefs) {
+        if (!prefs || typeof prefs !== 'object') return;
+        saveDetailPrefs(prefs);
+    }
+
     window.syncStatsDimensionControl = syncStatsDimensionControl;
     window.setStatsViewMode = setStatsViewMode;
     window.openStatsDetailModal = openStatsDetailModal;
     window.closeStatsDetailModal = closeStatsDetailModal;
     window.renderStatsCrosstab = renderStatsCrosstab;
     window.initStatsExplore = initStatsExplore;
+    window.getStatsCrosstabState = getStatsCrosstabState;
+    window.setStatsCrosstabState = setStatsCrosstabState;
+    window.getStatsDetailPrefs = getStatsDetailPrefs;
+    window.applyStatsDetailPrefs = applyStatsDetailPrefs;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initStatsExplore);

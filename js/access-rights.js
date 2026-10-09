@@ -51,6 +51,9 @@ function applyAccessRights(rights) {
     if (window.ReportIssue && typeof ReportIssue.refreshHubButton === 'function') {
         ReportIssue.refreshHubButton();
     }
+    if (window.UserSettings && typeof UserSettings.refreshButton === 'function') {
+        UserSettings.refreshButton();
+    }
     // Losing `ai`: clear AI解釋 filter + close its modal (CSS also hides controls).
     if (!window.accessRights.ai) {
         if (window.triStateFilters && window.triStateFilters.ai) {

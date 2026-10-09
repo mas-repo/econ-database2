@@ -985,12 +985,29 @@ function clearFilters() {
     if (typeof closeFilterModal === 'function') closeFilterModal();
 
     const scopeSelect = document.getElementById('search-scope');
-    if (scopeSelect) scopeSelect.value = 'all';
-    window.searchScope = 'all';
+    var rememberScope = (window.UserSettings && UserSettings.get
+        && UserSettings.get().filters
+        && UserSettings.get().filters.rememberLast);
+    var preferredScope = rememberScope && window.UserSettings.get().filters.searchScope
+        ? window.UserSettings.get().filters.searchScope
+        : 'all';
+    if (scopeSelect) {
+        var scopeOpt = Array.prototype.find.call(scopeSelect.options || [], function (o) {
+            return o.value === preferredScope;
+        });
+        scopeSelect.value = scopeOpt ? preferredScope : 'all';
+        preferredScope = scopeSelect.value;
+    }
+    window.searchScope = preferredScope;
 
-    // === Reset tri-state visual classes with Out syl exception ===
+    var featureDefault = (typeof emptyFeatureTriStateFromSettings === 'function')
+        ? emptyFeatureTriStateFromSettings()
+        : { 'Out syl': 'excluded' };
+    var excludeOutSyl = featureDefault['Out syl'] === 'excluded';
+
+    // === Reset tri-state visual classes (Out syl excluded only when preference says so) ===
     document.querySelectorAll('.tri-state-checkbox').forEach(el => {
-        if (el.dataset.value === 'Out syl') {
+        if (el.dataset.value === 'Out syl' && excludeOutSyl) {
             el.classList.remove('checked');
             el.classList.add('excluded');
             const label = el.closest('.tri-state-label');
@@ -1014,7 +1031,7 @@ function clearFilters() {
     window.triStateFilters = { 
         curriculum: {}, 
         chapter: {}, 
-        feature: { 'Out syl': 'excluded' },
+        feature: featureDefault,
         partPerformance: {},
         publisher: {},
         exam: {}, 
@@ -1273,6 +1290,9 @@ async function filterQuestions() {
     const scopeSelect = document.getElementById('search-scope');
     if (scopeSelect) {
         window.searchScope = scopeSelect.value;
+        if (window.UserSettings && typeof UserSettings.rememberSearchScope === 'function') {
+            UserSettings.rememberSearchScope(scopeSelect.value);
+        }
     }
 
     updateFilterIndicators();

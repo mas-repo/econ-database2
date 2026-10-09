@@ -727,7 +727,16 @@
     Poe.renderFollowUpChips = function renderFollowUpChips() {
         var host = document.getElementById('poe-followup-chips');
         if (!host) return;
+        var show = window.__userShowQuickPrompts !== false;
+        if (window.UserSettings && typeof UserSettings.get === 'function') {
+            try {
+                var ai = UserSettings.get().ai;
+                if (ai && ai.showQuickPrompts === false) show = false;
+            } catch (e) { /* ignore */ }
+        }
+        host.hidden = !show;
         host.innerHTML = '';
+        if (!show) return;
         (Poe.FOLLOWUP_CHIPS || []).forEach(function (chip) {
             var btn = document.createElement('button');
             btn.type = 'button';

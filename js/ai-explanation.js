@@ -32,6 +32,7 @@
         status: '',
         statusKind: ''
     };
+    var defaultDetailLevel = 'short';
 
     var overlay = null;
     var feedbackOverlay = null;
@@ -448,11 +449,16 @@
         bindEscape();
         modalState.questionId = qid;
         modalState.busy = false;
-        modalState.detailLevel = 'short';
+        var preferredLevel = normalizeDetailLevel(
+            defaultDetailLevel
+            || (global.__userAiExplainStyle)
+            || 'short'
+        );
+        modalState.detailLevel = preferredLevel;
         var levelShort = overlay.querySelector('input[name="ai-explain-level"][value="short"]');
         var levelDetailed = overlay.querySelector('input[name="ai-explain-level"][value="detailed"]');
-        if (levelShort) levelShort.checked = true;
-        if (levelDetailed) levelDetailed.checked = false;
+        if (levelShort) levelShort.checked = preferredLevel === 'short';
+        if (levelDetailed) levelDetailed.checked = preferredLevel === 'detailed';
         var qidEl = document.getElementById('ai-explain-qid');
         if (qidEl) qidEl.textContent = '題目 ' + qid;
         setModalStatus(store.loaded ? '' : '載入過往解釋…', store.loaded ? '' : 'info');
@@ -894,6 +900,12 @@
     }
 
     // Public API
+    function setDefaultDetailLevel(level) {
+        defaultDetailLevel = normalizeDetailLevel(level);
+        global.__userAiExplainStyle = defaultDetailLevel;
+        return defaultDetailLevel;
+    }
+
     global.AiExplanation = {
         LABEL_HAS: LABEL_HAS,
         LABEL_SHORT: LABEL_SHORT,
@@ -909,6 +921,7 @@
         refreshAdminButton: refreshAdminButton,
         setAdminUiDelegated: setAdminUiDelegated,
         closeAdminPanel: closeAdminFeedback,
+        setDefaultDetailLevel: setDefaultDetailLevel,
         init: initAiExplanationFeature,
         store: store
     };

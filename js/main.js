@@ -36,6 +36,11 @@ async function init() {
         await refreshAccessRights();
     }
 
+    // Load 用戶設定 (local + remote) before first filter/list paint.
+    if (typeof initUserSettingsFeature === 'function') {
+        try { await initUserSettingsFeature(); } catch (e) { /* keep defaults */ }
+    }
+
     if (typeof logQuestionToolLogin === 'function') {
         logQuestionToolLogin();
     }
@@ -160,6 +165,9 @@ async function initializeApp() {
     }
     if (typeof initGitSyncFeature === 'function') {
         initGitSyncFeature();
+    }
+    if (window.UserSettings && typeof UserSettings.applyAfterUiReady === 'function') {
+        await UserSettings.applyAfterUiReady();
     }
 }
 
@@ -428,7 +436,7 @@ if (document.readyState === 'loading') {
 }
 
 // === Hotkey Listener ===
-// Esc: Poe → stats/filter/進階 overlays (close only), else clearFilters.
+// Esc: Poe → stats/filter/進階/用戶設定 overlays (close only), else clearFilters.
 // AI解釋 / 回報問題 / data-checks / bulk-edit bind Escape privately — this
 // listener does not close them.
 document.addEventListener('keydown', function(e) {
@@ -450,6 +458,11 @@ document.addEventListener('keydown', function(e) {
         var afOverlay = document.getElementById('advanced-filter-overlay');
         if (afOverlay && !afOverlay.hidden) {
             if (typeof closeAdvancedFilterModal === 'function') closeAdvancedFilterModal();
+            return;
+        }
+        var usOverlay = document.getElementById('user-settings-overlay');
+        if (usOverlay && !usOverlay.hidden) {
+            if (window.UserSettings && typeof UserSettings.close === 'function') UserSettings.close();
             return;
         }
         clearFilters();

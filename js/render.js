@@ -189,7 +189,7 @@ async function renderQuestions() {
         return html;
     };
 
-    const renderCollapsibleSection = (label, content, images) => {
+    const renderCollapsibleSection = (label, content, images, langClass) => {
         if (!content || content.trim() === '' || content === '-') return '';
 
         const pics = images || [];
@@ -197,8 +197,9 @@ async function renderQuestions() {
         const body = pics.length ? renderInlineText(content.trim(), pics) : escapedContent;
         const open = pics.length > 0;
 
+        const langAttr = langClass ? ` ${langClass}` : '';
         return `
-            <div class="question-text">
+            <div class="question-text${langAttr}">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
                     <button class="expand-btn" title="${open ? '收起' : '展開/收起'}">${open ? '▼' : '▶'}</button>
                     <strong style="flex: 1;">${label}</strong>
@@ -370,8 +371,8 @@ async function renderQuestions() {
                         <span class="tag">${escapeHTML(q.topic)}</span>
                     </div>
                 ` : ''}
-                ${renderCollapsibleSection('題目：', q.plainText || q.questionTextChi, diagramSrcs(q))}
-                ${renderCollapsibleSection('Question:', q.questionTextEng)}
+                ${renderCollapsibleSection('題目：', q.plainText || q.questionTextChi, diagramSrcs(q), 'q-lang-zh')}
+                ${renderCollapsibleSection('Question:', q.questionTextEng, null, 'q-lang-en')}
 
                 ${(q.answerMC && q.answerMC !== '-') ? `
                     <div class="info-item" style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
@@ -380,11 +381,11 @@ async function renderQuestions() {
                     </div>
                 ` : ''}
 
-                ${renderCollapsibleSection('答案：', q.answerChi)}
-                ${renderCollapsibleSection('Answer:', q.answerEng)}
+                ${renderCollapsibleSection('答案：', q.answerChi, null, 'q-lang-zh')}
+                ${renderCollapsibleSection('Answer:', q.answerEng, null, 'q-lang-en')}
 
-                ${renderCollapsibleSection('評卷報告：', q.markersReportChi)}
-                ${renderCollapsibleSection('Markers Report:', q.markersReportEng)}
+                ${renderCollapsibleSection('評卷報告：', q.markersReportChi, null, 'q-lang-zh')}
+                ${renderCollapsibleSection('Markers Report:', q.markersReportEng, null, 'q-lang-en')}
 
                 ${(() => {
                     const status = (typeof resolvePartsStatus === 'function')
