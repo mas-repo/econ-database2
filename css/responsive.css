@@ -4,12 +4,12 @@
 
 /* Tablet and Below (768px) */
 @media (max-width: 768px) {
-    /* Header */
-    header h1 {
+    /* Site page header */
+    .container > header h1 {
         font-size: 1.8em;
     }
     
-    header p {
+    .container > header p {
         font-size: 0.95em;
     }
     
@@ -102,11 +102,11 @@
         padding: 10px;
     }
     
-    header {
+    .container > header {
         padding: var(--spacing-lg);
     }
     
-    header h1 {
+    .container > header h1 {
         font-size: 1.5em;
     }
     
@@ -157,7 +157,7 @@
         padding: 0;
     }
     
-    header {
+    .container > header {
         background: white;
         color: black;
     }

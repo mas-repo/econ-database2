@@ -37,46 +37,8 @@
     width: min(480px, 100%);
 }
 
-/* Deep indigo header: light text for contrast on the purple plane. */
-.ai-explain-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
-    color: #f7f2ff;
-}
-
-.ai-explain-header h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: #ffffff;
-    font-weight: 700;
-}
-
-.ai-explain-subtitle {
-    margin: 4px 0 0;
-    color: #e8ddff;
-    font-size: 0.9rem;
-}
-
-.ai-explain-close {
-    border: none;
-    background: transparent;
-    font-size: 1.6rem;
-    line-height: 1;
-    cursor: pointer;
-    color: #f4eeff;
-    padding: 0 4px;
-    border-radius: 6px;
-}
-
-.ai-explain-close:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-}
+/* Header chrome (title / subtitle / close) lives in components.css
+   (.ai-explain-header shared with 用戶設定 / 回饋／回報 brand indigo). */
 
 .ai-explain-generate {
     display: flex;

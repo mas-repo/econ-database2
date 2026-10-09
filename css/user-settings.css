@@ -27,47 +27,8 @@
     overflow: hidden;
 }
 
-/* Deep indigo header: light text for contrast (same family as AI解釋 / 回饋 hub). */
-.user-settings-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
-    color: #f7f2ff;
-}
-
-.user-settings-header h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: #ffffff;
-    font-weight: 700;
-}
-
-.user-settings-subtitle {
-    margin: 4px 0 0;
-    color: #e8ddff;
-    font-size: 0.88rem;
-    line-height: 1.45;
-}
-
-.user-settings-close {
-    border: none;
-    background: transparent;
-    font-size: 1.6rem;
-    line-height: 1;
-    cursor: pointer;
-    color: #f4eeff;
-    padding: 0 4px;
-    border-radius: 6px;
-}
-
-.user-settings-close:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-}
+/* Header chrome (title / subtitle / close) lives in components.css
+   (.user-settings-header shared with AI解釋 / 回饋／回報 brand indigo). */
 
 .user-settings-main {
     flex: 1;
