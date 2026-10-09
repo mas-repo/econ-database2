@@ -19,6 +19,7 @@ Top-level tabs are **題目** and **統計** (not separate 概念 / 課程分類
 - Binned: 答對率區間 `[0,20)…[80,100]`, 分數區間 `0–2…16+`, 題號區間 from id last digits `1–10…51–60` (plus 無* buckets). Jump uses matching range filters; empty buckets use id-set.
 - Derived: 年份種類（日曆年 / Mock(MT) / 其他）, 有／無分題, 選項設計（skip if unused）. **Not** a grouping dim: AI 詳解 (filter only).
 - Cards have **詳細統計** and **查看題目**; crosstab cell click jumps with intersection filters. Local aggregation only (`js/stats-explore.js`).
+- **詳細統計** modal: sort 題數／項目順序; columns 題數·佔比·MC·文字題·平均答對率／分數; row click jumps like crosstab (parent × secondary); choosable sections from `STAT_TABS` (parent dim auto-hidden); top-N + 展開全部; prefs in `localStorage` (`statsDetailPrefs.v1`).
 - Legacy `switchTab('concepts'|…)` aliases open 統計 on that dimension.
 
 ---
