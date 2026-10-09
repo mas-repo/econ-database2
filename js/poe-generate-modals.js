@@ -113,6 +113,12 @@
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
                 event.preventDefault();
+                // Stop bubble so document-level Esc handlers (e.g. AI解釋)
+                // do not also close the underlying modal in the same keypress.
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                    event.stopImmediatePropagation();
+                }
                 Poe.closeSettingsModal();
             }
         });
