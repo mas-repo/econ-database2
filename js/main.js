@@ -146,6 +146,9 @@ async function initializeApp() {
     if (typeof initPoeGenerateFeature === 'function') {
         initPoeGenerateFeature();
     }
+    if (typeof initStemPatternReviewFeature === 'function') {
+        initStemPatternReviewFeature();
+    }
     if (typeof initDataChecksFeature === 'function') {
         initDataChecksFeature();
     }

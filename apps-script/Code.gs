@@ -92,6 +92,7 @@
  * AI generate / test / personal backups / admin usage:
  *   generateQuestions   → handleGenerate_
  *   testModel           → handleTest_
+ *   reviewStemPatterns  → handleReviewStemPatterns_  (no Git AI backup / no GenerationBackup sheet)
  *   listAiBackups       → handleListAiBackups_
  *   getAiBackup         → handleGetAiBackup_
  *   listAiUsageRecords  → handleListAiUsageRecords_  (admin)
@@ -141,6 +142,19 @@ var POE_SHEET_CELL_MAX_ = 45000;
 var POE_SYSTEM_PROMPT_ = '你是香港中學文憑試經濟科的出題助手。請只用繁體中文回答。題目必須是全新的，不可原句複製參考題。請依照使用者的出題指示。每題都要有問題與解釋；若指示要求說明新意或創新之處，請一併說明。';
 var POE_TEST_SYSTEM_PROMPT_ = '你是連線測試助手。請嚴格依照使用者要求回覆，不要出題，不要加解釋。';
 var POE_TEST_USER_PROMPT_ = '請只回覆這一個詞：正常';
+// Stem-pattern review (題幹模式檢視). Independent of generateQuestions.
+// Reply stays in the browser; this action must not write Git AI backups.
+var STEM_REVIEW_SYSTEM_PROMPT_ = [
+  '你是香港中學文憑試經濟科題庫的題幹模式（stemPatterns）審核助手。',
+  '請只用繁體中文回答。不要撰寫新題目，不要改寫原題幹。',
+  'stemPatterns 是可重用的抽象題幹模板（問法形狀），不是故事細節、不是課程課題名、也不是題型標籤（patterns，例如填空／複選組合）。',
+  '抽象時用 (某人)、(某事件)、(某物品)、(某市場)、(某廠商)；空白用 ___________；選項用全形斜線 ／。',
+  '優先沿用「既有詞彙」清單中的字串；只有在確實沒有合適模板時才建議新字串。',
+  '若題幹文字缺失，可建議維持空陣列。'
+].join('');
+var STEM_REVIEW_MAX_QUESTIONS_ = 30;
+var STEM_REVIEW_MAX_CHARS_ = 90000;
+var STEM_REVIEW_VOCAB_MAX_ = 120;
 
 function doGet() {
   var key = String(props_().getProperty('POE_API_KEY') || '').trim();
@@ -170,6 +184,7 @@ function handlePost_(e) {
   if (action === 'logLogin') return handleLogin_(body);
   if (action === 'checkAccess' || action === 'checkRights') return handleCheck_(body);
   if (action === 'generateQuestions') return handleGenerate_(body);
+  if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
   if (action === 'syncDataChecksUpload') return handleDataChecksUpload_(body);
@@ -703,6 +718,222 @@ function handleTest_(body) {
   }
 }
 
+// Review stemPatterns for selected bank rows. Reuses Poe/OpenRouter keys and
+// requestCompletion_, but never writes Git AI backups or GenerationBackup rows.
+// Transcript stays in the browser (localStorage). UsageLog records metadata only.
+function handleReviewStemPatterns_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).ai) {
+    if (username && shouldAudit_(username, 'stem-review-denied', 60)) {
+      writeLog_({
+        username: username,
+        action: 'reviewStemPatterns',
+        success: false,
+        metadata: { error: 'denied' }
+      }, false);
+    }
+    return { ok: false, error: 'feature_unavailable' };
+  }
+
+  var provider = resolveProvider_(body);
+  var apiKey = resolveApiKey_(body, username, provider);
+  if (!apiKey) {
+    writeLog_({
+      username: username,
+      action: 'reviewStemPatterns',
+      success: false,
+      metadata: { error: 'missing_api_key', provider: provider }
+    }, true);
+    return { ok: false, error: 'missing_api_key' };
+  }
+
+  try {
+    getLogSheet_();
+  } catch (err) {
+    safeLog_(err);
+    return { ok: false, error: 'server_error' };
+  }
+
+  var packed = packStemReviewQuestions_(body.questions, STEM_REVIEW_MAX_QUESTIONS_, STEM_REVIEW_MAX_CHARS_);
+  if (!packed.questions.length) {
+    return { ok: false, error: 'no_reference_questions' };
+  }
+
+  var intervalSeconds = nonNegativeInt_(props_().getProperty('POE_MIN_INTERVAL_SECONDS'), 20);
+  if (!takeIntervalSlot_(username, intervalSeconds, 'review')) {
+    return { ok: false, error: 'rate_limited' };
+  }
+
+  var model = resolveModel_(body.model, provider);
+  var noteMeta = instructionMeta_(body.note || body.instruction);
+  var vocab = packStemReviewVocab_(body.vocabulary);
+  var started = Date.now();
+  try {
+    var userPrompt = buildStemReviewPrompt_(packed.questions, vocab, noteMeta.text, packed.truncated);
+    var completion = requestCompletion_(apiKey, model, userPrompt, STEM_REVIEW_SYSTEM_PROMPT_, provider);
+    var durationMs = Date.now() - started;
+    var result = {
+      ok: true,
+      content: completion.content,
+      model: completion.model || model,
+      sentCount: packed.questions.length,
+      truncated: packed.truncated,
+      logged: false,
+      backedUp: false,
+      gitBackup: false,
+      durationMs: durationMs,
+      requestId: requestId_(body && body.requestId)
+    };
+    result.logged = writeLog_({
+      username: username,
+      action: 'reviewStemPatterns',
+      success: true,
+      metadata: {
+        model: result.model,
+        requestedModel: model,
+        provider: provider,
+        sentCount: result.sentCount,
+        truncated: packed.truncated,
+        durationMs: durationMs,
+        promptTokens: completion.promptTokens,
+        completionTokens: completion.completionTokens,
+        noteChars: noteMeta.chars,
+        vocabCount: vocab.length,
+        // Explicit: no remote transcript / backup for this action.
+        gitBackup: false,
+        sheetBackup: false
+      }
+    }, true);
+    return result;
+  } catch (err) {
+    releaseIntervalSlot_(username, 'review');
+    var code = classifyFetchError_(err);
+    safeLog_(err);
+    writeLog_({
+      username: username,
+      action: 'reviewStemPatterns',
+      success: false,
+      metadata: {
+        error: code,
+        model: model,
+        provider: provider,
+        sentCount: packed.questions.length,
+        durationMs: Date.now() - started
+      }
+    }, true);
+    return { ok: false, error: code };
+  }
+}
+
+function listFieldJoin_(value) {
+  if (Array.isArray(value)) {
+    return value.map(function (item) {
+      return String(item == null ? '' : item).trim();
+    }).filter(Boolean).join(' | ');
+  }
+  return String(value == null ? '' : value).trim();
+}
+
+function packStemReviewQuestions_(raw, maxCount, maxChars) {
+  var questions = [];
+  var used = 0;
+  var truncated = false;
+  if (!Array.isArray(raw)) return { questions: questions, truncated: false };
+  for (var i = 0; i < raw.length; i++) {
+    var item = raw[i];
+    if (!item || typeof item !== 'object') continue;
+    var question = clip_(item.question || item.plainText || item.questionTextChi, 6000);
+    if (!question) continue;
+    if (questions.length >= maxCount) {
+      truncated = true;
+      break;
+    }
+    var entry = {
+      id: clip_(item.id, 80),
+      examination: clip_(item.examination, 40),
+      year: clip_(item.year, 20),
+      questionType: clip_(item.questionType, 40),
+      concepts: clip_(listFieldJoin_(item.concepts), 300),
+      patterns: clip_(listFieldJoin_(item.patterns), 300),
+      stemPatterns: clip_(listFieldJoin_(item.stemPatterns), 800),
+      question: question
+    };
+    var weight = entry.question.length + entry.stemPatterns.length + entry.patterns.length;
+    if (questions.length > 0 && used + weight > maxChars) {
+      truncated = true;
+      break;
+    }
+    questions.push(entry);
+    used += weight;
+  }
+  return { questions: questions, truncated: truncated };
+}
+
+function packStemReviewVocab_(raw) {
+  var out = [];
+  var seen = {};
+  var list = Array.isArray(raw) ? raw : [];
+  for (var i = 0; i < list.length; i++) {
+    var text = String(list[i] == null ? '' : list[i]).trim();
+    if (!text || seen[text]) continue;
+    seen[text] = true;
+    out.push(clip_(text, 200));
+    if (out.length >= STEM_REVIEW_VOCAB_MAX_) break;
+  }
+  return out;
+}
+
+function buildStemReviewPrompt_(questions, vocabulary, note, truncated) {
+  var lines = [];
+  lines.push('請審核以下題目的 stemPatterns（題幹模式），並回答：');
+  lines.push('1. 各題現行 stemPatterns 是否正確、是否應改寫或改用既有詞彙；');
+  lines.push('2. 這批題目是否應共用同一個（或同一組）stemPatterns 模板；');
+  lines.push('3. 為每題建議修正後的 stemPatterns 字串（可多個，用 | 分隔；優先用既有詞彙）。');
+  lines.push('');
+  lines.push('請用繁體中文，並依下列格式回覆（方便管理員套用）：');
+  lines.push('## 總結');
+  lines.push('（是否同模板、整體觀察）');
+  lines.push('## 建議');
+  lines.push('### 編號：<題目ID>');
+  lines.push('現行：…');
+  lines.push('建議：template A | template B');
+  lines.push('理由：…');
+  lines.push('同模板：是／否');
+  if (note) {
+    lines.push('');
+    lines.push('使用者補充：');
+    lines.push(note);
+  }
+  if (truncated) {
+    lines.push('');
+    lines.push('（題目或詞彙因長度上限而截斷；請只根據下列已附內容判斷。）');
+  }
+  if (vocabulary && vocabulary.length) {
+    lines.push('');
+    lines.push('既有 stemPatterns 詞彙（優先沿用）：');
+    vocabulary.forEach(function (item, index) {
+      lines.push((index + 1) + '. ' + item);
+    });
+  }
+  lines.push('');
+  lines.push('待審題目：');
+  lines.push('');
+  questions.forEach(function (q, index) {
+    lines.push('【題目 ' + (index + 1) + '】');
+    if (q.id) lines.push('編號：' + q.id);
+    if (q.examination) lines.push('考試：' + q.examination);
+    if (q.year) lines.push('年份：' + q.year);
+    if (q.questionType) lines.push('題型：' + q.questionType);
+    if (q.concepts) lines.push('概念：' + q.concepts);
+    if (q.patterns) lines.push('題型標籤（patterns）：' + q.patterns);
+    lines.push('現行 stemPatterns：' + (q.stemPatterns || '（空）'));
+    lines.push('題幹：');
+    lines.push(q.question);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
 function buildPrompt_(questions, filteredCount, truncated, instruction, source) {
   var lines = [instruction || POE_INSTRUCTION_, ''];
   var single = referenceSource_(source) === 'single';
@@ -962,7 +1193,9 @@ function countTodayGenerations_(username) {
 }
 
 function intervalKey_(username, slot) {
-  var prefix = slot === 'test' ? 'poe_test_iv_' : 'poe_iv_';
+  var prefix = 'poe_iv_';
+  if (slot === 'test') prefix = 'poe_test_iv_';
+  else if (slot === 'review') prefix = 'poe_review_iv_';
   return prefix + sha256Hex_(username).slice(0, 32);
 }
 
