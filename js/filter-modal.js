@@ -1,10 +1,12 @@
 // filter-modal.js
 // Modal-based pickers for the seven long-option filters:
 // 圖表類型 / 表格類型 / 計算類型 / 複選類型 / 概念類型 / 題型 / 題幹模式
+// Plus Chapters (static 01–29 list) — was a viewport-overflowing dropdown.
 //
 // DESIGN: state lives directly in window.triStateFilters (keys: graph,
-// table, calculation, multipleSelection, concepts, patterns, stemPatterns) with the
-// existing 'checked' / 'excluded' tri-state semantics. This means
+// table, calculation, multipleSelection, concepts, patterns, stemPatterns,
+// chapter) with the existing 'checked' / 'excluded' tri-state semantics.
+// Chapter also keeps window.filterLogic.chapter (OR/AND). This means
 // applyFilters (storage-filters.js), the active-filter badges
 // (updateSearchInfo), clickable question-card tags (filterByTag) and
 // clearFilters() all work unchanged.
@@ -17,8 +19,9 @@
 // clears filters only when no modal is open).
 //
 // Dependencies: utils.js (escapeHTML, debounce), filters.js
-// (filterQuestions, triStateFilters), template-filters.js (trigger
-// buttons with ids mf-item-*, mf-trigger-*, mf-badge-*).
+// (filterQuestions, triStateFilters), constants.js (CHAPTER_*), 
+// template-filters.js (trigger buttons with ids mf-item-*, mf-trigger-*,
+// mf-badge-*).
 
 const MODAL_FILTER_DEFS = [
     { key: 'graph',             label: '📊 圖表類型' },
@@ -80,6 +83,7 @@ function updateModalFilterBadge(key) {
 
 function updateModalFilterBadges() {
     MODAL_FILTER_DEFS.forEach(d => updateModalFilterBadge(d.key));
+    updateChapterFilterBadge();
 }
 
 // ---------- Modal lifecycle ----------
@@ -137,6 +141,161 @@ function closeFilterModal() {
     _mfActiveKey = null;
     _mfFrozenOrder = null;
     _mfRenderedOpts = [];
+}
+
+// ---------- Chapters (centered modal; same tri-state + OR/AND as old dropdown) ----------
+
+function updateChapterFilterBadge() {
+    const badge = document.getElementById('mf-badge-chapter');
+    const trigger = document.getElementById('mf-trigger-chapter');
+    if (!badge || !trigger) return;
+    const state = (window.triStateFilters && window.triStateFilters.chapter) || {};
+    const n = Object.keys(state).length;
+    badge.hidden = n === 0;
+    badge.textContent = n === 0 ? '' : String(n);
+    trigger.classList.toggle('mf-trigger-active', n > 0);
+}
+
+function openChapterFilterModal() {
+    closeFilterModal();
+
+    _mfActiveKey = 'chapter';
+    _mfFrozenOrder = null;
+    _mfRenderedOpts = [];
+
+    if (!window.filterLogic) window.filterLogic = { curriculum: 'OR', chapter: 'OR' };
+    const andOn = window.filterLogic.chapter === 'AND';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mf-overlay';
+    overlay.id = 'mf-overlay';
+    overlay.innerHTML = `
+        <div class="mf-dialog mf-chapter-dialog" role="dialog" aria-modal="true" aria-label="Chapters">
+            <div class="mf-header">
+                <h3>📖 Chapters</h3>
+                <button type="button" class="mf-close" onclick="closeFilterModal()" aria-label="關閉">✕</button>
+            </div>
+            <div class="mf-hint">點擊選項切換：未選 → ✔ 包含 → ✕ 排除</div>
+            <div class="mf-chapter-toolbar">
+                <div class="logic-toggle">
+                    <input type="checkbox" id="chapter-logic-toggle" ${andOn ? 'checked' : ''}
+                           onchange="toggleChapterLogic(this)">
+                    <label for="chapter-logic-toggle">
+                        <span class="logic-text or">OR</span>
+                        <span class="logic-text and">AND</span>
+                    </label>
+                </div>
+                <input type="text" class="mf-search mf-chapter-search" id="mf-chapter-search"
+                       placeholder="搜尋章節編號或名稱...">
+            </div>
+            <div class="mf-list mf-chapter-list" id="mf-chapter-list"></div>
+            <div class="mf-footer">
+                <button type="button" class="btn mf-clear-btn" onclick="clearChapterFilter()">🗑️ 清除</button>
+                <button type="button" class="btn mf-done-btn" onclick="closeFilterModal()">完成</button>
+            </div>
+        </div>`;
+
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) closeFilterModal();
+    });
+    document.body.appendChild(overlay);
+    document.body.classList.add('mf-modal-open');
+
+    const searchEl = document.getElementById('mf-chapter-search');
+    searchEl.addEventListener('input',
+        typeof debounce === 'function'
+            ? debounce(() => renderChapterModalList(), 150)
+            : () => renderChapterModalList());
+
+    renderChapterModalList();
+    updateChapterFilterBadge();
+    searchEl.focus();
+}
+
+function chapterModalEntries() {
+    const min = (typeof CHAPTER_RANGE !== 'undefined' && CHAPTER_RANGE.min) || 1;
+    const max = (typeof CHAPTER_RANGE !== 'undefined' && CHAPTER_RANGE.max) || 29;
+    const descs = (typeof CHAPTER_DESCRIPTIONS !== 'undefined') ? CHAPTER_DESCRIPTIONS : {};
+    const out = [];
+    for (let i = min; i <= max; i++) {
+        const chNumber = String(i).padStart(2, '0');
+        out.push({
+            value: chNumber,
+            name: descs[chNumber] || ''
+        });
+    }
+    return out;
+}
+
+function renderChapterModalList() {
+    const list = document.getElementById('mf-chapter-list');
+    if (!list || _mfActiveKey !== 'chapter') return;
+
+    const state = (window.triStateFilters && window.triStateFilters.chapter) || {};
+    const term = (document.getElementById('mf-chapter-search')?.value || '').trim().toLowerCase();
+    const entries = chapterModalEntries().filter(entry => {
+        if (!term) return true;
+        return entry.value.includes(term)
+            || String(parseInt(entry.value, 10)).includes(term)
+            || entry.name.toLowerCase().includes(term);
+    });
+    _mfRenderedOpts = entries.map(e => e.value);
+
+    if (!entries.length) {
+        list.innerHTML = '<div class="mf-empty">沒有符合的章節</div>';
+        return;
+    }
+
+    list.innerHTML = '<div class="mf-chapter-grid">' + entries.map((entry, i) => {
+        const s = state[entry.value];
+        const mode = s === 'checked' ? 'include' : s === 'excluded' ? 'exclude' : 'none';
+        const mark = mode === 'include' ? '✔' : mode === 'exclude' ? '✕' : '';
+        const nameHtml = entry.name
+            ? `<span class="mf-chapter-name">${escapeHTML(entry.name)}</span>`
+            : '';
+        return `
+        <button type="button" class="mf-option mf-chapter-option mf-${mode}" data-idx="${i}"
+                title="${escapeHTML(entry.value + (entry.name ? ': ' + entry.name : ''))}">
+            <span class="mf-mark">${mark}</span>
+            <span class="mf-chapter-num">${escapeHTML(entry.value)}</span>
+            ${nameHtml}
+        </button>`;
+    }).join('') + '</div>';
+
+    list.onclick = e => {
+        const btn = e.target.closest('.mf-chapter-option');
+        if (!btn) return;
+        const opt = _mfRenderedOpts[Number(btn.dataset.idx)];
+        if (opt !== undefined) cycleChapterModalOption(opt);
+    };
+}
+
+function cycleChapterModalOption(opt) {
+    if (!window.triStateFilters.chapter) window.triStateFilters.chapter = {};
+    const cur = window.triStateFilters.chapter[opt];
+    if (!cur) {
+        window.triStateFilters.chapter[opt] = 'checked';
+    } else if (cur === 'checked') {
+        window.triStateFilters.chapter[opt] = 'excluded';
+    } else {
+        delete window.triStateFilters.chapter[opt];
+    }
+    renderChapterModalList();
+    updateChapterFilterBadge();
+    if (typeof updateFilterIndicators === 'function') updateFilterIndicators();
+    if (typeof filterQuestions === 'function') filterQuestions();
+}
+
+function clearFilterModal() {
+    if (!_mfActiveKey) return;
+    if (_mfActiveKey === 'chapter') {
+        if (typeof clearChapterFilter === 'function') clearChapterFilter();
+        return;
+    }
+    window.triStateFilters[_mfActiveKey] = {};
+    renderModalOptionList();
+    updateModalFilterBadge(_mfActiveKey);
+    if (typeof filterQuestions === 'function') filterQuestions();
 }
 
 // ---------- Option list ----------
@@ -223,13 +382,5 @@ function cycleModalOption(key, opt) {
 
     renderModalOptionList();        // instant visual feedback
     updateModalFilterBadge(key);
-    if (typeof filterQuestions === 'function') filterQuestions();
-}
-
-function clearFilterModal() {
-    if (!_mfActiveKey) return;
-    window.triStateFilters[_mfActiveKey] = {};
-    renderModalOptionList();
-    updateModalFilterBadge(_mfActiveKey);
     if (typeof filterQuestions === 'function') filterQuestions();
 }

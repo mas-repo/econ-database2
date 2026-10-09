@@ -170,27 +170,16 @@ function renderFiltersTemplate() {
                     </div>
                 </div>
 
-                <!-- 📖 Chapters -->
-                <div class="filter-item">
-                    <div class="dropdown-filter">
-                        <button class="dropdown-btn" onclick="toggleDropdown('chapter-options')">
-                            <span>📖 Chapters</span><span class="arrow" id="chapter-arrow">▶</span>
-                        </button>
-                        <span class="active-indicator" id="indicator-chapter"></span>
-                        <div class="custom-grid-dropdown chapter-grid-width" id="chapter-options">
-                            <div class="filter-header">
-                                <div class="logic-toggle">
-                                    <input type="checkbox" id="chapter-logic-toggle" onchange="toggleChapterLogic(this)">
-                                    <label for="chapter-logic-toggle">
-                                        <span class="logic-text or">OR</span>
-                                        <span class="logic-text and">AND</span>
-                                    </label>
-                                </div>
-                                <button class="clear-btn" onclick="clearChapterFilter()">🗑️ 清除</button>
-                            </div>
-                            <div id="chapter-list"></div>
-                        </div>
-                    </div>
+                <!-- 📖 Chapters — centered modal (dropdown overflowed viewport with 29 named chapters) -->
+                <div class="filter-item" id="mf-item-chapter">
+                    <button type="button" class="dropdown-btn modal-filter-trigger" id="mf-trigger-chapter"
+                            onclick="openChapterFilterModal()">
+                        <span>📖 Chapters</span>
+                        <span class="mf-trigger-right">
+                            <span class="mf-badge" id="mf-badge-chapter" hidden></span>
+                            <span class="arrow">▶</span>
+                        </span>
+                    </button>
                 </div>
 
                 <!-- 🎯 特徵 -->
