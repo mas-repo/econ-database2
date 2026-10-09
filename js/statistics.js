@@ -67,6 +67,28 @@ function sortStatRows(tabId, rows) {
             return na - nb;
         });
     }
+    if (state.sort === 'year-desc') {
+        return copy.sort((a, b) => {
+            const ka = String(a.value);
+            const kb = String(b.value);
+            const na = parseInt(ka, 10);
+            const nb = parseInt(kb, 10);
+            if (!isNaN(na) && !isNaN(nb) && /^\d+$/.test(ka) && /^\d+$/.test(kb)) return nb - na;
+            return kb.localeCompare(ka, 'zh-HK');
+        });
+    }
+    if (state.sort === 'bin') {
+        const cfg = (typeof STAT_TABS !== 'undefined') ? STAT_TABS[tabId] : null;
+        const order = (cfg && cfg.binOrder) || [];
+        return copy.sort((a, b) => {
+            const ia = order.indexOf(a.value);
+            const ib = order.indexOf(b.value);
+            const ra = ia === -1 ? 999 : ia;
+            const rb = ib === -1 ? 999 : ib;
+            if (ra !== rb) return ra - rb;
+            return a.searchText.localeCompare(b.searchText, 'zh-HK');
+        });
+    }
     return byCount(-1);
 }
 
@@ -111,7 +133,10 @@ async function renderGroupedStats(tabId, gen) {
 
     if (typeof setStatsActiveDimension === 'function') setStatsActiveDimension(dim);
     if (typeof ensureStatsFilterBar === 'function') ensureStatsFilterBar(dim);
-    if (typeof syncStatsDimensionControl === 'function') syncStatsDimensionControl(dim);
+    if (typeof syncStatsDimensionControl === 'function') {
+        const syncResult = syncStatsDimensionControl(dim);
+        if (syncResult && typeof syncResult.then === 'function') await syncResult;
+    }
 
     const all = await window.storage.getQuestions();
     if (typeof statsRenderIsCurrent === 'function' && typeof gen === 'number' && !statsRenderIsCurrent(dim, gen)) return;
