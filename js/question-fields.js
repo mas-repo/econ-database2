@@ -349,6 +349,41 @@
         return text;
     }
 
+    // Shared 特徵 matcher for 題目 filters, 統計, and ConditionMatch.
+    // Lives here (before condition-match.js) so advanced filter / data-checks
+    // do not need a duplicate fallback body.
+    function questionFeatureOn(q, value) {
+        if (value === '含圖表') {
+            return !!(q.graphType && q.graphType !== '' && q.graphType !== '-' && q.graphType !== '沒有圖');
+        }
+        if (value === '有內嵌圖') return !!(q.inlineDiagrams && String(q.inlineDiagrams).trim());
+        if (value === '含表格') {
+            return !!(q.tableType && q.tableType !== '' && q.tableType !== '-' && q.tableType !== '沒有表格');
+        }
+        if (value === '複選') {
+            return !!(q.multipleSelectionType && q.multipleSelectionType !== '' && q.multipleSelectionType !== '-' &&
+                q.multipleSelectionType !== '並非複選型' && q.multipleSelectionType !== '不適用');
+        }
+        if (value === '含計算') {
+            return !!(q.calculationType && q.calculationType !== '' && q.calculationType !== '-' && q.calculationType !== '沒有計算');
+        }
+        if (value === '跨課題') {
+            return !!(q.curriculumClassification && Array.isArray(q.curriculumClassification) && q.curriculumClassification.length > 1);
+        }
+        if (value === '跨章節') {
+            return !!(q.AristochapterClassification && Array.isArray(q.AristochapterClassification) && q.AristochapterClassification.length > 1);
+        }
+        if (value === '已刪除') return !!(q.answerMC && String(q.answerMC).trim() === '*');
+        if (value === 'Out syl') return !!(q.outSyl && String(q.outSyl).trim().toUpperCase() === 'Y');
+        if (value === '有分題') return questionHasParts(q);
+        if (value === '沒有分題') return questionPartsConfirmedNone(q);
+        if (value === '尚未輸入分題') return questionPartsPending(q);
+        if (value === '題目空白') return isQuestionTextBlank(q);
+        if (value === '答案空白') return isAnswerBlank(q);
+        if (value === '評卷報告空白') return isMarkersReportBlank(q);
+        return false;
+    }
+
     function questionSearchText(question, scope) {
         scope = scope || 'all';
         var parts = [];
@@ -406,6 +441,7 @@
     global.parseQuestionPartsCompact = parseQuestionPartsCompact;
     global.normalizeYear = normalizeYear;
     global.questionSearchText = questionSearchText;
+    global.questionFeatureOn = questionFeatureOn;
     global.ADMIN_BLANK_FEATURE_ITEMS = ADMIN_BLANK_FEATURES;
     global.PART_MARKS_SUM_TOLERANCE = PART_MARKS_SUM_TOLERANCE;
 })(window);

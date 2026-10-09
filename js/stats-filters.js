@@ -608,53 +608,7 @@ function triSelectionCount(state, key) {
     }).length;
 }
 
-function questionFeatureOn(q, value) {
-    if (value === '含圖表') {
-        return !!(q.graphType && q.graphType !== '' && q.graphType !== '-' && q.graphType !== '沒有圖');
-    }
-    if (value === '有內嵌圖') return !!(q.inlineDiagrams && String(q.inlineDiagrams).trim());
-    if (value === '含表格') {
-        return !!(q.tableType && q.tableType !== '' && q.tableType !== '-' && q.tableType !== '沒有表格');
-    }
-    if (value === '複選') {
-        return !!(q.multipleSelectionType && q.multipleSelectionType !== '' && q.multipleSelectionType !== '-' &&
-            q.multipleSelectionType !== '並非複選型' && q.multipleSelectionType !== '不適用');
-    }
-    if (value === '含計算') {
-        return !!(q.calculationType && q.calculationType !== '' && q.calculationType !== '-' && q.calculationType !== '沒有計算');
-    }
-    if (value === '跨課題') {
-        return !!(q.curriculumClassification && Array.isArray(q.curriculumClassification) && q.curriculumClassification.length > 1);
-    }
-    if (value === '跨章節') {
-        return !!(q.AristochapterClassification && Array.isArray(q.AristochapterClassification) && q.AristochapterClassification.length > 1);
-    }
-    if (value === '已刪除') return !!(q.answerMC && String(q.answerMC).trim() === '*');
-    if (value === 'Out syl') return !!(q.outSyl && String(q.outSyl).trim().toUpperCase() === 'Y');
-    if (value === '有分題') {
-        return typeof questionHasParts === 'function' ? questionHasParts(q) : !!(q.questionParts && q.questionParts.length);
-    }
-    if (value === '沒有分題') {
-        return typeof questionPartsConfirmedNone === 'function'
-            ? questionPartsConfirmedNone(q)
-            : (q && q.partsStatus === 'none' && !(q.questionParts && q.questionParts.length));
-    }
-    if (value === '尚未輸入分題') {
-        return typeof questionPartsPending === 'function'
-            ? questionPartsPending(q)
-            : (!(q && q.questionParts && q.questionParts.length) && q && q.partsStatus !== 'none');
-    }
-    if (value === '題目空白') {
-        return typeof isQuestionTextBlank === 'function' ? isQuestionTextBlank(q) : false;
-    }
-    if (value === '答案空白') {
-        return typeof isAnswerBlank === 'function' ? isAnswerBlank(q) : false;
-    }
-    if (value === '評卷報告空白') {
-        return typeof isMarkersReportBlank === 'function' ? isMarkersReportBlank(q) : false;
-    }
-    return false;
-}
+// questionFeatureOn: defined in question-fields.js (loads before condition-match).
 
 function valuesOnQuestion(q, def) {
     if (def.kind === 'concepts') return (Array.isArray(q.concepts) ? q.concepts : []).map(v => String(v).trim()).filter(Boolean);

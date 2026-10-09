@@ -1,0 +1,210 @@
+/* 回報問題 + combined feedback hub */
+.report-issue-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 12100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(20, 28, 40, 0.45);
+}
+
+.report-issue-overlay[hidden] {
+    display: none !important;
+}
+
+.report-issue-dialog {
+    width: min(520px, 100%);
+    max-height: min(90vh, 820px);
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--border-light, #dde3ea);
+    box-shadow: 0 12px 40px rgba(20, 28, 40, 0.18);
+    overflow: hidden;
+}
+
+.feedback-hub-dialog {
+    width: min(860px, 100%);
+}
+
+.report-issue-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 10px;
+    border-bottom: 1px solid var(--border-light, #dde3ea);
+}
+
+.report-issue-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: var(--primary-color, #1a5276);
+}
+
+.report-issue-subtitle {
+    margin: 4px 0 0;
+    color: var(--text-light, #667788);
+    font-size: 0.9rem;
+}
+
+.report-issue-close {
+    border: none;
+    background: transparent;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #667788;
+    padding: 0 4px;
+}
+
+.report-issue-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 18px 0;
+}
+
+.report-chip {
+    border: 1px solid var(--border-light, #dde3ea);
+    background: #f8fafc;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.report-chip.is-active {
+    border-color: #90caf9;
+    background: #e3f2fd;
+    font-weight: 600;
+    color: #1a5276;
+}
+
+.report-issue-label {
+    display: block;
+    margin: 12px 18px 6px;
+    font-size: 0.9rem;
+    color: #445566;
+}
+
+.report-issue-dialog textarea {
+    margin: 0 18px;
+    width: calc(100% - 36px);
+    box-sizing: border-box;
+    border: 1px solid var(--border-light, #dde3ea);
+    border-radius: 8px;
+    padding: 10px;
+    font: inherit;
+    resize: vertical;
+}
+
+.report-issue-status {
+    margin: 8px 18px 0;
+    font-size: 0.9rem;
+}
+
+.report-issue-status.is-error { color: #c0392b; }
+.report-issue-status.is-ok { color: #1e8449; }
+.report-issue-status.is-info { color: #1a5276; }
+
+.report-issue-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-light, #dde3ea);
+    background: #f7fafc;
+    margin-top: 12px;
+}
+
+.report-issue-empty {
+    margin: 8px 0;
+    color: var(--text-light, #667788);
+}
+
+.feedback-hub-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-light, #dde3ea);
+    padding: 0 12px;
+}
+
+.feedback-hub-tab {
+    appearance: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    padding: 10px 14px;
+    font: inherit;
+    font-size: 0.95rem;
+    cursor: pointer;
+    color: #556677;
+}
+
+.feedback-hub-tab.is-active {
+    border-bottom-color: #1a5276;
+    color: #1a5276;
+    font-weight: 700;
+}
+
+.feedback-hub-toolbar {
+    padding: 10px 18px 0;
+}
+
+.feedback-hub-list {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.feedback-hub-row {
+    border: 1px solid var(--border-light, #dde3ea);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #fff;
+}
+
+.feedback-hub-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    font-size: 0.85rem;
+    color: var(--text-light, #667788);
+}
+
+.feedback-hub-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eaf4fc;
+    color: #1a5276;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.feedback-hub-snippet,
+.feedback-hub-text {
+    margin: 8px 0 0;
+    line-height: 1.55;
+    font-size: 0.95rem;
+    color: #243447;
+    white-space: pre-wrap;
+}
+
+.feedback-hub-snippet {
+    color: #5a6a7a;
+    font-size: 0.88rem;
+}
+
+body.report-issue-open {
+    overflow: hidden;
+}
