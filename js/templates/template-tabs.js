@@ -117,12 +117,15 @@ function renderTabContentsTemplate() {
         <div class="stats-shell">
             <div class="stats-shell-head">
                 <h2 id="stats-heading">統計</h2>
-                <div class="stats-mode-toggle" role="group" aria-label="統計模式">
-                    <button type="button" class="stats-mode-btn is-active" data-stats-mode="browse" aria-pressed="true">一維瀏覽</button>
-                    <button type="button" class="stats-mode-btn" data-stats-mode="crosstab" aria-pressed="false">交叉分析</button>
-                </div>
             </div>
+            <p id="stats-classification-warning" class="stats-classification-warning" role="note">
+                注意：目前的題目分類尚未完成，題目分類或會有所錯誤，切勿盡信。
+            </p>
             <div id="stats-filters"></div>
+            <div class="stats-mode-toggle stats-mode-toggle-main" role="group" aria-label="統計模式">
+                <button type="button" class="stats-mode-btn is-active" data-stats-mode="browse" aria-pressed="true">一維瀏覽</button>
+                <button type="button" class="stats-mode-btn" data-stats-mode="crosstab" aria-pressed="false">交叉分析</button>
+            </div>
             <div id="stats-browse-panel" class="stats-browse-panel">
                 <div class="stats-dimension-bar">
                     <label for="stats-dimension">分組維度</label>

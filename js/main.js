@@ -149,6 +149,9 @@ async function initializeApp() {
     if (typeof initAiExplanationFeature === 'function') {
         initAiExplanationFeature();
     }
+    if (typeof initReportIssueFeature === 'function') {
+        initReportIssueFeature();
+    }
     if (typeof initStemPatternReviewFeature === 'function') {
         initStemPatternReviewFeature();
     }
@@ -369,6 +372,15 @@ function setupEventListeners() {
                 return;
             }
             
+            const reportIssueBtn = target.closest('[data-action="report-issue"]');
+            if (reportIssueBtn) {
+                const id = reportIssueBtn.getAttribute('data-id');
+                if (typeof openReportIssueModal === 'function') {
+                    openReportIssueModal(id);
+                }
+                return;
+            }
+
             const aiExplainBtn = target.closest('[data-action="ai-explain"]');
             if (aiExplainBtn) {
                 const id = aiExplainBtn.getAttribute('data-id');

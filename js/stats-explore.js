@@ -364,9 +364,13 @@
             var style = document.createElement('style');
             style.id = 'stats-explore-styles';
             style.textContent = ''
-                + '.stats-shell-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;}'
+                + '.stats-shell-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;}'
                 + '.stats-shell-head h2{margin:0;font-size:1.35rem;}'
+                + '.stats-classification-warning{margin:0 0 12px;padding:10px 12px;border:1px solid #f0d9a8;border-radius:8px;background:#fff8eb;color:#7a4e00;font-size:13px;line-height:1.5;}'
                 + '.stats-mode-toggle{display:inline-flex;border:1px solid var(--border-light,#e0e0e0);border-radius:8px;overflow:hidden;background:#fff;}'
+                + '.stats-mode-toggle-main{display:flex;width:100%;max-width:28em;margin:14px 0 12px;border-width:2px;border-color:#90b4e0;border-radius:10px;box-shadow:0 1px 0 rgba(15,23,42,.04);}'
+                + '.stats-mode-toggle-main .stats-mode-btn{flex:1;padding:12px 16px;font-size:15px;font-weight:600;}'
+                + '.stats-mode-toggle-main .stats-mode-btn.is-active{background:#d6e8ff;color:#0f3d73;}'
                 + '.stats-mode-btn{appearance:none;border:0;background:#fff;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;}'
                 + '.stats-mode-btn+.stats-mode-btn{border-left:1px solid var(--border-light,#e0e0e0);}'
                 + '.stats-mode-btn.is-active{background:#e8f1ff;font-weight:700;}'
