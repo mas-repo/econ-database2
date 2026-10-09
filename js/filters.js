@@ -599,8 +599,8 @@ async function updateDynamicDropdowns() {
     const contextQuestions = window.storage.applyFilters(allQuestions, contextFilters);
 
     // --- Populate Year Filter Dynamically (Grouped by Decade) ---
-    // Mock papers store a paper number (44), not a calendar year. Show MT44.
-    // Canonical filter keys collapse "44" / "MT44" so the UI never lists MT44 twice.
+    // Mock papers store MT## (e.g. MT44); legacy bare "44" still matches.
+    // Filter keys collapse "44" / "MT44" → "44"; UI label is always MT44.
     const populateYearGrid = () => {
         const container = document.getElementById('year-options');
         if (!container) return;

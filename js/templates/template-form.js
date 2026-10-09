@@ -29,8 +29,8 @@ function renderFormTemplate() {
                 </div>
                 <div class="form-group">
                     <label for="year">年份 *</label>
-                    <!-- Text, not number: stored years include PP and SP as well as 2016 and 27. -->
-                    <input type="text" id="year" required>
+                    <!-- Text: 4-digit calendar years, PP/SP, or mock MT## (bare 27–44 auto-normalize to MT## on save). -->
+                    <input type="text" id="year" required placeholder="2016 / PP / MT39">
                 </div>
                 <div class="form-group">
                     <label for="paper">試卷</label>

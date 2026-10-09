@@ -53,10 +53,19 @@ class QuestionJsonSource {
                 case 'calculationType':
                     question[fieldName] = String(value).trim() || '-';
                     break;
+                case 'year':
+                    question[fieldName] = (typeof normalizeYear === 'function')
+                        ? normalizeYear(value)
+                        : String(value).trim();
+                    break;
                 default:
                     question[fieldName] = typeof value === 'string' ? value.trim() : value;
             }
         });
+
+        if (question.year != null && question.year !== '' && typeof normalizeYear === 'function') {
+            question.year = normalizeYear(question.year);
+        }
 
         ['curriculumClassification', 'AristochapterClassification', 'concepts', 'patterns', 'stemPatterns'].forEach(field => {
             if (!question[field]) question[field] = [];
