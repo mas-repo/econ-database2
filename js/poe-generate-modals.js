@@ -176,6 +176,21 @@
             + '        </div>'
             + '      </div>'
             + '      <div class="poe-stage" id="poe-stage" tabindex="0"></div>'
+            + '      <div class="poe-followup" id="poe-followup" hidden>'
+            + '        <div class="poe-followup-head">'
+            + '          <span class="poe-followup-label">追問</span>'
+            + '          <span class="poe-followup-meta" id="poe-followup-meta"></span>'
+            + '          <button type="button" class="poe-text-btn" id="poe-followup-clear" title="清除追問回合，保留首次回覆">清空追問</button>'
+            + '        </div>'
+            + '        <div class="poe-followup-chips" id="poe-followup-chips" role="group" aria-label="快捷追問"></div>'
+            + '        <label class="poe-followup-field" for="poe-followup-input">繼續對話'
+            + '          <textarea id="poe-followup-input" rows="2" maxlength="2000" aria-label="追問內容" placeholder="針對這次回覆繼續追問（不會預設重送整份參考題）…"></textarea>'
+            + '        </label>'
+            + '        <div class="poe-followup-actions">'
+            + '          <label class="poe-followup-refs"><input type="checkbox" id="poe-followup-refs"> 一併附上參考題</label>'
+            + '          <button type="button" class="btn btn-primary btn-sm" id="poe-followup-send">送出追問</button>'
+            + '        </div>'
+            + '      </div>'
             + '      </div>'
             + '      <div class="poe-composer">'
             + '      <div class="poe-meta" id="poe-meta"></div>'
@@ -258,6 +273,19 @@
         overlay.querySelector('#poe-paste-input').addEventListener('input', Poe.onPasteInput);
         Poe.fillComposerOptions();
         overlay.querySelector('#poe-again').addEventListener('click', Poe.regenerateActive);
+        overlay.querySelector('#poe-followup-send').addEventListener('click', function () {
+            Poe.sendFollowUp();
+        });
+        overlay.querySelector('#poe-followup-clear').addEventListener('click', function () {
+            Poe.clearFollowUpThread();
+        });
+        overlay.querySelector('#poe-followup-input').addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                Poe.sendFollowUp();
+            }
+        });
+        Poe.renderFollowUpChips();
         overlay.querySelector('#poe-test').addEventListener('click', Poe.testSelectedModel);
         overlay.querySelector('#poe-mode').addEventListener('change', Poe.onModeChange);
         overlay.querySelector('#poe-settings-open').addEventListener('click', function () { Poe.openSettingsModal(false); });

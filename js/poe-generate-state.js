@@ -91,8 +91,21 @@ var PoeGenerate = {};
         network: '無法連線到出題服務。',
         bad_response: '出題服務有回覆，但內容無法讀取。請再試一次。',
         empty_response: '出題服務沒有回傳內容。請再試一次。',
-        save_failed: '題目已產生，但未能寫入這部瀏覽器。'
+        save_failed: '題目已產生，但未能寫入這部瀏覽器。',
+        empty_followup: '請先輸入追問內容。',
+        no_active_reply: '請先完成一次出題，或從過往紀錄開啟一筆回覆。'
     };
+
+    // Shortcut chips fill the follow-up box; user can edit before send.
+    Poe.FOLLOWUP_CHIPS = [
+        { id: 'same-style', label: '再出一題同風格', text: '請再出一題，風格、難度與題型盡量接近剛才那題。' },
+        { id: 'harder', label: '改難啲', text: '請把剛才的題目改得難一點，保持題型與考點相近。' },
+        { id: 'easier', label: '改易啲', text: '請把剛才的題目改得易一點，保持題型與考點相近。' },
+        { id: 'marking', label: '補標準答案同評分', text: '請為剛才的題目補上標準答案與評分重點／評分準則。' },
+        { id: 'to-mc', label: '改成 MC', text: '請把剛才的題目改成選擇題（MC），並提供選項與正確答案。' },
+        { id: 'to-text', label: '改成文字題', text: '請把剛才的題目改成文字題（短答／論述），並提供參考答案。' },
+        { id: 'fix-n', label: '修正第 N 題', text: '請修正第 1 題：（請說明要改什麼）' }
+    ];
 
     Poe.poeUi = {
         overlay: null,

@@ -273,7 +273,12 @@
         }
         if (again) again.disabled = Poe.poeUi.busy || !canRegenerate;
         if (copy) copy.disabled = Poe.poeUi.busy || !(Poe.poeUi.activeRecord && Poe.poeUi.activeRecord.content);
-        if (cancel) cancel.hidden = !Poe.poeUi.busy;
+        if (cancel) {
+            cancel.hidden = !Poe.poeUi.busy;
+            if (cancel && Poe.poeUi.busyAction === 'continue') cancel.textContent = '取消追問';
+            else if (cancel) cancel.textContent = '取消';
+        }
+        if (typeof Poe.syncFollowUpUi === 'function') Poe.syncFollowUpUi();
         if (instruction) instruction.disabled = !!Poe.poeUi.busy;
         if (reset) reset.disabled = !!Poe.poeUi.busy;
         var pasteInput = Poe.pasteField();

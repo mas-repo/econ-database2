@@ -91,6 +91,7 @@
  *   logLogin                   → handleLogin_
  * AI generate / test / personal backups / admin usage:
  *   generateQuestions   → handleGenerate_
+ *   continueGeneration  → handleContinueGeneration_  (multi-turn follow-up; messages[]; refs optional)
  *   testModel           → handleTest_
  *   reviewStemPatterns  → handleReviewStemPatterns_  (no Git AI backup / no GenerationBackup sheet)
  *   listAiBackups       → handleListAiBackups_
@@ -184,6 +185,7 @@ function handlePost_(e) {
   if (action === 'logLogin') return handleLogin_(body);
   if (action === 'checkAccess' || action === 'checkRights') return handleCheck_(body);
   if (action === 'generateQuestions') return handleGenerate_(body);
+  if (action === 'continueGeneration') return handleContinueGeneration_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
@@ -591,6 +593,214 @@ function handleGenerate_(body) {
   }
 }
 
+// Multi-turn follow-up after generateQuestions. Client sends messages[]
+// (prior user/assistant turns). Full reference bank is NOT re-attached unless
+// includeReferences is true and questions[] is provided.
+function handleContinueGeneration_(body) {
+  var invokedAt = Date.now();
+  var username = normalizeUsername_(body.username);
+  var source = referenceSource_(body && body.source);
+  if (!username || !lookupRights_(username).ai) {
+    if (username && shouldAudit_(username, 'continue-denied', 60)) {
+      writeLog_({
+        username: username,
+        action: 'continueGeneration',
+        success: false,
+        metadata: { error: 'denied', source: source }
+      }, false);
+    }
+    return { ok: false, error: 'feature_unavailable' };
+  }
+
+  var provider = resolveProvider_(body);
+  var apiKey = resolveApiKey_(body, username, provider);
+  if (!apiKey) {
+    writeLog_({
+      username: username,
+      action: 'continueGeneration',
+      success: false,
+      metadata: { error: 'missing_api_key', source: source, provider: provider }
+    }, true);
+    return { ok: false, error: 'missing_api_key' };
+  }
+
+  try {
+    getLogSheet_();
+    getBackupSheet_();
+  } catch (err) {
+    safeLog_(err);
+    return { ok: false, error: 'server_error' };
+  }
+
+  var packedMessages = normalizeContinueMessages_(body.messages, POE_SYSTEM_PROMPT_);
+  if (!packedMessages.ok) {
+    return { ok: false, error: packedMessages.error || 'bad_request' };
+  }
+
+  var includeReferences = !!(body.includeReferences === true || body.includeReferences === 'true' || body.includeReferences === 1);
+  var packedRefs = { questions: [], truncated: false };
+  var sentCount = 0;
+  if (includeReferences) {
+    var maxReferences = Math.min(positiveInt_(props_().getProperty('POE_MAX_REFERENCES'), 40), 80);
+    var maxChars = Math.min(positiveInt_(props_().getProperty('POE_MAX_REFERENCE_CHARS'), 80000), 200000);
+    packedRefs = packReferences_(body.questions, maxReferences, maxChars);
+    sentCount = packedRefs.questions.length;
+    if (sentCount) {
+      var refBlock = buildPrompt_(
+        packedRefs.questions,
+        sentCount,
+        packedRefs.truncated,
+        '【補充參考題（此追問回合選擇附上）】請對照以下題幹與答案；不要重新完整出題除非使用者要求。',
+        source
+      );
+      // Insert just before the last user turn so the follow-up stays last.
+      var msgs = packedMessages.messages.slice();
+      var insertAt = msgs.length;
+      for (var mi = msgs.length - 1; mi >= 0; mi--) {
+        if (msgs[mi].role === 'user') {
+          insertAt = mi;
+          break;
+        }
+      }
+      msgs.splice(insertAt, 0, { role: 'user', content: refBlock });
+      packedMessages.messages = msgs;
+      packedMessages.messageCount = msgs.length;
+    }
+  }
+
+  var dailyLimit = nonNegativeInt_(props_().getProperty('POE_DAILY_LIMIT'), 40);
+  if (dailyLimit > 0 && countTodayGenerations_(username) >= dailyLimit) {
+    writeLog_({
+      username: username,
+      action: 'continueGeneration',
+      success: false,
+      metadata: { error: 'daily_limit', source: source }
+    }, true);
+    return { ok: false, error: 'rate_limited' };
+  }
+
+  var intervalSeconds = nonNegativeInt_(props_().getProperty('POE_MIN_INTERVAL_SECONDS'), 20);
+  if (!takeIntervalSlot_(username, intervalSeconds)) {
+    return { ok: false, error: 'rate_limited' };
+  }
+
+  var model = resolveModel_(body.model, provider);
+  var modeId = resolveModeId_(body.modeId);
+  var started = Date.now();
+  var requestId = requestId_(body && body.requestId);
+  try {
+    var completion = requestCompletionMessages_(apiKey, model, packedMessages.messages, provider);
+    var durationMs = Date.now() - started;
+    var gitBackup = false;
+    var backupName = '';
+    var replyChars = String(completion.content || '').length;
+    var backupMsNeeded = replyChars > (CONTENT_SERVICE_INLINE_MAX_CHARS_ / 2) ? 8000 : 45000;
+    if (executionMsLeft_(invokedAt) > backupMsNeeded) {
+      try {
+        backupName = writeGitAiBackup_({
+          action: 'continueGeneration',
+          username: username,
+          model: completion.model || model,
+          content: completion.content,
+          sentCount: sentCount,
+          filteredCount: clampInt_(body.filteredCount, sentCount, 100000),
+          durationMs: durationMs,
+          source: source,
+          modeId: modeId,
+          modeName: modeName_(modeId),
+          instruction: '',
+          referenceIds: includeReferences ? referenceIdsForBackup_(body, packedRefs, source) : [],
+          requestId: requestId,
+          messageCount: packedMessages.messageCount
+        }) || '';
+        gitBackup = !!backupName;
+      } catch (backupErr) {
+        safeLog_(backupErr);
+      }
+    }
+    var result = {
+      ok: true,
+      content: completion.content,
+      model: completion.model || model,
+      sentCount: sentCount,
+      filteredCount: clampInt_(body.filteredCount, sentCount, 100000),
+      truncated: !!packedRefs.truncated,
+      logged: false,
+      backedUp: false,
+      durationMs: durationMs,
+      gitBackup: gitBackup,
+      requestId: requestId,
+      continue: true,
+      messageCount: packedMessages.messageCount
+    };
+    if (executionMsLeft_(invokedAt) <= 25000) {
+      return finalizeGeneratePayload_(result, backupName, requestId);
+    }
+    result.logged = writeLog_({
+      username: username,
+      action: 'continueGeneration',
+      success: true,
+      metadata: {
+        model: result.model,
+        requestedModel: model,
+        provider: provider,
+        modeId: modeId,
+        modeName: modeName_(modeId),
+        sentCount: sentCount,
+        durationMs: durationMs,
+        promptTokens: completion.promptTokens,
+        completionTokens: completion.completionTokens,
+        source: source,
+        gitBackup: gitBackup,
+        includeReferences: includeReferences,
+        messageCount: packedMessages.messageCount
+      }
+    }, true);
+    result.backedUp = writeBackup_({
+      username: username,
+      action: 'continueGeneration',
+      model: result.model,
+      modeId: modeId,
+      modeName: modeName_(modeId),
+      instruction: '',
+      filteredCount: result.filteredCount,
+      sentCount: sentCount,
+      content: completion.content,
+      metadata: {
+        requestedModel: model,
+        provider: provider,
+        durationMs: durationMs,
+        promptTokens: completion.promptTokens,
+        completionTokens: completion.completionTokens,
+        source: source,
+        gitBackup: gitBackup,
+        includeReferences: includeReferences,
+        messageCount: packedMessages.messageCount
+      }
+    });
+    return finalizeGeneratePayload_(result, backupName, requestId);
+  } catch (err) {
+    releaseIntervalSlot_(username);
+    var code = classifyFetchError_(err);
+    safeLog_(err);
+    writeLog_({
+      username: username,
+      action: 'continueGeneration',
+      success: false,
+      metadata: {
+        error: code,
+        model: model,
+        provider: provider,
+        modeId: modeId,
+        durationMs: Date.now() - started,
+        source: source,
+        messageCount: packedMessages.messageCount
+      }
+    }, true);
+    return { ok: false, error: code };
+  }
+}
+
 // Short model ping (expects 正常). Does not count toward POE_DAILY_LIMIT.
 function handleTest_(body) {
   var username = normalizeUsername_(body.username);
@@ -962,13 +1172,18 @@ function buildPrompt_(questions, filteredCount, truncated, instruction, source) 
 }
 
 function requestCompletion_(apiKey, model, userPrompt, systemPrompt, provider) {
+  return requestCompletionMessages_(apiKey, model, [
+    { role: 'system', content: systemPrompt || POE_SYSTEM_PROMPT_ },
+    { role: 'user', content: userPrompt }
+  ], provider);
+}
+
+// Chat-completions with an arbitrary messages[] (roles: system/user/assistant).
+function requestCompletionMessages_(apiKey, model, messages, provider) {
   provider = provider === 'openrouter' ? 'openrouter' : 'poe';
   var payload = {
     model: model,
-    messages: [
-      { role: 'system', content: systemPrompt || POE_SYSTEM_PROMPT_ },
-      { role: 'user', content: userPrompt }
-    ]
+    messages: messages
   };
   var maxTokens = optionalNumber_('POE_MAX_TOKENS');
   var temperature = optionalNumber_('POE_TEMPERATURE');
@@ -1017,6 +1232,41 @@ function requestCompletion_(apiKey, model, userPrompt, systemPrompt, provider) {
     promptTokens: numberOrNull_(usage.prompt_tokens),
     completionTokens: numberOrNull_(usage.completion_tokens)
   };
+}
+
+// Normalize client chat turns for continueGeneration. Caps count and chars.
+function normalizeContinueMessages_(raw, systemPrompt) {
+  var maxMessages = Math.min(positiveInt_(props_().getProperty('POE_CONTINUE_MAX_MESSAGES'), 24), 40);
+  var maxChars = Math.min(positiveInt_(props_().getProperty('POE_CONTINUE_MAX_CHARS'), 120000), 250000);
+  var maxEach = Math.min(positiveInt_(props_().getProperty('POE_CONTINUE_MAX_EACH'), 40000), 80000);
+  var list = Array.isArray(raw) ? raw : [];
+  var out = [];
+  var total = 0;
+  var hasUser = false;
+  for (var i = 0; i < list.length && out.length < maxMessages; i++) {
+    var item = list[i];
+    if (!item || typeof item !== 'object') continue;
+    var role = String(item.role || '').trim().toLowerCase();
+    if (role !== 'system' && role !== 'user' && role !== 'assistant') continue;
+    var text = String(item.content == null ? '' : item.content).trim();
+    if (!text) continue;
+    if (text.length > maxEach) text = text.slice(0, maxEach);
+    if (total + text.length > maxChars) {
+      var room = maxChars - total;
+      if (room < 200) break;
+      text = text.slice(0, room);
+    }
+    total += text.length;
+    if (role === 'user') hasUser = true;
+    out.push({ role: role, content: text });
+  }
+  if (!out.length || !hasUser) {
+    return { ok: false, error: 'bad_request', messages: [] };
+  }
+  if (out[0].role !== 'system') {
+    out.unshift({ role: 'system', content: systemPrompt || POE_SYSTEM_PROMPT_ });
+  }
+  return { ok: true, messages: out, messageCount: out.length, charCount: total };
 }
 
 function messageText_(message) {
@@ -1182,7 +1432,8 @@ function countTodayGenerations_(username) {
       var user = normalizeUsername_(values[i][1]);
       var action = String(values[i][2] || '');
       var success = String(values[i][3] || '');
-      if (user !== username || action !== 'generateQuestions' || success !== 'success') continue;
+      if (user !== username || success !== 'success') continue;
+      if (action !== 'generateQuestions' && action !== 'continueGeneration') continue;
       if (ts instanceof Date && ts.getTime() >= today) count++;
     }
     return count;

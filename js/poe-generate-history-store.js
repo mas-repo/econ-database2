@@ -150,7 +150,7 @@
     Poe.mapRemoteBackup = function mapRemoteBackup(backup, username) {
         if (!backup || typeof backup !== 'object') return null;
         var action = String(backup.action || '');
-        if (action && action !== 'generateQuestions') return null;
+        if (action && action !== 'generateQuestions' && action !== 'continueGeneration') return null;
         var name = String(backup.name || '').replace(/^.*\//, '');
         var content = String(backup.content == null ? '' : backup.content);
         var source = backup.referenceSource || backup.source || 'filter';
