@@ -239,43 +239,54 @@ function hideLoading() {
 }
 
 // Tab switching — delegates to tabs.js renderers (thin wrappers around
-// the read-only renderers in statistics.js).
+// the read-only renderers in statistics.js). Legacy stats tab ids alias
+// to the unified 「統計」tab + dimension.
 function switchTab(tabName, event) {
-    window.currentTab = tabName;
-    
+    const aliases = (typeof STAT_TAB_ALIASES !== 'undefined' && STAT_TAB_ALIASES) || {
+        concepts: 'concepts',
+        topics: 'topics',
+        chapters: 'chapters',
+        patterns: 'patterns',
+        stemPatterns: 'stemPatterns',
+        publishers: 'publishers'
+    };
+    let activeName = tabName;
+    let dimension = null;
+    if (aliases[tabName]) {
+        activeName = 'stats';
+        dimension = aliases[tabName];
+        if (typeof setStatsActiveDimension === 'function') {
+            setStatsActiveDimension(dimension);
+        } else {
+            window.statsActiveDimension = dimension;
+        }
+        window.statsViewMode = 'browse';
+    }
+
+    window.currentTab = activeName;
+
     // Update tab buttons
     document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
     });
-    
-    if (event && event.target) {
+
+    if (event && event.target && activeName === tabName) {
         event.target.classList.add('active');
     } else {
-        // Fallback if event not passed
-        const btn = document.querySelector(`[onclick*="switchTab('${tabName}')"]`);
+        const btn = document.querySelector(`[onclick*="switchTab('${activeName}')"]`);
         if (btn) btn.classList.add('active');
     }
-    
+
     // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
     });
-    const content = document.getElementById(`${tabName}-tab`);
+    const content = document.getElementById(`${activeName}-tab`);
     if (content) content.classList.add('active');
-    
+
     // Render content based on tab
-    if (tabName === 'publishers') {
-        if (typeof renderPublishers === 'function') renderPublishers();
-    } else if (tabName === 'topics') {
-        if (typeof renderTopics === 'function') renderTopics();
-    } else if (tabName === 'chapters') {
-        if (typeof renderChapters === 'function') renderChapters();     
-    } else if (tabName === 'concepts') {
-        if (typeof renderConcepts === 'function') renderConcepts();
-    } else if (tabName === 'patterns') {
-        if (typeof renderPatterns === 'function') renderPatterns();
-    } else if (tabName === 'stemPatterns') {
-        if (typeof renderStemPatterns === 'function') renderStemPatterns();
+    if (activeName === 'stats') {
+        if (typeof renderStats === 'function') renderStats();
     }
 }
 

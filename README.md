@@ -10,6 +10,16 @@ Records with reviewedByAI equal to Y must not be overwritten by builders that fi
 
 ---
 
+## 統計 tab
+
+Top-level tabs are **題目** and **統計** (not separate 概念 / 課程分類 / 章節 / 題型 / 題幹模式 tabs). Inside **統計**:
+
+- **一維瀏覽** — dimension switcher (概念 / 課程分類 / 章節 / 題型 / 題幹模式 / 出版商) reuses `renderGroupedStats` + shared stats filters (`js/stats-filters.js`). Cards have **詳細統計** (breakdown modal) and **查看題目**.
+- **交叉分析** — row × column × metric (題數 / MC / 文字題 / 平均答對率 / 平均分數), presets, swap; multi-value fields may count a question in multiple cells; 答對率／分數 use bins. Cell click jumps to 題目 with intersection filters. Local aggregation only (`js/stats-explore.js`).
+- Legacy `switchTab('concepts'|…)` aliases open 統計 on that dimension.
+
+---
+
 ## Field: year
 
 - Type: string.

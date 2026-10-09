@@ -1,25 +1,25 @@
 // stats-filters.js
-// Filters for the statistics tabs (概念 / 課程分類 / Chapters / 題型 / 題幹).
+// Filters for the unified 「統計」tab (一維瀏覽 + 交叉分析).
 //
-// Each tab aggregates questions by one dimension, so that dimension is a
-// name search plus a 「查看題目」 jump — not a second copy of itself in the
-// filter bar. Every other dimension the question list already understands
-// is available here, with the same include / exclude behaviour.
-//
-// State is independent of the 題目 tab until the user jumps. The jump
-// copies these filters onto the question list and adds the clicked row,
-// so the list matches the count on the card.
+// Dimensions (概念 / 課程分類 / 章節 / 題型 / 題幹模式 / 出版商) share one
+// filter bar and one filter state. The active dimension is hidden from the
+// filter bar via hideOn. State is independent of the 題目 tab until jump.
 //
 // Dependencies: storage-filters.js (applyFilters, filterLogic override),
 // constants.js, utils.js (escapeHTML, debounce), filters.js
 // (filterQuestions, closeAllDropdowns, yearFilterLabel, paperFilterLabel)
 
+const STATS_SHARED_MOUNT = 'stats-filters';
+const STATS_SHARED_GRID = 'stats-grid';
+const STATS_SHARED_PAGER = 'stats-pager';
+const STATS_STATE_KEY = 'stats';
+
 const STAT_TABS = {
     concepts: {
         label: '概念',
-        mountId: 'concepts-stats-filters',
-        gridId: 'concepts-grid',
-        pagerId: 'concepts-stats-pager',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
         groupKey: 'concepts',
         empty: '暫無概念資料',
         filteredEmpty: '沒有符合篩選的概念',
@@ -31,9 +31,9 @@ const STAT_TABS = {
     },
     topics: {
         label: '課程分類',
-        mountId: 'topics-stats-filters',
-        gridId: 'topics-grid',
-        pagerId: 'topics-stats-pager',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
         groupKey: 'curriculum',
         empty: '暫無課程分類資料',
         filteredEmpty: '沒有符合篩選的課程分類',
@@ -44,10 +44,10 @@ const STAT_TABS = {
         }
     },
     chapters: {
-        label: 'Chapter',
-        mountId: 'chapters-stats-filters',
-        gridId: 'chapters-grid',
-        pagerId: 'chapters-stats-pager',
+        label: '章節',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
         groupKey: 'chapter',
         empty: '暫無章節資料',
         filteredEmpty: '沒有符合篩選的章節',
@@ -59,9 +59,9 @@ const STAT_TABS = {
     },
     patterns: {
         label: '題型',
-        mountId: 'patterns-stats-filters',
-        gridId: 'patterns-grid',
-        pagerId: 'patterns-stats-pager',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
         groupKey: 'patterns',
         empty: '暫無題型資料',
         filteredEmpty: '沒有符合篩選的題型',
@@ -73,9 +73,9 @@ const STAT_TABS = {
     },
     stemPatterns: {
         label: '題幹模式',
-        mountId: 'stemPatterns-stats-filters',
-        gridId: 'stemPatterns-grid',
-        pagerId: 'stemPatterns-stats-pager',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
         groupKey: 'stemPatterns',
         empty: '暫無題幹模式資料',
         filteredEmpty: '沒有符合篩選的題幹模式',
@@ -84,10 +84,50 @@ const STAT_TABS = {
         valuesOf(q) {
             return Array.isArray(q.stemPatterns) ? q.stemPatterns : [];
         }
+    },
+    publishers: {
+        label: '出版商',
+        mountId: STATS_SHARED_MOUNT,
+        gridId: STATS_SHARED_GRID,
+        pagerId: STATS_SHARED_PAGER,
+        groupKey: 'publisher',
+        empty: '暫無出版商資料',
+        filteredEmpty: '沒有符合篩選的出版商',
+        defaultSort: 'count-desc',
+        defaultPageSize: -1,
+        valuesOf(q) {
+            const text = String(q && q.publisher != null ? q.publisher : '').trim();
+            return [text || 'Unknown'];
+        }
     }
 };
 
-// hideOn: the tab that is already grouped by this dimension.
+window.statsActiveDimension = window.statsActiveDimension || 'concepts';
+window.statsViewMode = window.statsViewMode || 'browse'; // browse | crosstab
+
+function getStatsActiveDimension() {
+    const dim = window.statsActiveDimension;
+    return STAT_TABS[dim] ? dim : 'concepts';
+}
+
+function setStatsActiveDimension(dim) {
+    if (!STAT_TABS[dim]) return getStatsActiveDimension();
+    window.statsActiveDimension = dim;
+    return dim;
+}
+
+function statsStateKey(tabId) {
+    if (tabId === STATS_STATE_KEY || STAT_TABS[tabId]) return STATS_STATE_KEY;
+    return tabId;
+}
+
+function resolveStatsDimension(tabId) {
+    if (tabId === STATS_STATE_KEY || tabId === 'stats') return getStatsActiveDimension();
+    if (STAT_TABS[tabId]) return tabId;
+    return getStatsActiveDimension();
+}
+
+// hideOn: the dimension that is already grouped (hidden from filter bar).
 // optional: hidden when the loaded bank has no values.
 const STAT_FILTER_DEFS = [
     { key: 'concepts', label: '💡 概念類型', kind: 'concepts', hideOn: ['concepts'] },
@@ -100,7 +140,7 @@ const STAT_FILTER_DEFS = [
     { key: 'year', label: '📅 年份', kind: 'year' },
     { key: 'paper', label: '📄 卷別', kind: 'paper' },
     { key: 'section', label: '📝 Section', kind: 'section' },
-    { key: 'publisher', label: '🏢 出版商', kind: 'publisher' },
+    { key: 'publisher', label: '🏢 出版商', kind: 'publisher', hideOn: ['publishers'] },
     { key: 'feature', label: '🎯 特徵', kind: 'feature' },
     { key: 'partPerformance', label: '📈 分題表現', kind: 'partPerformance' },
     { key: 'graph', label: '📊 圖表類型', kind: 'scalar', field: 'graphType', optional: true },
@@ -162,9 +202,10 @@ function emptyStatsTriState() {
 }
 
 function getStatsTabState(tabId) {
-    if (!statsFilterState[tabId]) {
-        const cfg = STAT_TABS[tabId];
-        statsFilterState[tabId] = {
+    const key = statsStateKey(tabId);
+    if (!statsFilterState[key]) {
+        const cfg = STAT_TABS[resolveStatsDimension(tabId)] || STAT_TABS.concepts;
+        statsFilterState[key] = {
             search: '',
             searchScope: 'name',
             sort: cfg.defaultSort,
@@ -178,7 +219,7 @@ function getStatsTabState(tabId) {
             qnum: { min: QNUM_MIN_STATS, max: QNUM_MAX_STATS, active: false }
         };
     }
-    return statsFilterState[tabId];
+    return statsFilterState[key];
 }
 
 function statsStateToFilters(state, omitKey) {
@@ -253,7 +294,12 @@ function statsSortOptions(tabId) {
 }
 
 function visibleStatFilters(tabId) {
-    return STAT_FILTER_DEFS.filter(def => !def.hideOn || !def.hideOn.includes(tabId));
+    // Crosstab uses two free axes — keep every dimension filter available.
+    if (window.statsViewMode === 'crosstab') {
+        return STAT_FILTER_DEFS.slice();
+    }
+    const dim = resolveStatsDimension(tabId);
+    return STAT_FILTER_DEFS.filter(def => !def.hideOn || !def.hideOn.includes(dim));
 }
 
 function triSelectionCount(state, key) {
@@ -551,15 +597,18 @@ function paintStatsRange(tabId, rangeKey) {
 }
 
 function ensureStatsFilterBar(tabId) {
-    const cfg = STAT_TABS[tabId];
+    const dim = resolveStatsDimension(tabId);
+    const cfg = STAT_TABS[dim];
     const mount = cfg && document.getElementById(cfg.mountId);
     if (!mount) return;
     bindStatsFilterUi();
-    if (mount.dataset.ready === '1') return;
-    mount.innerHTML = buildStatsFilterBar(tabId);
+    // Rebuild when the active dimension changes so hideOn stays correct.
+    if (mount.dataset.ready === '1' && mount.dataset.statsDim === dim) return;
+    mount.innerHTML = buildStatsFilterBar(dim);
     mount.dataset.ready = '1';
-    visibleStatFilters(tabId).forEach(def => {
-        if (def.kind === 'range') paintStatsRange(tabId, def.key);
+    mount.dataset.statsDim = dim;
+    visibleStatFilters(dim).forEach(def => {
+        if (def.kind === 'range') paintStatsRange(dim, def.key);
     });
 }
 
@@ -673,42 +722,50 @@ function renderStatsBadges(tabId) {
 }
 
 function scheduleStatsRender(tabId) {
-    const gen = (statsRenderGen[tabId] || 0) + 1;
-    statsRenderGen[tabId] = gen;
+    const dim = resolveStatsDimension(tabId);
+    const gen = (statsRenderGen[dim] || 0) + 1;
+    statsRenderGen[dim] = gen;
+    if (window.statsViewMode === 'crosstab' && typeof window.renderStatsCrosstab === 'function') {
+        window.renderStatsCrosstab(gen);
+        return;
+    }
     if (typeof window.renderStatsTab === 'function') {
-        window.renderStatsTab(tabId, gen);
+        window.renderStatsTab(dim, gen);
     }
 }
 
 function statsRenderIsCurrent(tabId, gen) {
-    return statsRenderGen[tabId] === gen;
+    const dim = resolveStatsDimension(tabId);
+    return statsRenderGen[dim] === gen;
 }
 
 function resetStatsFilters(tabId) {
-    const cfg = STAT_TABS[tabId];
+    const dim = resolveStatsDimension(tabId);
+    const cfg = STAT_TABS[dim];
+    const prev = getStatsTabState(dim);
     const fresh = {
         search: '',
         searchScope: 'name',
-        sort: getStatsTabState(tabId).sort,
+        sort: prev.sort,
         page: 1,
-        pageSize: getStatsTabState(tabId).pageSize,
-        collapsed: getStatsTabState(tabId).collapsed,
+        pageSize: prev.pageSize,
+        collapsed: prev.collapsed,
         triState: emptyStatsTriState(),
         logic: { curriculum: 'OR', chapter: 'OR' },
         percentage: { min: 0, max: 100, active: false },
         marks: { min: 0, max: 30, active: false },
         qnum: { min: QNUM_MIN_STATS, max: QNUM_MAX_STATS, active: false }
     };
-    statsFilterState[tabId] = fresh;
-    const search = document.querySelector(`[data-sf-search="${tabId}"]`);
+    statsFilterState[statsStateKey(dim)] = fresh;
+    const search = document.querySelector(`[data-sf-search="${dim}"]`);
     if (search) search.value = '';
-    const scope = document.querySelector(`[data-sf-scope="${tabId}"]`);
+    const scope = document.querySelector(`[data-sf-scope="${dim}"]`);
     if (scope) scope.value = 'name';
-    visibleStatFilters(tabId).forEach(def => {
-        if (def.kind === 'range') paintStatsRange(tabId, def.key);
+    visibleStatFilters(dim).forEach(def => {
+        if (def.kind === 'range') paintStatsRange(dim, def.key);
     });
-    if (sfModal && sfModal.tabId === tabId) closeStatsFilterModal();
-    if (cfg) scheduleStatsRender(tabId);
+    if (sfModal && sfModal.tabId === dim) closeStatsFilterModal();
+    if (cfg) scheduleStatsRender(dim);
 }
 
 function bindStatsFilterUi() {
@@ -1168,3 +1225,7 @@ window.refreshStatsFilterVisibility = refreshStatsFilterVisibility;
 window.updateStatsFilterChrome = updateStatsFilterChrome;
 window.statsRenderIsCurrent = statsRenderIsCurrent;
 window.jumpStatsRowToQuestions = jumpStatsRowToQuestions;
+window.getStatsActiveDimension = getStatsActiveDimension;
+window.setStatsActiveDimension = setStatsActiveDimension;
+window.resolveStatsDimension = resolveStatsDimension;
+window.scheduleStatsRender = scheduleStatsRender;
