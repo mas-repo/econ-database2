@@ -370,34 +370,47 @@
         Poe.refreshProviderSummary();
     }
 
-    Poe.fillSettingsModelOptions = function fillSettingsModelOptions(provider) {
+    // Shared model <select> filler for API／模型設定 and 用戶設定.
+    // selectedModel wins when provided; otherwise falls back to default for provider.
+    Poe.fillModelSelect = function fillModelSelect(selectEl, provider, selectedModel, customInputEl) {
+        if (!selectEl) return '';
         provider = Poe.normalizeProvider(provider);
-        Poe.syncProviderModelPanels(provider);
-        var modelSelect = Poe.settingsModelSelect(provider);
-        if (!modelSelect) return;
         var list = Poe.modelsForProvider(provider);
-        var selected = Poe.readStoredModel(provider);
-        modelSelect.textContent = '';
+        var selected = String(selectedModel == null ? '' : selectedModel).trim();
+        var sanitized = selected ? Poe.sanitizeModelId(provider, selected) : '';
+        selected = sanitized || Poe.defaultModelForProvider(provider);
+        selectEl.textContent = '';
         var seen = false;
         list.forEach(function (model) {
             var option = document.createElement('option');
             option.value = model;
             option.textContent = model;
-            modelSelect.appendChild(option);
+            selectEl.appendChild(option);
             if (model === selected) seen = true;
         });
         if (selected && !seen) {
             var customOption = document.createElement('option');
             customOption.value = selected;
             customOption.textContent = selected + '（自訂）';
-            modelSelect.appendChild(customOption);
+            selectEl.appendChild(customOption);
         }
-        modelSelect.value = selected;
-        var custom = Poe.settingsModelCustom(provider);
-        if (custom && document.activeElement !== custom) {
-            custom.value = (selected && list.indexOf(selected) === -1) ? selected : '';
+        selectEl.value = selected;
+        if (customInputEl && document.activeElement !== customInputEl) {
+            customInputEl.value = (selected && list.indexOf(selected) === -1) ? selected : '';
         }
-    }
+        return selected;
+    };
+
+    Poe.fillSettingsModelOptions = function fillSettingsModelOptions(provider) {
+        provider = Poe.normalizeProvider(provider);
+        Poe.syncProviderModelPanels(provider);
+        Poe.fillModelSelect(
+            Poe.settingsModelSelect(provider),
+            provider,
+            Poe.readStoredModel(provider),
+            Poe.settingsModelCustom(provider)
+        );
+    };
 
     Poe.loadSettingsForm = function loadSettingsForm() {
         Poe.ensureSettingsModal();
