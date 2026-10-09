@@ -341,7 +341,6 @@ async function renderQuestions() {
                     ${renderOriginalBadge(q.originalAnswerImageEng, '英答案')}
                     ${renderOriginalBadge(q.originalReportImage, '報告')}
                     ${renderOriginalBadge(q.originalReportImageEng, '英報告')}
-                    <button type="button" class="ai-explain-btn" data-action="ai-explain" data-id="${escapeHTML(q.id)}" title="AI解釋" aria-label="AI解釋">🤖</button>
                 </div>
                 <div class="question-badges">
                     ${q.reviewedByAI === 'Y' ? `<span class="badge" title="上次覆核 ${escapeHTML(q.lastReviewDate || '')}">AI已覆核</span>` : `<span class="badge" title="尚未人工覆核">未覆核</span>`}

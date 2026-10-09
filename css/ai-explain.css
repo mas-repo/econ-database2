@@ -1,26 +1,7 @@
 /* AI解釋 modal + per-question controls. Standalone admin Feedback overlay
-   styles remain for fallback; primary admin UI is the report-issue.css hub. */
-.ai-explain-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    margin-left: 8px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid #90caf9;
-    background: #e3f2fd;
-    font-size: 1.2em;
-    cursor: pointer;
-    vertical-align: middle;
-    line-height: 1;
-}
-
-.ai-explain-btn:hover {
-    background: #bbdefb;
-}
-
+   styles remain for fallback; primary admin UI is the report-issue.css hub.
+   Per-card entry is the footer「AI解釋」button (question-ai-explain); the old
+   circular robot badge beside the question id was removed. */
 .ai-explain-overlay {
     position: fixed;
     inset: 0;

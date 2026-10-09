@@ -738,14 +738,16 @@ async function updateDynamicDropdowns() {
         } else {
             if (aiFilterItem) aiFilterItem.hidden = false;
             const labelHas = (window.AiExplanation && AiExplanation.LABEL_HAS) || '有AI解釋';
+            const labelNone = (window.AiExplanation && AiExplanation.LABEL_NONE) || '沒有AI解釋';
             const labelShort = (window.AiExplanation && AiExplanation.LABEL_SHORT) || '簡短';
             const labelDetailed = (window.AiExplanation && AiExplanation.LABEL_DETAILED) || '詳盡';
             const valueFn = (typeof aiExplanationFilterValues === 'function')
                 ? aiExplanationFilterValues
                 : (id => (window.AiExplanation && AiExplanation.filterValuesForQuestion
-                    ? AiExplanation.filterValuesForQuestion(id) : []));
+                    ? AiExplanation.filterValuesForQuestion(id) : [labelNone]));
             const counts = {};
             counts[labelHas] = 0;
+            counts[labelNone] = 0;
             counts[labelShort] = 0;
             counts[labelDetailed] = 0;
             contextQuestions.forEach(q => {
@@ -757,7 +759,8 @@ async function updateDynamicDropdowns() {
                     counts[v] = (counts[v] || 0) + 1;
                 });
             });
-            const items = [labelHas, labelShort, labelDetailed];
+            // Presence first (有／沒有), then detail level when present.
+            const items = [labelHas, labelNone, labelShort, labelDetailed];
             aiContainer.innerHTML = items.map(item => {
                 const currentState = window.triStateFilters.ai && window.triStateFilters.ai[item];
                 let wrapperClass = 'tri-state-label';
@@ -770,13 +773,10 @@ async function updateDynamicDropdowns() {
                     checkboxClass += ' excluded';
                 }
                 const count = counts[item] || 0;
-                const hint = item === labelHas
-                    ? '（剔選＝有／排除＝無）'
-                    : '';
                 return `
                 <div class="${wrapperClass}" onclick="toggleTriState(this)" data-filter="ai" data-value="${item}">
                     <div class="${checkboxClass}" data-filter="ai" data-value="${item}">
-                        <span>${item}${hint} <small style="opacity: 0.6; font-size: 0.85em; margin-left: 4px;">(${count})</small></span>
+                        <span>${item} <small style="opacity: 0.6; font-size: 0.85em; margin-left: 4px;">(${count})</small></span>
                     </div>
                 </div>`;
             }).join('');

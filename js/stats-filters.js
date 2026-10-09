@@ -418,7 +418,7 @@ const STAT_FILTER_DEFS = [
     { key: 'percentage', label: '📊 答對率', kind: 'range', range: 'percentage', hideOn: ['percentageBin'] },
     { key: 'marks', label: '💯 分數', kind: 'range', range: 'marks', hideOn: ['marksBin'] },
     { key: 'qnum', label: '#️⃣ 題號', kind: 'range', range: 'qnum', hideOn: ['qnumBin'] },
-    { key: 'ai', label: '🤖 AI解釋', kind: 'ai', optional: true, requiresAi: true }
+    { key: 'ai', label: 'AI解釋', kind: 'ai', optional: true, requiresAi: true }
 ];
 
 const STAT_SEARCH_SCOPES = [
@@ -657,7 +657,7 @@ function valuesOnQuestion(q, def) {
         if (window.AiExplanation && typeof AiExplanation.filterValuesForQuestion === 'function') {
             return AiExplanation.filterValuesForQuestion(q && q.id);
         }
-        return [];
+        return [(window.AiExplanation && AiExplanation.LABEL_NONE) || '沒有AI解釋'];
     }
     if (def.kind === 'year') {
         const key = typeof normalizeYearFilterKey === 'function'
@@ -707,9 +707,10 @@ function staticFilterUniverse(def, counts) {
     else if (def.kind === 'partPerformance' && typeof PART_PERFORMANCE_ITEMS !== 'undefined') base = PART_PERFORMANCE_ITEMS.slice();
     else if (def.kind === 'ai') {
         const labelHas = (window.AiExplanation && AiExplanation.LABEL_HAS) || '有AI解釋';
+        const labelNone = (window.AiExplanation && AiExplanation.LABEL_NONE) || '沒有AI解釋';
         const labelShort = (window.AiExplanation && AiExplanation.LABEL_SHORT) || '簡短';
         const labelDetailed = (window.AiExplanation && AiExplanation.LABEL_DETAILED) || '詳盡';
-        base = [labelHas, labelShort, labelDetailed];
+        base = [labelHas, labelNone, labelShort, labelDetailed];
     }
     else base = Object.keys(counts);
 
@@ -769,7 +770,7 @@ function datasetHasFilter(def, questions) {
         return false;
     }
     if (!def.optional) return true;
-    // AI解釋: always offer 有／無／簡短／詳盡 when the user has ai access.
+    // AI解釋: always offer 有／沒有／簡短／詳盡 when the user has ai access.
     if (def.kind === 'ai') return true;
     return Object.keys(countFilterValues(questions, def)).length > 0;
 }
