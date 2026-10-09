@@ -136,20 +136,26 @@
             idle.appendChild(empty);
         }
         stage.appendChild(idle);
+        if (typeof Poe.syncFollowUpUi === 'function') Poe.syncFollowUpUi();
     }
 
     Poe.showLoading = function showLoading() {
         var stage = document.getElementById('poe-stage');
         if (!stage) return;
         Poe.closeEnlargeOverlay();
-        Poe.setStageChrome({ label: '正在出題', enlarge: false, hasPaper: false });
+        var continuing = Poe.poeUi.busyAction === 'continue';
+        Poe.setStageChrome({
+            label: continuing ? '正在追問' : '正在出題',
+            enlarge: false,
+            hasPaper: false
+        });
         stage.textContent = '';
         var wrap = document.createElement('div');
         wrap.className = 'poe-loading';
         var bar = document.createElement('div');
         bar.className = 'poe-progress';
         bar.setAttribute('role', 'progressbar');
-        bar.setAttribute('aria-label', '正在出題');
+        bar.setAttribute('aria-label', continuing ? '正在追問' : '正在出題');
         var fill = document.createElement('div');
         fill.className = 'poe-progress-bar';
         bar.appendChild(fill);
@@ -710,6 +716,7 @@
             hasPaper: !!(record && record.content)
         });
         if (Poe.poeUi.resultExpanded) Poe.enlargeResult();
+        if (typeof Poe.syncFollowUpUi === 'function') Poe.syncFollowUpUi();
     }
 
     Poe.formatTime = function formatTime(timestamp) {
