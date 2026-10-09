@@ -253,12 +253,11 @@
         var host = document.querySelector('header div[style*="flex-wrap"]') ||
             document.querySelector('header');
         if (!host) return null;
-        // Retire the old AI-only button if present.
-        var legacy = document.getElementById('ai-explain-feedback-admin-btn');
-        if (legacy) {
-            legacy.hidden = true;
-            legacy.id = 'ai-explain-feedback-admin-btn-retired';
-        }
+        // Drop ghost nodes left by the old retire-by-rename path
+        // (#ai-explain-feedback-admin-btn-retired). Standalone AI button stays.
+        document.querySelectorAll('#ai-explain-feedback-admin-btn-retired').forEach(function (node) {
+            node.remove();
+        });
         var button = document.getElementById('feedback-hub-admin-btn');
         if (button) {
             if (button.dataset.bound !== '1') {
@@ -270,13 +269,15 @@
         button = document.createElement('button');
         button.type = 'button';
         button.id = 'feedback-hub-admin-btn';
-        button.className = 'btn btn-outline-primary';
+        button.className = 'btn btn-outline-primary header-toolbar-btn';
         button.hidden = true;
         button.textContent = '回饋／回報';
         button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback 同問題回報');
         button.dataset.bound = '1';
         button.addEventListener('click', openFeedbackHub);
-        var anchor = document.getElementById('data-checks-btn') || document.getElementById('admin-mode-btn');
+        var anchor = document.getElementById('ai-explain-feedback-admin-btn')
+            || document.getElementById('data-checks-btn')
+            || document.getElementById('admin-mode-btn');
         if (anchor && anchor.parentNode === host) {
             host.insertBefore(button, anchor.nextSibling);
         } else {
@@ -291,9 +292,6 @@
         var allowed = hasAdminAccess();
         button.hidden = !allowed;
         if (!allowed) closeFeedbackHub();
-        // Hide legacy AI-only button if somehow still separate.
-        var legacy = document.getElementById('ai-explain-feedback-admin-btn');
-        if (legacy && legacy !== button) legacy.hidden = true;
     }
 
     function ensureHubOverlay() {
@@ -610,11 +608,10 @@
     function initReportIssueFeature() {
         bindEscape();
         refreshHubButton();
-        // Prefer combined hub over standalone AI admin button.
+        // Purge any leftover retired AI header duplicates from older builds.
         if (global.AiExplanation && typeof AiExplanation.setAdminUiDelegated === 'function') {
-            AiExplanation.setAdminUiDelegated(true);
+            AiExplanation.setAdminUiDelegated(false);
         }
-        refreshHubButton();
     }
 
     global.ReportIssue = {
