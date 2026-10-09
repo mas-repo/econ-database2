@@ -360,9 +360,36 @@
     transform: scale(0.95);
 }
 
-/* .btn sets display, which would otherwise ignore the hidden attribute. */
-#admin-mode-btn[hidden] {
+/* .btn sets display:inline-flex, which beats the UA [hidden]{display:none}
+   rule — header toolbar chips must force-hide or "retired" duplicates stay visible. */
+#admin-mode-btn[hidden],
+header .btn[hidden],
+header .header-toolbar-btn[hidden] {
     display: none !important;
+}
+
+/* Admin / account chips on the purple–blue header gradient: light text +
+   translucent fill (same family as .btn-info / 重新載入), not teal outline. */
+header .btn.btn-outline-primary,
+header .header-toolbar-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    text-shadow: 0 1px 1px rgba(40, 20, 70, 0.25);
+}
+
+header .btn.btn-outline-primary:hover,
+header .header-toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.32);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 4px 12px rgba(30, 16, 60, 0.22);
+}
+
+header .btn.btn-outline-primary:active,
+header .header-toolbar-btn:active {
+    background: rgba(255, 255, 255, 0.24);
+    color: #ffffff;
 }
 
 /* Logout stays available after sign-in. */

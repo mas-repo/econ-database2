@@ -1,8 +1,8 @@
 // AI解釋 — per-question explanations (generate / list / vote / feedback).
 // Gate: accessRights.ai (same as AI出題; CSS class body.poe-ai-allowed).
 // Persist: shared/data/ai-explanations.json via Apps Script + direct read.
-// Admin Feedback UI is normally delegated to the 回饋／回報 hub
-// (ReportIssue.setAdminUiDelegated); standalone admin overlay is fallback only.
+// Standalone「AI解釋 Feedback」header button + admin overlay;「回饋／回報」hub
+// is a separate ReportIssue control (do not retire/rename the AI button).
 // Depends: PoeGenerate (proxyRequest, withProviderAndApiKey, settings),
 // shared-assets (fetchSharedJsonDirectOrProxy), access-rights, render.
 
@@ -898,38 +898,63 @@
     }
 
     // --- Admin feedback browser ---
-    // When ReportIssue owns the combined「回饋／回報」hub, skip the standalone
-    // AI-only button (setAdminUiDelegated(true)).
+    // Standalone「AI解釋 Feedback」header button. ReportIssue's「回饋／回報」hub
+    // is a separate control; do not rename/retire this button (renaming broke
+    // getElementById guards and left duplicate visible nodes because .btn
+    // display beats the UA [hidden] rule).
 
-    var adminUiDelegated = false;
-
-    function setAdminUiDelegated(flag) {
-        adminUiDelegated = !!flag;
-        if (adminUiDelegated) {
-            var legacy = document.getElementById('ai-explain-feedback-admin-btn');
-            if (legacy) legacy.hidden = true;
-            closeAdminFeedback();
-        } else {
-            refreshAdminButton();
+    function purgeDuplicateAiAdminButtons(keep) {
+        var host = document.querySelector('header');
+        if (!host) return;
+        var nodes = host.querySelectorAll('button');
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            var id = node.id || '';
+            var label = (node.getAttribute('aria-label') || '').trim();
+            var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+            var isAiAdmin = id === 'ai-explain-feedback-admin-btn'
+                || id === 'ai-explain-feedback-admin-btn-retired'
+                || label === '瀏覽 AI解釋 Feedback'
+                || text === 'AI解釋 Feedback';
+            if (!isAiAdmin) continue;
+            if (keep && node === keep) continue;
+            node.remove();
         }
     }
 
+    // Kept for callers that still invoke it (ReportIssue init). No longer hides
+    // or retires the standalone header button.
+    function setAdminUiDelegated(_flag) {
+        purgeDuplicateAiAdminButtons(document.getElementById('ai-explain-feedback-admin-btn'));
+        refreshAdminButton();
+    }
+
     function ensureAdminButton() {
-        if (adminUiDelegated) return null;
         var host = document.querySelector('header div[style*="flex-wrap"]') ||
             document.querySelector('header');
         if (!host) return null;
         var button = document.getElementById('ai-explain-feedback-admin-btn');
-        if (button) return button;
+        if (button) {
+            purgeDuplicateAiAdminButtons(button);
+            if (button.dataset.bound !== '1') {
+                button.dataset.bound = '1';
+                button.addEventListener('click', openAdminFeedback);
+            }
+            return button;
+        }
+        purgeDuplicateAiAdminButtons(null);
         button = document.createElement('button');
         button.type = 'button';
         button.id = 'ai-explain-feedback-admin-btn';
-        button.className = 'btn btn-outline-primary';
+        button.className = 'btn btn-outline-primary header-toolbar-btn';
         button.hidden = true;
         button.textContent = 'AI解釋 Feedback';
         button.setAttribute('aria-label', '瀏覽 AI解釋 Feedback');
+        button.dataset.bound = '1';
         button.addEventListener('click', openAdminFeedback);
-        var anchor = document.getElementById('data-checks-btn') || document.getElementById('admin-mode-btn');
+        var anchor = document.getElementById('feedback-hub-admin-btn')
+            || document.getElementById('data-checks-btn')
+            || document.getElementById('admin-mode-btn');
         if (anchor && anchor.parentNode === host) {
             host.insertBefore(button, anchor.nextSibling);
         } else {
@@ -939,11 +964,6 @@
     }
 
     function refreshAdminButton() {
-        if (adminUiDelegated) {
-            var legacy = document.getElementById('ai-explain-feedback-admin-btn');
-            if (legacy) legacy.hidden = true;
-            return;
-        }
         var button = ensureAdminButton();
         if (!button) return;
         var allowed = hasAdminAccess();

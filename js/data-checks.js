@@ -534,7 +534,7 @@
         button = document.createElement('button');
         button.type = 'button';
         button.id = 'data-checks-btn';
-        button.className = 'btn btn-outline-primary';
+        button.className = 'btn btn-outline-primary header-toolbar-btn';
         button.hidden = true;
         button.textContent = '資料檢查';
         button.setAttribute('aria-label', '資料檢查');
