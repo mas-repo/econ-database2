@@ -45,9 +45,6 @@ function applyAccessRights(rights) {
     if (typeof populateDynamicFilters === 'function') {
         populateDynamicFilters();
     }
-    if (window.AiExplanation && typeof AiExplanation.refreshAdminButton === 'function') {
-        AiExplanation.refreshAdminButton();
-    }
     if (window.ReportIssue && typeof ReportIssue.refreshHubButton === 'function') {
         ReportIssue.refreshHubButton();
     }
