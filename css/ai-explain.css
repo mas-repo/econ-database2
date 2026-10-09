@@ -202,9 +202,28 @@
 }
 
 .ai-explain-version.is-selected {
-    border-color: #7c5cbf;
-    background: #f3ecff;
-    box-shadow: 0 0 0 1px #7c5cbf inset;
+    border-color: #3b2760;
+    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 100%);
+    box-shadow: 0 0 0 1px #3b2760 inset;
+    color: #f7f2ff;
+}
+
+.ai-explain-version.is-selected .ai-explain-pill {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.ai-explain-version.is-selected .ai-explain-meta,
+.ai-explain-version.is-selected .ai-explain-version-index {
+    color: #e8ddff;
+}
+
+.ai-explain-version.is-selected .ai-explain-version-model {
+    color: #ffffff;
+}
+
+.ai-explain-version.is-selected .ai-explain-version-snippet {
+    color: #d9cef0;
 }
 
 .ai-explain-version-top {
@@ -224,7 +243,7 @@
 .ai-explain-version-model {
     font-size: 0.82rem;
     font-weight: 600;
-    color: #3b2760;
+    color: #243447;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
