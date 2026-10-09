@@ -16,7 +16,7 @@
 }
 
 .user-settings-dialog {
-    width: min(640px, 100%);
+    width: min(780px, 100%);
     max-height: min(90vh, 860px);
     display: flex;
     flex-direction: column;
@@ -27,24 +27,28 @@
     overflow: hidden;
 }
 
+/* Deep indigo header: light text for contrast (same family as AI解釋 / 回饋 hub). */
 .user-settings-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    padding: 16px 18px 10px;
-    border-bottom: 1px solid var(--border-light, #dde3ea);
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
+    color: #f7f2ff;
 }
 
 .user-settings-header h2 {
     margin: 0;
-    font-size: 1.2rem;
-    color: var(--primary-color, #1a5276);
+    font-size: 1.25rem;
+    color: #ffffff;
+    font-weight: 700;
 }
 
 .user-settings-subtitle {
     margin: 4px 0 0;
-    color: var(--text-light, #667788);
+    color: #e8ddff;
     font-size: 0.88rem;
     line-height: 1.45;
 }
@@ -55,32 +59,57 @@
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
-    color: #667788;
+    color: #f4eeff;
     padding: 0 4px;
+    border-radius: 6px;
 }
 
-.user-settings-body {
+.user-settings-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+.user-settings-main {
     flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 148px;
+    overflow: hidden;
+}
+
+.user-settings-panels {
+    min-width: 0;
     overflow: auto;
-    padding: 8px 18px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    padding: 14px 18px 16px;
+}
+
+.user-settings-panel[hidden] {
+    display: none !important;
+}
+
+.user-settings-panel-title {
+    margin: 0 0 10px;
+    font-size: 1.05rem;
+    color: #3b2760;
+    font-weight: 700;
+}
+
+.user-settings-subhead {
+    margin: 4px 0 8px;
+    font-size: 0.9rem;
+    color: #1a5276;
+    font-weight: 650;
 }
 
 .user-settings-section {
-    padding: 10px 0;
+    padding: 0 0 14px;
+    margin: 0 0 4px;
     border-bottom: 1px solid var(--border-light, #eef2f6);
 }
 
 .user-settings-section:last-child {
     border-bottom: 0;
-}
-
-.user-settings-section h3 {
-    margin: 0 0 8px;
-    font-size: 0.95rem;
-    color: #1a5276;
+    padding-bottom: 0;
 }
 
 .user-settings-section label {
@@ -116,6 +145,48 @@
     line-height: 1.4;
 }
 
+/* Right-side category menu */
+.user-settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 10px;
+    border-left: 1px solid var(--border-light, #e8eef4);
+    background: #f7f8fc;
+}
+
+.user-settings-nav-btn {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #445566;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.user-settings-nav-btn:hover {
+    background: #fff;
+    border-color: #e0e6ef;
+    color: #243447;
+}
+
+.user-settings-nav-btn.is-active {
+    background: #fff;
+    border-color: #c5b3e8;
+    color: #3b2760;
+    box-shadow: 0 1px 0 rgba(59, 39, 96, 0.06);
+}
+
+.user-settings-nav-btn[hidden] {
+    display: none !important;
+}
+
 .user-settings-status {
     margin: 4px 18px 0;
     font-size: 0.9rem;
@@ -136,6 +207,29 @@
 
 body.user-settings-open {
     overflow: hidden;
+}
+
+@media (max-width: 640px) {
+    .user-settings-main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .user-settings-nav {
+        order: -1;
+        flex-direction: row;
+        flex-wrap: wrap;
+        border-left: 0;
+        border-bottom: 1px solid var(--border-light, #e8eef4);
+        padding: 10px 12px;
+    }
+
+    .user-settings-nav-btn {
+        width: auto;
+        flex: 1 1 auto;
+        text-align: center;
+        padding: 8px 10px;
+    }
 }
 
 /* Display prefs applied via body classes */

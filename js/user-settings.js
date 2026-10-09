@@ -49,9 +49,10 @@
                 detailPrefs: null
             },
             ai: {
-                defaultModel: '',
+                // System defaults for new / empty prefs (UI label「詳盡」= detailed).
+                defaultModel: 'GPT-6.1-Sol',
                 provider: 'poe',
-                explainStyle: 'short',
+                explainStyle: 'detailed',
                 showQuickPrompts: true
             },
             ui: { defaultTab: 'questions' }
@@ -208,9 +209,17 @@
         if (!base.stats.crosstab || typeof base.stats.crosstab !== 'object') {
             base.stats.crosstab = { row: 'topics', col: 'year', metric: 'count' };
         }
-        if (base.ai.explainStyle !== 'detailed') base.ai.explainStyle = 'short';
+        // Keep explicit short/detailed; anything else → system default「詳盡」.
+        if (base.ai.explainStyle !== 'short' && base.ai.explainStyle !== 'detailed') {
+            base.ai.explainStyle = 'detailed';
+        }
         base.ai.showQuickPrompts = base.ai.showQuickPrompts !== false;
         if (base.ai.provider !== 'openrouter') base.ai.provider = 'poe';
+        if (!String(base.ai.defaultModel || '').trim()) {
+            base.ai.defaultModel = base.ai.provider === 'openrouter'
+                ? (global.PoeGenerate && PoeGenerate.OPENROUTER_DEFAULT_MODEL) || 'openai/gpt-4o-mini'
+                : 'GPT-6.1-Sol';
+        }
         if (base.ui.defaultTab !== 'stats') base.ui.defaultTab = 'questions';
         // Never keep secrets even if somehow present.
         delete base.poeApiKey;
@@ -648,11 +657,14 @@
         setVal('us-density', s.display.density);
         setVal('us-lang', s.display.lang);
         setVal('us-ai-provider', s.ai.provider || 'poe');
-        fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || '');
-        setVal('us-ai-explain', s.ai.explainStyle);
+        fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || 'GPT-6.1-Sol');
+        setVal('us-ai-explain', s.ai.explainStyle === 'short' ? 'short' : 'detailed');
         setCheck('us-ai-quick-prompts', s.ai.showQuickPrompts !== false);
-        var aiSection = document.getElementById('user-settings-ai-section');
-        if (aiSection) aiSection.hidden = !hasAiAccess();
+        var aiAllowed = hasAiAccess();
+        var aiNav = document.getElementById('user-settings-nav-ai');
+        if (aiNav) aiNav.hidden = !aiAllowed;
+        var aiPanel = document.getElementById('us-panel-ai');
+        if (aiPanel && !aiAllowed) aiPanel.hidden = true;
         // Populate dimension options if STAT_TABS exists.
         ['us-stats-dimension', 'us-ct-row', 'us-ct-col'].forEach(function (id) {
             var sel = document.getElementById(id);
@@ -679,6 +691,10 @@
             });
             metricSel.value = (s.stats.crosstab && s.stats.crosstab.metric) || 'count';
         }
+        // Keep current category if still valid; otherwise land on 介面.
+        var activeBtn = overlay && overlay.querySelector('.user-settings-nav-btn.is-active:not([hidden])');
+        var cat = activeBtn ? activeBtn.getAttribute('data-us-cat') : 'ui';
+        showSettingsCategory(cat || 'ui');
     }
 
     function readModalIntoSettings() {
@@ -732,88 +748,101 @@
             + '    </div>'
             + '    <button type="button" class="user-settings-close" aria-label="關閉">×</button>'
             + '  </header>'
-            + '  <div class="user-settings-body">'
-            + '    <section class="user-settings-section">'
-            + '      <h3>介面</h3>'
-            + '      <label>預設分頁<select id="us-default-tab">'
-            + '        <option value="questions">題目</option>'
-            + '        <option value="stats">統計</option>'
-            + '      </select></label>'
-            + '      <label>字型大小<select id="us-font-size">'
-            + '        <option value="small">較小</option>'
-            + '        <option value="medium">標準</option>'
-            + '        <option value="large">較大</option>'
-            + '      </select></label>'
-            + '      <label>卡片密度<select id="us-density">'
-            + '        <option value="standard">標準</option>'
-            + '        <option value="compact">緊湊</option>'
-            + '      </select></label>'
-            + '      <label>題目語言<select id="us-lang">'
-            + '        <option value="both">雙語</option>'
-            + '        <option value="zh">中文</option>'
-            + '        <option value="en">英文</option>'
-            + '      </select></label>'
-            + '    </section>'
-            + '    <section class="user-settings-section">'
-            + '      <h3>題目列表</h3>'
-            + '      <label>每頁題數<select id="us-page-size">'
-            + '        <option value="10">10</option><option value="20">20</option>'
-            + '        <option value="50">50</option><option value="-1">全部</option>'
-            + '      </select></label>'
-            + '      <label>預設排序<select id="us-sort">'
-            + '        <option value="default">預設 (年份新→舊，題號小→大)</option>'
-            + '        <option value="year-desc">年份 (新→舊)</option>'
-            + '        <option value="year-asc">年份 (舊→新)</option>'
-            + '        <option value="question-asc">題號 (小→大)</option>'
-            + '        <option value="question-desc">題號 (大→小)</option>'
-            + '        <option value="marks-asc">分數 (低→高)</option>'
-            + '        <option value="marks-desc">分數 (高→低)</option>'
-            + '        <option value="percentage-asc">答對率 (低→高)</option>'
-            + '        <option value="percentage-desc">答對率 (高→低)</option>'
-            + '      </select></label>'
-            + '    </section>'
-            + '    <section class="user-settings-section">'
-            + '      <h3>篩選偏好</h3>'
-            + '      <label class="user-settings-check"><input type="checkbox" id="us-exclude-out-syl"> 預設排除 Out syl</label>'
-            + '      <label class="user-settings-check"><input type="checkbox" id="us-remember-last"> 記住搜尋範圍偏好</label>'
-            + '      <label>預設搜尋範圍<select id="us-search-scope">'
-            + '        <option value="all">全部欄位</option>'
-            + '        <option value="id">題目 ID</option>'
-            + '        <option value="content">題目內容</option>'
-            + '        <option value="answer">答案</option>'
-            + '        <option value="markersReport">評卷報告</option>'
-            + '      </select></label>'
-            + '      <p class="user-settings-note">不會儲存即時 idSet／進階篩選內容。</p>'
-            + '    </section>'
-            + '    <section class="user-settings-section">'
-            + '      <h3>統計</h3>'
-            + '      <label>模式<select id="us-stats-mode">'
-            + '        <option value="browse">一維瀏覽</option>'
-            + '        <option value="crosstab">交叉分析</option>'
-            + '      </select></label>'
-            + '      <label>偏好維度<select id="us-stats-dimension"></select></label>'
-            + '      <label>交叉列<select id="us-ct-row"></select></label>'
-            + '      <label>交叉欄<select id="us-ct-col"></select></label>'
-            + '      <label>交叉指標<select id="us-ct-metric"></select></label>'
-            + '    </section>'
-            + '    <section class="user-settings-section" id="user-settings-ai-section" hidden>'
-            + '      <h3>AI</h3>'
-            + '      <label>預設供應商<select id="us-ai-provider" aria-label="預設供應商">'
-            + '        <option value="poe">Poe</option>'
-            + '        <option value="openrouter">OpenRouter</option>'
-            + '      </select></label>'
-            + '      <label>預設模型<select id="us-ai-model" aria-label="預設模型"></select></label>'
-            + '      <label>自訂模型 id（選填）'
-            + '        <input type="text" id="us-ai-model-custom" autocomplete="off" spellcheck="false" maxlength="120"'
-            + '          placeholder="例如 Claude-Opus-4.6" aria-label="自訂模型 id">'
-            + '      </label>'
-            + '      <label>AI解釋詳細度<select id="us-ai-explain">'
-            + '        <option value="short">簡短</option>'
-            + '        <option value="detailed">詳盡</option>'
-            + '      </select></label>'
-            + '      <label class="user-settings-check"><input type="checkbox" id="us-ai-quick-prompts"> 顯示追問快捷提示</label>'
-            + '      <p class="user-settings-note">模型清單與「API／模型設定」相同。API 金鑰只留在本機，不會上載。</p>'
-            + '    </section>'
+            + '  <div class="user-settings-main">'
+            + '    <div class="user-settings-panels" id="user-settings-panels">'
+            + '      <section class="user-settings-panel" id="us-panel-ui" data-us-panel="ui">'
+            + '        <h3 class="user-settings-panel-title">介面</h3>'
+            + '        <div class="user-settings-section">'
+            + '          <label>預設分頁<select id="us-default-tab">'
+            + '            <option value="questions">題目</option>'
+            + '            <option value="stats">統計</option>'
+            + '          </select></label>'
+            + '          <label>字型大小<select id="us-font-size">'
+            + '            <option value="small">較小</option>'
+            + '            <option value="medium">標準</option>'
+            + '            <option value="large">較大</option>'
+            + '          </select></label>'
+            + '          <label>卡片密度<select id="us-density">'
+            + '            <option value="standard">標準</option>'
+            + '            <option value="compact">緊湊</option>'
+            + '          </select></label>'
+            + '          <label>題目語言<select id="us-lang">'
+            + '            <option value="both">雙語</option>'
+            + '            <option value="zh">中文</option>'
+            + '            <option value="en">英文</option>'
+            + '          </select></label>'
+            + '        </div>'
+            + '        <div class="user-settings-section">'
+            + '          <h4 class="user-settings-subhead">題目列表</h4>'
+            + '          <label>每頁題數<select id="us-page-size">'
+            + '            <option value="10">10</option><option value="20">20</option>'
+            + '            <option value="50">50</option><option value="-1">全部</option>'
+            + '          </select></label>'
+            + '          <label>預設排序<select id="us-sort">'
+            + '            <option value="default">預設 (年份新→舊，題號小→大)</option>'
+            + '            <option value="year-desc">年份 (新→舊)</option>'
+            + '            <option value="year-asc">年份 (舊→新)</option>'
+            + '            <option value="question-asc">題號 (小→大)</option>'
+            + '            <option value="question-desc">題號 (大→小)</option>'
+            + '            <option value="marks-asc">分數 (低→高)</option>'
+            + '            <option value="marks-desc">分數 (高→低)</option>'
+            + '            <option value="percentage-asc">答對率 (低→高)</option>'
+            + '            <option value="percentage-desc">答對率 (高→低)</option>'
+            + '          </select></label>'
+            + '        </div>'
+            + '      </section>'
+            + '      <section class="user-settings-panel" id="us-panel-filters" data-us-panel="filters" hidden>'
+            + '        <h3 class="user-settings-panel-title">篩選偏好</h3>'
+            + '        <div class="user-settings-section">'
+            + '          <label class="user-settings-check"><input type="checkbox" id="us-exclude-out-syl"> 預設排除 Out syl</label>'
+            + '          <label class="user-settings-check"><input type="checkbox" id="us-remember-last"> 記住搜尋範圍偏好</label>'
+            + '          <label>預設搜尋範圍<select id="us-search-scope">'
+            + '            <option value="all">全部欄位</option>'
+            + '            <option value="id">題目 ID</option>'
+            + '            <option value="content">題目內容</option>'
+            + '            <option value="answer">答案</option>'
+            + '            <option value="markersReport">評卷報告</option>'
+            + '          </select></label>'
+            + '          <p class="user-settings-note">不會儲存即時 idSet／進階篩選內容。</p>'
+            + '        </div>'
+            + '        <div class="user-settings-section">'
+            + '          <h4 class="user-settings-subhead">統計</h4>'
+            + '          <label>模式<select id="us-stats-mode">'
+            + '            <option value="browse">一維瀏覽</option>'
+            + '            <option value="crosstab">交叉分析</option>'
+            + '          </select></label>'
+            + '          <label>偏好維度<select id="us-stats-dimension"></select></label>'
+            + '          <label>交叉列<select id="us-ct-row"></select></label>'
+            + '          <label>交叉欄<select id="us-ct-col"></select></label>'
+            + '          <label>交叉指標<select id="us-ct-metric"></select></label>'
+            + '        </div>'
+            + '      </section>'
+            + '      <section class="user-settings-panel" id="us-panel-ai" data-us-panel="ai" hidden>'
+            + '        <h3 class="user-settings-panel-title">AI</h3>'
+            + '        <div class="user-settings-section" id="user-settings-ai-section">'
+            + '          <label>預設供應商<select id="us-ai-provider" aria-label="預設供應商">'
+            + '            <option value="poe">Poe</option>'
+            + '            <option value="openrouter">OpenRouter</option>'
+            + '          </select></label>'
+            + '          <label>預設模型<select id="us-ai-model" aria-label="預設模型"></select></label>'
+            + '          <label>自訂模型 id（選填）'
+            + '            <input type="text" id="us-ai-model-custom" autocomplete="off" spellcheck="false" maxlength="120"'
+            + '              placeholder="例如 Claude-Opus-4.6" aria-label="自訂模型 id">'
+            + '          </label>'
+            + '          <label>AI解釋詳細度<select id="us-ai-explain">'
+            + '            <option value="short">簡短</option>'
+            + '            <option value="detailed">詳盡</option>'
+            + '          </select></label>'
+            + '          <label class="user-settings-check"><input type="checkbox" id="us-ai-quick-prompts"> 顯示追問快捷提示</label>'
+            + '          <p class="user-settings-note">模型清單與「API／模型設定」相同。API 金鑰只留在本機，不會上載。</p>'
+            + '        </div>'
+            + '      </section>'
+            + '    </div>'
+            + '    <nav class="user-settings-nav" aria-label="設定分類" role="tablist">'
+            + '      <button type="button" class="user-settings-nav-btn is-active" role="tab" data-us-cat="ui" aria-controls="us-panel-ui" aria-selected="true">介面</button>'
+            + '      <button type="button" class="user-settings-nav-btn" role="tab" data-us-cat="filters" aria-controls="us-panel-filters" aria-selected="false">篩選偏好</button>'
+            + '      <button type="button" class="user-settings-nav-btn" role="tab" data-us-cat="ai" aria-controls="us-panel-ai" aria-selected="false" id="user-settings-nav-ai">AI</button>'
+            + '    </nav>'
             + '  </div>'
             + '  <p class="user-settings-status" id="user-settings-status" hidden></p>'
             + '  <footer class="user-settings-footer">'
@@ -831,6 +860,13 @@
             readModalIntoSettings();
             setModalStatus('已套用' + (isSignedIn() ? '，正在同步…' : '（本機）'), 'info');
             if (isSignedIn()) flushRemoteSave();
+        });
+        overlay.querySelector('.user-settings-nav').addEventListener('click', function (event) {
+            var btn = event.target && event.target.closest
+                ? event.target.closest('[data-us-cat]')
+                : null;
+            if (!btn || btn.hidden) return;
+            showSettingsCategory(btn.getAttribute('data-us-cat'));
         });
         var providerSel = overlay.querySelector('#us-ai-provider');
         var modelSel = overlay.querySelector('#us-ai-model');
@@ -872,6 +908,26 @@
         return overlay;
     }
 
+    function showSettingsCategory(cat) {
+        if (!overlay) return;
+        var allowed = { ui: 1, filters: 1, ai: 1 };
+        var next = allowed[cat] ? cat : 'ui';
+        if (next === 'ai' && !hasAiAccess()) next = 'ui';
+        overlay.querySelectorAll('[data-us-panel]').forEach(function (panel) {
+            var id = panel.getAttribute('data-us-panel');
+            panel.hidden = id !== next;
+        });
+        overlay.querySelectorAll('[data-us-cat]').forEach(function (btn) {
+            var id = btn.getAttribute('data-us-cat');
+            var active = id === next;
+            btn.classList.toggle('is-active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            btn.tabIndex = active ? 0 : -1;
+        });
+        var panels = overlay.querySelector('#user-settings-panels');
+        if (panels) panels.scrollTop = 0;
+    }
+
     function bindEscape() {
         if (escapeBound) return;
         escapeBound = true;
@@ -886,6 +942,7 @@
         ensureOverlay();
         bindEscape();
         fillModalFromSettings();
+        showSettingsCategory('ui');
         setModalStatus('', '');
         overlay.hidden = false;
         document.body.classList.add('user-settings-open');
