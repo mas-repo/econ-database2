@@ -445,10 +445,13 @@ let sfModal = null;
 let sfOpenToken = 0;
 
 function emptyStatsTriState() {
+    var featureDefault = (typeof emptyFeatureTriStateFromSettings === 'function')
+        ? emptyFeatureTriStateFromSettings()
+        : { 'Out syl': 'excluded' };
     return {
         curriculum: {},
         chapter: {},
-        feature: { 'Out syl': 'excluded' },
+        feature: featureDefault,
         publisher: {},
         exam: {},
         qtype: {},

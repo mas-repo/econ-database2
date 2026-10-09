@@ -37,6 +37,8 @@
  * 回報問題 (any known user; admin list):
  *   <GITHUB_SHARED_PREFIX>/data/issue-reports.json
  *   e.g. shared/data/issue-reports.json
+ * Personal preferences (known user; getUserSettings / saveUserSettings):
+ *   users/<username>/settings.json
  * Model-reply (AI出題) backups stay personal:
  *   users/<username>/<GITHUB_AI_BACKUP_DIR>/<timestamp>-….json
  * <username> is the trimmed, lowercased signed-in name. Spaces become hyphens.
@@ -120,6 +122,9 @@
  *   listIssueReports          → handleListIssueReports_  (admin)
  *   updateIssueReportStatus   → handleUpdateIssueReportStatus_ (admin)
  *   bulkUpdateIssueReportStatus → handleBulkUpdateIssueReportStatus_ (admin)
+ * Personal user settings (users/<username>/settings.json; known user; not bank SCHEMA):
+ *   getUserSettings  → handleGetUserSettings_
+ *   saveUserSettings → handleSaveUserSettings_
  * Shared bank read (Apps Script body fallback; prefer direct read below):
  *   fetchSharedAsset → handleFetchShared_
  *   listSharedData   → handleListShared_
@@ -219,6 +224,8 @@ function handlePost_(e) {
   if (action === 'listIssueReports') return handleListIssueReports_(body);
   if (action === 'updateIssueReportStatus') return handleUpdateIssueReportStatus_(body);
   if (action === 'bulkUpdateIssueReportStatus') return handleBulkUpdateIssueReportStatus_(body);
+  if (action === 'getUserSettings') return handleGetUserSettings_(body);
+  if (action === 'saveUserSettings') return handleSaveUserSettings_(body);
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
@@ -1661,6 +1668,208 @@ function handleBulkUpdateIssueReportStatus_(body) {
     sha: saved.sha,
     path: saved.path
   };
+}
+
+// === Personal user settings (users/<username>/settings.json) ===
+// Preference blob only — never stores API keys, idSet, or live filter snapshots.
+// Path is always derived from the authenticated username (no client path).
+// settings.schemaVersion is independent of the shared bank SCHEMA_VERSION.
+
+var USER_SETTINGS_REL_NAME_ = 'settings.json';
+var USER_SETTINGS_MAX_BYTES_ = 80000;
+var USER_SETTINGS_SCHEMA_VERSION_ = 1;
+
+function githubUserSettingsPath_(username) {
+  var segment = githubUserSegment_(username);
+  if (!segment) return '';
+  // Fixed filename under the user's folder — reject any traversal via segment.
+  return joinGithubPath_('users/' + segment, USER_SETTINGS_REL_NAME_);
+}
+
+function githubUserSettingsReady_(cfg) {
+  return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo)
+    && githubBranchOk_(cfg.branch));
+}
+
+function emptyUserSettingsStore_() {
+  return {
+    schemaVersion: USER_SETTINGS_SCHEMA_VERSION_,
+    updatedAt: '',
+    display: { fontSize: 'medium', density: 'standard', lang: 'both' },
+    list: { pageSize: 20, sort: 'default' },
+    filters: { excludeOutSyl: true, rememberLast: true, searchScope: 'all' },
+    stats: { mode: 'browse', dimensions: [], metrics: [] },
+    ai: { defaultModel: '', explainStyle: 'short', showQuickPrompts: true },
+    ui: { defaultTab: 'questions' }
+  };
+}
+
+function normalizeUserSettingsPayload_(raw) {
+  var data = coerceJson_(raw);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { ok: false, error: 'bad_request' };
+  }
+  // Strip secrets if a client ever sends them.
+  delete data.poeApiKey;
+  delete data.openRouterApiKey;
+  delete data.apiKey;
+  delete data.apiKeys;
+  delete data.idSetFilter;
+  delete data.advancedFilter;
+  delete data.triStateFilters;
+
+  var out = emptyUserSettingsStore_();
+  var schema = Number(data.schemaVersion);
+  if (isFinite(schema) && schema >= 1) {
+    out.schemaVersion = Math.min(Math.floor(schema), USER_SETTINGS_SCHEMA_VERSION_);
+  }
+  if (typeof data.updatedAt === 'string') out.updatedAt = String(data.updatedAt).slice(0, 40);
+
+  function copyObj_(src, dest) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return;
+    Object.keys(dest).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(src, key)) return;
+      dest[key] = src[key];
+    });
+    // Allow extra preference keys for forward compatibility (bounded size later).
+    Object.keys(src).forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(dest, key)) return;
+      if (key === 'poeApiKey' || key === 'openRouterApiKey' || key === 'apiKey') return;
+      dest[key] = src[key];
+    });
+  }
+  copyObj_(data.display, out.display);
+  copyObj_(data.list, out.list);
+  copyObj_(data.filters, out.filters);
+  copyObj_(data.stats, out.stats);
+  copyObj_(data.ai, out.ai);
+  copyObj_(data.ui, out.ui);
+
+  // Clamp a few high-value fields.
+  var pageSize = Number(out.list.pageSize);
+  if (!isFinite(pageSize) || (pageSize !== -1 && (pageSize < 1 || pageSize > 500))) {
+    out.list.pageSize = 20;
+  } else {
+    out.list.pageSize = Math.floor(pageSize);
+  }
+  out.filters.excludeOutSyl = out.filters.excludeOutSyl !== false;
+  out.filters.rememberLast = out.filters.rememberLast !== false;
+  out.ai.showQuickPrompts = out.ai.showQuickPrompts !== false;
+  if (out.ai.explainStyle !== 'detailed') out.ai.explainStyle = 'short';
+  if (out.ui.defaultTab !== 'stats') out.ui.defaultTab = 'questions';
+  if (out.stats.mode === 'crosstab' || out.stats.mode === 'detail') {
+    out.stats.mode = out.stats.mode === 'detail' ? 'browse' : 'crosstab';
+  } else {
+    out.stats.mode = 'browse';
+  }
+  if (!Array.isArray(out.stats.dimensions)) out.stats.dimensions = [];
+  if (!Array.isArray(out.stats.metrics)) out.stats.metrics = [];
+  if (out.stats.dimensions.length > 40) out.stats.dimensions = out.stats.dimensions.slice(0, 40);
+  if (out.stats.metrics.length > 20) out.stats.metrics = out.stats.metrics.slice(0, 20);
+
+  var text = JSON.stringify(out);
+  if (utf8Length_(text) > USER_SETTINGS_MAX_BYTES_) {
+    return { ok: false, error: 'payload_too_large' };
+  }
+  return { ok: true, settings: out, text: text };
+}
+
+function handleGetUserSettings_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = lookupRights_(username);
+  if (!username || !rights.known) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubUserSettingsReady_(cfg)) return gitClientError_('github_not_configured');
+  var path = githubUserSettingsPath_(username);
+  if (!path) return gitClientError_('bad_request');
+  try {
+    var read = githubReadText_(cfg, path);
+    var parsed;
+    try {
+      parsed = JSON.parse(read.text);
+    } catch (ignore) {
+      return gitClientError_('github_error');
+    }
+    var normalized = normalizeUserSettingsPayload_(parsed);
+    if (!normalized.ok) {
+      return { ok: true, settings: emptyUserSettingsStore_(), path: path, sha: read.sha || '', missing: false };
+    }
+    return {
+      ok: true,
+      settings: normalized.settings,
+      path: path,
+      sha: read.sha || '',
+      missing: false
+    };
+  } catch (err) {
+    if (err && err.code === 'github_not_found') {
+      return {
+        ok: true,
+        settings: emptyUserSettingsStore_(),
+        path: path,
+        sha: '',
+        missing: true
+      };
+    }
+    safeLog_(err);
+    return gitClientError_(err && err.code ? err.code : 'github_error');
+  }
+}
+
+function handleSaveUserSettings_(body) {
+  var username = normalizeUsername_(body.username);
+  var rights = lookupRights_(username);
+  if (!username || !rights.known) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubUserSettingsReady_(cfg)) return gitClientError_('github_not_configured');
+  var path = githubUserSettingsPath_(username);
+  if (!path) return gitClientError_('bad_request');
+
+  var normalized = normalizeUserSettingsPayload_(body.settings != null ? body.settings : body.data);
+  if (!normalized.ok) {
+    return gitClientError_(normalized.error || 'bad_request');
+  }
+  var settings = normalized.settings;
+  settings.updatedAt = new Date().toISOString();
+  settings.schemaVersion = USER_SETTINGS_SCHEMA_VERSION_;
+  var text = JSON.stringify(settings);
+  if (utf8Length_(text) > USER_SETTINGS_MAX_BYTES_) return gitClientError_('payload_too_large');
+
+  if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
+  var lock = LockService.getScriptLock();
+  var held = false;
+  try {
+    if (!lock.tryLock(20000)) {
+      releaseGitSlot_(username);
+      return gitClientError_('rate_limited');
+    }
+    held = true;
+    var written = githubWriteText_(cfg, path, text, 'Update user settings for ' + githubUserSegment_(username));
+    lock.releaseLock();
+    held = false;
+    writeLog_({
+      username: username,
+      action: 'saveUserSettings',
+      success: true,
+      metadata: { bytes: utf8Length_(text), schemaVersion: settings.schemaVersion }
+    }, true);
+    return {
+      ok: true,
+      settings: settings,
+      sha: written.sha,
+      path: path
+    };
+  } catch (err) {
+    if (held) {
+      try { lock.releaseLock(); } catch (ignore) {}
+      held = false;
+    }
+    safeLog_(err);
+    releaseGitSlot_(username);
+    var code = err && err.code ? err.code : 'github_error';
+    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
+    return gitClientError_(code === 'github_not_found' ? 'github_error' : code);
+  }
 }
 
 // === Model test / stem pattern review ===
