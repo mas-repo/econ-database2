@@ -365,7 +365,7 @@ async function renderQuestions() {
                         <span class="tag">${escapeHTML(q.topic)}</span>
                     </div>
                 ` : ''}
-                ${renderCollapsibleSection('純文字：', q.plainText || q.questionTextChi, diagramSrcs(q))}
+                ${renderCollapsibleSection('題目：', q.plainText || q.questionTextChi, diagramSrcs(q))}
                 ${renderCollapsibleSection('Question:', q.questionTextEng)}
 
                 ${(q.answerMC && q.answerMC !== '-') ? `
