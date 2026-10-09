@@ -157,3 +157,70 @@
     color: var(--text-light);
     font-size: 16px;
 }
+
+/* ============================================
+   Brand indigo modal headers
+   AI解釋 / 用戶設定 / 回饋／回報 (+ 回報問題).
+   Light title / subtitle / close on purple — keep in sync via tokens.
+   ============================================ */
+
+.ai-explain-header,
+.user-settings-header,
+.report-issue-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--modal-brand-header-bg);
+    color: var(--modal-brand-header-fg);
+    text-align: left;
+}
+
+.ai-explain-header h2,
+.user-settings-header h2,
+.report-issue-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--modal-brand-header-title);
+    font-weight: 700;
+}
+
+.ai-explain-header .ai-explain-subtitle,
+.user-settings-header .user-settings-subtitle,
+.report-issue-header .report-issue-subtitle {
+    margin: 4px 0 0;
+    color: var(--modal-brand-header-sub);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    opacity: 1;
+}
+
+/* Body copy that reuses *-subtitle outside the purple header (e.g. Feedback prompt). */
+.ai-explain-dialog > .ai-explain-subtitle {
+    margin: 10px 18px 0;
+    color: var(--text-light, #667788);
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.ai-explain-close,
+.user-settings-close,
+.report-issue-close {
+    border: none;
+    background: transparent;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--modal-brand-header-close);
+    padding: 0 4px;
+    border-radius: 6px;
+}
+
+.ai-explain-close:hover,
+.user-settings-close:hover,
+.report-issue-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}

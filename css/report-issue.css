@@ -30,36 +30,8 @@
     width: min(860px, 100%);
 }
 
-.report-issue-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 10px;
-    border-bottom: 1px solid var(--border-light, #dde3ea);
-}
-
-.report-issue-header h2 {
-    margin: 0;
-    font-size: 1.2rem;
-    color: var(--primary-color, #1a5276);
-}
-
-.report-issue-subtitle {
-    margin: 4px 0 0;
-    color: var(--text-light, #667788);
-    font-size: 0.9rem;
-}
-
-.report-issue-close {
-    border: none;
-    background: transparent;
-    font-size: 1.6rem;
-    line-height: 1;
-    cursor: pointer;
-    color: #667788;
-    padding: 0 4px;
-}
+/* Header chrome (title / subtitle / close) lives in components.css
+   (.report-issue-header shared with AI解釋 / 用戶設定 brand indigo). */
 
 .report-issue-chips {
     display: flex;

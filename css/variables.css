@@ -25,6 +25,14 @@
     --text-color: #2c3e50;
     --text-light: #7f8c8d;
     --text-white: #ffffff;
+
+    /* Brand indigo modal headers (AI解釋 / 用戶設定 / 回饋／回報).
+       Light text on purple — shared so contrast stays consistent. */
+    --modal-brand-header-bg: linear-gradient(135deg, #3b2760 0%, #5b3d8c 55%, #4a2f74 100%);
+    --modal-brand-header-fg: #f7f2ff;
+    --modal-brand-header-title: #ffffff;
+    --modal-brand-header-sub: #e8ddff;
+    --modal-brand-header-close: #f4eeff;
     
     /* Spacing */
     --spacing-xs: 4px;

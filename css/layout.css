@@ -11,8 +11,10 @@
     overflow: hidden;
 }
 
-/* Header Section */
-header {
+/* Site page header only (inside .container).
+   Do not style bare modal <header> elements — those inherit this purple
+   gradient and fight dark title/subtitle/close rules (回饋／回報 bug). */
+.container > header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: var(--text-white);
     padding: var(--spacing-xl);
@@ -20,12 +22,12 @@ header {
     position: relative;
 }
 
-header h1 {
+.container > header h1 {
     font-size: 2.5em;
     margin-bottom: 10px;
 }
 
-header p {
+.container > header p {
     opacity: 0.9;
     font-size: 1.1em;
 }
