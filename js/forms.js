@@ -423,7 +423,10 @@ async function editQuestion(id) {
         : (question.year || '');
     document.getElementById('paper').value = question.paper || '';
     document.getElementById('question-type').value = question.questionType;
-    document.getElementById('marks').value = question.marks || '';
+    // Nullish only — 0 marks / 0% must populate as "0", not empty.
+    document.getElementById('marks').value = (question.marks == null || question.marks === '')
+        ? ''
+        : String(question.marks);
     document.getElementById('section').value = question.section || '';
     document.getElementById('question-number').value = question.questionNumber || '';
     document.getElementById('question-text-chi').value = question.questionTextChi || '';
@@ -433,7 +436,9 @@ async function editQuestion(id) {
     document.getElementById('graph-type').value = question.graphType === '-' ? '' : (question.graphType || '');
     document.getElementById('table-type').value = question.tableType === '-' ? '' : (question.tableType || '');
     document.getElementById('calculation-type').value = question.calculationType === '-' ? '' : (question.calculationType || '');
-    document.getElementById('correct-percentage').value = question.correctPercentage || '';
+    document.getElementById('correct-percentage').value = (question.correctPercentage == null || question.correctPercentage === '')
+        ? ''
+        : String(question.correctPercentage);
     document.getElementById('answer-mc').value = question.answerMC || '';
     document.getElementById('answer-chi').value = question.answerChi || '';    
     document.getElementById('answer-eng').value = question.answerEng || '';    
