@@ -1928,20 +1928,11 @@ function validateProposalPartsSum_(parts, totalMarks, questionId) {
       message: '題目「' + idLabel + '」有分題但缺少分數（' + missing.join('、') + '）。'
     };
   }
-  if (totalMarks === null || totalMarks === undefined || String(totalMarks).trim() === '') {
-    return {
-      ok: false,
-      error: 'validation_failed',
-      message: '題目「' + idLabel + '」的總分無效；有分題時總分必須是數字。'
-    };
-  }
-  var total = Number(totalMarks);
-  if (!isFinite(total)) {
-    return {
-      ok: false,
-      error: 'validation_failed',
-      message: '題目「' + idLabel + '」的總分無效；有分題時總分必須是數字。'
-    };
+  // Blank / non-numeric bank total: treat parts sum as the total (approve will write marks).
+  var blankTotal = totalMarks === null || totalMarks === undefined || String(totalMarks).trim() === '';
+  var total = blankTotal ? NaN : Number(totalMarks);
+  if (blankTotal || !isFinite(total)) {
+    return { ok: true, sum: sum, total: sum, filledMarksFromParts: true };
   }
   if (Math.abs(sum - total) > PARTS_PROPOSAL_SUM_TOLERANCE_) {
     return {
@@ -1951,7 +1942,7 @@ function validateProposalPartsSum_(parts, totalMarks, questionId) {
         + '，與總分 ' + String(total) + ' 不符。'
     };
   }
-  return { ok: true, sum: sum, total: total };
+  return { ok: true, sum: sum, total: total, filledMarksFromParts: false };
 }
 
 function bankQuestionHasFilledParts_(question) {
@@ -2320,6 +2311,9 @@ function handleApproveQuestionPartsProposal_(body) {
 
     live.questionParts = parts;
     live.partsStatus = 'filled';
+    if (sumCheck.filledMarksFromParts) {
+      live.marks = sumCheck.sum;
+    }
     loadedBank.bank.questions[qIndex] = live;
 
     var bankWritten = writeSharedBankForPartsApprove_(
