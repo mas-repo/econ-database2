@@ -2,7 +2,7 @@
 // via Apps Script getUserSettings / saveUserSettings.
 //
 // Shape (settings.schemaVersion, independent of bank SCHEMA_VERSION):
-//   display: fontSize / density / lang
+//   display: fontSize / density / lang / questionsExpandedByDefault
 //   list: pageSize / sort
 //   filters: excludeOutSyl / rememberLast / searchScope  (NOT idSet / live tri-state)
 //   stats: mode / dimensions / metrics / crosstab / detailPrefs
@@ -38,7 +38,7 @@
         return {
             schemaVersion: SETTINGS_SCHEMA,
             updatedAt: '',
-            display: { fontSize: 'medium', density: 'standard', lang: 'both' },
+            display: { fontSize: 'medium', density: 'standard', lang: 'both', questionsExpandedByDefault: false },
             list: { pageSize: 20, sort: 'default' },
             filters: { excludeOutSyl: true, rememberLast: true, searchScope: 'all' },
             stats: {
@@ -212,6 +212,8 @@
         }
         if (base.display.density !== 'compact') base.display.density = 'standard';
         if (base.display.lang !== 'zh' && base.display.lang !== 'en') base.display.lang = 'both';
+        // Missing / non-true → collapsed (historical default); only explicit true expands.
+        base.display.questionsExpandedByDefault = base.display.questionsExpandedByDefault === true;
         if (base.stats.mode === 'crosstab' || base.stats.mode === 'detail') {
             base.stats.mode = base.stats.mode === 'detail' ? 'browse' : 'crosstab';
         } else {
@@ -264,7 +266,9 @@
         root.setAttribute('data-user-font', settings.display.fontSize || 'medium');
         root.setAttribute('data-user-density', settings.display.density || 'standard');
         root.setAttribute('data-user-lang', settings.display.lang || 'both');
+        root.setAttribute('data-user-qa-expanded', settings.display.questionsExpandedByDefault ? '1' : '0');
         body.classList.toggle('user-density-compact', settings.display.density === 'compact');
+        body.classList.toggle('user-qa-expanded-default', !!settings.display.questionsExpandedByDefault);
         body.classList.remove('user-font-small', 'user-font-medium', 'user-font-large');
         body.classList.add('user-font-' + (settings.display.fontSize || 'medium'));
         body.classList.remove('user-lang-zh', 'user-lang-en', 'user-lang-both');
@@ -669,6 +673,7 @@
         setVal('us-font-size', s.display.fontSize);
         setVal('us-density', s.display.density);
         setVal('us-lang', s.display.lang);
+        setVal('us-qa-default', s.display.questionsExpandedByDefault ? 'expanded' : 'collapsed');
         setVal('us-ai-provider', s.ai.provider || 'poe');
         fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || 'GPT-6.1-Sol');
         setVal('us-ai-explain', s.ai.explainStyle === 'short' ? 'short' : 'detailed');
@@ -737,6 +742,7 @@
             s.display.fontSize = val('us-font-size') || 'medium';
             s.display.density = val('us-density') === 'compact' ? 'compact' : 'standard';
             s.display.lang = val('us-lang') || 'both';
+            s.display.questionsExpandedByDefault = val('us-qa-default') === 'expanded';
             if (hasAiAccess()) {
                 s.ai.provider = val('us-ai-provider') === 'openrouter' ? 'openrouter' : 'poe';
                 s.ai.defaultModel = readUsAiModel(s.ai.provider);
@@ -802,6 +808,11 @@
             + '            <option value="percentage-asc">答對率 (低→高)</option>'
             + '            <option value="percentage-desc">答對率 (高→低)</option>'
             + '          </select></label>'
+            + '          <label>題目／答案預設顯示<select id="us-qa-default" aria-label="題目與答案預設顯示">'
+            + '            <option value="collapsed">預設摺疊</option>'
+            + '            <option value="expanded">預設展開</option>'
+            + '          </select></label>'
+            + '          <p class="user-settings-note">控制題幹、答案、評卷報告各區塊載入時是否展開；仍可逐題手動摺疊／展開。</p>'
             + '        </div>'
             + '      </section>'
             + '      <section class="user-settings-panel" id="us-panel-filters" data-us-panel="filters" hidden>'
