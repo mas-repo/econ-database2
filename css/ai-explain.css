@@ -155,7 +155,22 @@
 }
 
 .ai-explain-workspace.is-versions-collapsed {
-    grid-template-columns: minmax(148px, 180px) 1fr;
+    /* Hug the toggle label; collapsed rail stays much narrower than expanded. */
+    grid-template-columns: max-content 1fr;
+}
+
+.ai-explain-workspace.is-versions-collapsed .ai-explain-versions-toggle {
+    padding: 10px 8px 8px;
+    gap: 4px;
+}
+
+.ai-explain-workspace.is-versions-collapsed .ai-explain-versions-toggle-label {
+    gap: 4px;
+}
+
+.ai-explain-workspace.is-versions-collapsed .ai-explain-versions-toggle > .ai-explain-meta {
+    font-size: 0.8rem;
+    white-space: nowrap;
 }
 
 .ai-explain-versions-list {
