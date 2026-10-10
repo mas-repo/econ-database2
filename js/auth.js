@@ -22,10 +22,10 @@ class AuthManager {
                 this.currentUser = userData.username;
                 this.displayName = userData.displayName || userData.username;
                 this.userGroup = 'Local';
-                // Mock tests stay hidden until the proxy returns mockTests.
-                // An older cookie cannot grant that on its own.
-                this._canViewMockTests = false;
-                this._canEdit = false;
+                // Do not clear _canViewMockTests / _canEdit here — signed-in
+                // checks run during render and must not wipe rights already set
+                // by applyAccessRights. Flags are set only in saveUser (login)
+                // and applyAccessRights (proxy rights).
                if (userData.username) {
                     try {
                         localStorage.setItem('username', userData.username);

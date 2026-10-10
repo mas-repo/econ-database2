@@ -68,8 +68,21 @@
     }
 
     function isSignedIn() {
-        return !!(global.authManager && global.authManager.isAuthenticated
-            && global.authManager.isAuthenticated() && username());
+        // Avoid isAuthenticated() here: signed-in checks must not touch
+        // mock/edit permission flags (those come from applyAccessRights).
+        const am = global.authManager;
+        if (!am) return false;
+        if (am.currentUser) return true;
+        if (typeof am.getPersistedAuthData === 'function' && am.getPersistedAuthData()) {
+            try {
+                const raw = am.getPersistedAuthData();
+                const data = JSON.parse(decodeURIComponent(raw));
+                return !!(data && data.username);
+            } catch (e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     async function proxyAction(payload, timeoutMs) {
