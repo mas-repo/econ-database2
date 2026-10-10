@@ -101,7 +101,8 @@
     overflow: hidden;
 }
 
-.ai-explain-versions-head {
+.ai-explain-versions-head,
+.ai-explain-versions-toggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -110,6 +111,51 @@
     border-bottom: 1px solid var(--border-light, #e8eef4);
     font-size: 0.88rem;
     color: #243447;
+}
+
+.ai-explain-versions-toggle {
+    appearance: none;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ai-explain-versions-toggle:hover {
+    background: #eef2f7;
+}
+
+.ai-explain-versions-toggle:focus-visible {
+    outline: 2px solid #5b3d8c;
+    outline-offset: -2px;
+}
+
+.ai-explain-versions-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ai-explain-versions-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    color: #5b6b7c;
+    line-height: 1;
+}
+
+.ai-explain-versions.is-collapsed .ai-explain-versions-list {
+    display: none;
+}
+
+.ai-explain-workspace.is-versions-collapsed {
+    grid-template-columns: minmax(148px, 180px) 1fr;
 }
 
 .ai-explain-versions-list {
@@ -487,6 +533,11 @@ body.ai-explain-open {
     .ai-explain-workspace {
         grid-template-columns: 1fr;
         grid-template-rows: minmax(140px, 36%) 1fr;
+    }
+
+    .ai-explain-workspace.is-versions-collapsed {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
     }
 
     .ai-explain-versions {
