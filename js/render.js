@@ -195,7 +195,16 @@ async function renderQuestions() {
         const pics = images || [];
         const escapedContent = escapeHTML(content.trim());
         const body = pics.length ? renderInlineText(content.trim(), pics) : escapedContent;
-        const open = pics.length > 0;
+        // Expanded-by-default from 用戶設定 (display.questionsExpandedByDefault).
+        // Missing / false keeps historical behaviour: open only when inline diagrams exist.
+        let expandedByDefault = false;
+        try {
+            if (window.UserSettings && typeof window.UserSettings.get === 'function') {
+                const disp = window.UserSettings.get().display;
+                expandedByDefault = !!(disp && disp.questionsExpandedByDefault);
+            }
+        } catch (e) { /* settings not ready */ }
+        const open = pics.length > 0 || expandedByDefault;
 
         const langAttr = langClass ? ` ${langClass}` : '';
         return `
