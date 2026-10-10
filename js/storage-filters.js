@@ -84,6 +84,12 @@ IndexedDBStorage.prototype.isMockQuestion = function(q) {
 };
 
 IndexedDBStorage.prototype.applyPermissionFilter = function(questions) {
+    // Prefer window.accessRights.mockTests (same source as mock UI chrome) so a
+    // mid-render isAuthenticated()/signed-in check cannot desync the list count.
+    if (window.accessRights) {
+        if (window.accessRights.mockTests === true) return questions;
+        return questions.filter(q => !this.isMockQuestion(q));
+    }
     if (!window.authManager || window.authManager.canViewMockTests()) {
         return questions;
     }
