@@ -759,8 +759,8 @@
             + '" title="沒有幫助">👎 <span>' + esc(String(exp.downCount || 0)) + '</span></button>'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" data-ai-feedback="1" data-ai-qid="'
             + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
-            + '">Feedback</button>'
-            + (exp.feedbackCount ? '    <span class="ai-explain-meta">Feedback ' + esc(String(exp.feedbackCount)) + '</span>' : '')
+            + '">反饋</button>'
+            + (exp.feedbackCount ? '    <span class="ai-explain-meta">反饋 ' + esc(String(exp.feedbackCount)) + '</span>' : '')
             + (hasAdminAccess()
                 ? '    <button type="button" class="btn btn-outline-danger btn-sm" data-ai-delete="1" data-ai-qid="'
                     + esc(exp.questionId || modalState.questionId) + '" data-ai-eid="' + esc(exp.id)
@@ -951,7 +951,7 @@
         var eid = String(explanationId || '');
         if (!qid || !eid) return;
         var ok = global.confirm
-            ? global.confirm('確定刪除此則 AI解釋？刪除後無法復原（連同其 Feedback 一併移除）。')
+            ? global.confirm('確定刪除此則 AI解釋？刪除後無法復原（連同其反饋一併移除）。')
             : true;
         if (!ok) return;
         modalState.busy = true;
@@ -1026,10 +1026,10 @@
         feedbackOverlay.innerHTML = ''
             + '<div class="ai-explain-dialog ai-explain-feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-fb-title">'
             + '  <header class="ai-explain-header">'
-            + '    <h2 id="ai-fb-title">Feedback</h2>'
+            + '    <h2 id="ai-fb-title">反饋</h2>'
             + '    <button type="button" class="ai-explain-close" aria-label="關閉">×</button>'
             + '  </header>'
-            + '  <p class="ai-explain-subtitle">簡短說明原因（會連同你的使用者名稱儲存）。</p>'
+            + '  <p class="ai-explain-subtitle">簡短說明原因。</p>'
             + '  <textarea id="ai-fb-text" rows="4" maxlength="2000" placeholder="例如：解釋漏了關鍵步驟／概念有誤…"></textarea>'
             + '  <p class="ai-explain-status" id="ai-fb-status" hidden></p>'
             + '  <footer class="ai-explain-footer">'
@@ -1109,7 +1109,7 @@
             }
             refreshModalListFromStore();
             closeFeedbackPrompt();
-            setModalStatus('已儲存 Feedback', 'ok');
+            setModalStatus('已儲存反饋', 'ok');
         } catch (err) {
             if (st) {
                 st.hidden = false;
