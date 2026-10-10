@@ -265,6 +265,41 @@
     color: #e8ddff;
 }
 
+/* Copy on purple card meta strip — right side, light on indigo. */
+.ai-explain-copy-btn {
+    margin-left: auto;
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.ai-explain-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.26);
+    border-color: rgba(255, 255, 255, 0.55);
+}
+
+.ai-explain-copy-btn:active {
+    transform: scale(0.96);
+}
+
+.ai-explain-copy-btn.is-copied {
+    background: #1e8449;
+    border-color: #196f3d;
+    color: #ffffff;
+}
+
+
 .ai-explain-pill {
     display: inline-block;
     padding: 2px 8px;

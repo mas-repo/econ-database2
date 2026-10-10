@@ -521,6 +521,11 @@
                 openFeedbackPrompt(fbBtn.getAttribute('data-ai-qid'), fbBtn.getAttribute('data-ai-eid'));
                 return;
             }
+            var copyBtn = event.target.closest('[data-ai-copy]');
+            if (copyBtn) {
+                onCopyExplanationClick(copyBtn);
+                return;
+            }
             var delBtn = event.target.closest('[data-ai-delete]');
             if (delBtn) {
                 onDeleteClick(delBtn.getAttribute('data-ai-qid'), delBtn.getAttribute('data-ai-eid'));
@@ -590,6 +595,67 @@
         renderExplanationList();
     }
 
+
+    function copyTextWithFallback(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).catch(function () {
+                return copyTextWithTextarea(text);
+            });
+        }
+        return copyTextWithTextarea(text);
+    }
+
+    function copyTextWithTextarea(text) {
+        return new Promise(function (resolve, reject) {
+            var area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', '');
+            area.style.position = 'fixed';
+            area.style.top = '0';
+            area.style.left = '0';
+            area.style.opacity = '0';
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (error) { ok = false; }
+            area.remove();
+            if (ok) resolve();
+            else reject(new Error('copy'));
+        });
+    }
+
+    function flashCopyButton(button) {
+        if (!button) return;
+        var original = button.getAttribute('data-ai-copy-label') || button.innerHTML;
+        button.setAttribute('data-ai-copy-label', original);
+        button.classList.add('is-copied');
+        button.innerHTML = '✓ 已複製';
+        button.setAttribute('aria-label', '已複製');
+        setTimeout(function () {
+            if (!button.classList.contains('is-copied')) return;
+            button.classList.remove('is-copied');
+            button.innerHTML = original;
+            button.setAttribute('aria-label', '複製解釋');
+        }, 1500);
+    }
+
+    function onCopyExplanationClick(button) {
+        var card = button && button.closest ? button.closest('.ai-explain-card') : null;
+        var body = card ? card.querySelector('.ai-explain-body') : null;
+        var text = body ? String(body.innerText || body.textContent || '').trim() : '';
+        if (!text) {
+            setModalStatus('沒有可複製的解釋內容。', 'warn');
+            return;
+        }
+        copyTextWithFallback(text).then(function () {
+            flashCopyButton(button);
+            setModalStatus('已複製到剪貼簿。', 'ok');
+        }).catch(function () {
+            setModalStatus('複製失敗，請手動選取文字。', 'error');
+        });
+    }
+
     function renderExplanationList() {
         var versions = document.getElementById('ai-explain-versions');
         var detail = document.getElementById('ai-explain-detail');
@@ -641,6 +707,8 @@
             + '    <span class="ai-explain-pill">' + esc(detailLevelLabel(exp.detailLevel)) + '</span>'
             + '    <span class="ai-explain-meta">' + esc(exp.model || '—') + '</span>'
             + '    <span class="ai-explain-meta">' + esc(formatWhen(exp.createdAt)) + '</span>'
+            + '    <button type="button" class="ai-explain-copy-btn" data-ai-copy="1"'
+            + ' title="複製解釋" aria-label="複製解釋">📋</button>'
             + '  </header>'
             + '  <div class="ai-explain-body ai-explain-md">' + renderMarkdownBody(exp.text) + '</div>'
             + '  <div class="ai-explain-actions">'
