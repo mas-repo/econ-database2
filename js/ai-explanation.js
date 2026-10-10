@@ -31,7 +31,9 @@
         busy: false,
         detailLevel: 'short',
         status: '',
-        statusKind: ''
+        statusKind: '',
+        // Session-only for this modal visit; reset on open / question change.
+        versionsExpanded: true
     };
     var defaultDetailLevel = 'short';
 
@@ -506,6 +508,12 @@
             if (input) modalState.detailLevel = normalizeDetailLevel(input.value);
         });
         overlay.addEventListener('click', function (event) {
+            var versionsToggle = event.target.closest('[data-ai-versions-toggle]');
+            if (versionsToggle) {
+                modalState.versionsExpanded = !modalState.versionsExpanded;
+                applyVersionsExpandedUi();
+                return;
+            }
             var versionBtn = event.target.closest('[data-ai-select]');
             if (versionBtn) {
                 selectExplanation(versionBtn.getAttribute('data-ai-select'));
@@ -656,6 +664,24 @@
         });
     }
 
+    function applyVersionsExpandedUi() {
+        var expanded = modalState.versionsExpanded !== false;
+        modalState.versionsExpanded = expanded;
+        var versions = document.getElementById('ai-explain-versions');
+        var workspace = document.getElementById('ai-explain-workspace');
+        var toggle = versions ? versions.querySelector('[data-ai-versions-toggle]') : null;
+        var list = document.getElementById('ai-explain-versions-list');
+        if (versions) versions.classList.toggle('is-collapsed', !expanded);
+        if (workspace) workspace.classList.toggle('is-versions-collapsed', !expanded);
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            toggle.setAttribute('title', expanded ? '收起過往版本' : '展開過往版本');
+            var chevron = toggle.querySelector('.ai-explain-versions-chevron');
+            if (chevron) chevron.textContent = expanded ? '▼' : '▶';
+        }
+        if (list) list.hidden = !expanded;
+    }
+
     function renderExplanationList() {
         var versions = document.getElementById('ai-explain-versions');
         var detail = document.getElementById('ai-explain-detail');
@@ -663,18 +689,30 @@
         var list = modalState.explanations || [];
         if (!list.length) {
             versions.innerHTML = '';
+            versions.classList.remove('is-collapsed');
+            var workspaceEmpty = document.getElementById('ai-explain-workspace');
+            if (workspaceEmpty) workspaceEmpty.classList.remove('is-versions-collapsed');
             detail.innerHTML = '<p class="ai-explain-empty">尚未有解釋。可選擇簡短或詳盡後產生。</p>';
             return;
         }
         if (!modalState.selectedId || !list.some(function (e) { return e && String(e.id) === String(modalState.selectedId); })) {
             modalState.selectedId = String(list[0].id || '');
         }
+        var expanded = modalState.versionsExpanded !== false;
+        modalState.versionsExpanded = expanded;
         versions.innerHTML = ''
-            + '<div class="ai-explain-versions-head">'
-            + '  <strong>過往版本</strong>'
+            + '<button type="button" class="ai-explain-versions-toggle" data-ai-versions-toggle="1"'
+            + ' aria-expanded="' + (expanded ? 'true' : 'false') + '"'
+            + ' aria-controls="ai-explain-versions-list"'
+            + ' title="' + (expanded ? '收起過往版本' : '展開過往版本') + '">'
+            + '  <span class="ai-explain-versions-toggle-label">'
+            + '    <strong>過往版本</strong>'
+            + '    <span class="ai-explain-versions-chevron" aria-hidden="true">' + (expanded ? '▼' : '▶') + '</span>'
+            + '  </span>'
             + '  <span class="ai-explain-meta">' + esc(String(list.length)) + ' 則</span>'
-            + '</div>'
-            + '<div class="ai-explain-versions-list" role="listbox" aria-label="選擇解釋版本">'
+            + '</button>'
+            + '<div class="ai-explain-versions-list" id="ai-explain-versions-list" role="listbox"'
+            + ' aria-label="選擇解釋版本"' + (expanded ? '' : ' hidden') + '>'
             + list.map(function (exp, index) {
                 var selected = String(exp.id) === String(modalState.selectedId);
                 var snippet = String(exp.text || '').replace(/\s+/g, ' ').trim().slice(0, 72);
@@ -692,6 +730,7 @@
                     + '</button>';
             }).join('')
             + '</div>';
+        applyVersionsExpandedUi();
 
         var exp = selectedExplanation();
         if (!exp) {
@@ -747,6 +786,7 @@
         bindEscape();
         modalState.questionId = qid;
         modalState.selectedId = '';
+        modalState.versionsExpanded = true;
         var preferredLevel = normalizeDetailLevel(
             defaultDetailLevel
             || (global.__userAiExplainStyle)
@@ -790,6 +830,7 @@
         modalState.explanations = [];
         modalState.selectedId = '';
         modalState.busy = false;
+        modalState.versionsExpanded = true;
         setModalStatus('', '');
         syncGenerateButton();
     }
