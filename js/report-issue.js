@@ -343,7 +343,8 @@
             renderHubList();
         });
         hubOverlay.querySelector('#feedback-hub-bulk-resolve').addEventListener('click', function () {
-            bulkMarkResolved();
+            if (hubState.tab === 'parts') bulkApproveParts();
+            else bulkMarkResolved();
         });
         hubOverlay.querySelector('.feedback-hub-tabs').addEventListener('click', function (event) {
             var tab = event.target.closest('[data-hub-tab]');
@@ -405,12 +406,13 @@
         var subtitle = document.getElementById('feedback-hub-subtitle');
         if (filterLabel) filterLabel.hidden = partsMode;
         if (filter) filter.hidden = partsMode;
-        if (bulk) bulk.hidden = partsMode;
+        if (bulk) bulk.hidden = false;
         if (subtitle) {
             subtitle.textContent = partsMode
                 ? '待審批的分題提案（通過會寫入共用題庫；拒絕只移除提案）。'
                 : 'AI解釋評分／Feedback、使用者問題回報，同埋分題提案審批。';
         }
+        syncBulkButton();
     }
 
     function closeFeedbackHub() {
@@ -576,6 +578,17 @@
         var btn = document.getElementById('feedback-hub-bulk-resolve');
         if (!btn) return;
         var n = Object.keys(hubState.selected).length;
+        if (hubState.tab === 'parts') {
+            var total = (hubState.partsRows || []).length;
+            if (n > 0) {
+                btn.disabled = hubState.busy;
+                btn.textContent = '通過選中（' + n + '）';
+            } else {
+                btn.disabled = hubState.busy || total === 0;
+                btn.textContent = '通過全部';
+            }
+            return;
+        }
         btn.disabled = hubState.busy || n === 0;
         btn.textContent = n ? ('標記已關閉（' + n + '）') : '標記已關閉';
     }
@@ -619,6 +632,7 @@
                 var qid = String(row.questionId || '');
                 var stem = hubState.partsStemById[qid] || '';
                 var preview = formatPartsPreview(row.questionParts);
+                var checked = hubState.selected[id] ? ' checked' : '';
                 var metaBits = [];
                 if (row.source) metaBits.push(esc(row.source));
                 if (row.proposedBy) metaBits.push(esc(row.proposedBy));
@@ -626,6 +640,8 @@
                 return ''
                     + '<article class="feedback-hub-row" data-parts-id="' + esc(id) + '">'
                     + '  <div class="feedback-hub-meta">'
+                    + (id ? '    <label class="feedback-hub-select"><input type="checkbox" data-hub-select="'
+                        + esc(id) + '"' + checked + '> 選取</label>' : '')
                     + '    <strong>' + esc(qid) + '</strong>'
                     + '    <span class="feedback-hub-pill">分題提案</span>'
                     + metaBits.map(function (bit) {
@@ -904,6 +920,120 @@
                 if (!still) delete hubState.selected[id];
             });
             setHubBanner('已刪除該則 AI解釋。', 'ok');
+            renderHubList();
+        } catch (err) {
+            setHubBanner(errorMessage(err && err.code), 'error');
+        } finally {
+            hubState.busy = false;
+            syncBulkButton();
+        }
+    }
+
+    async function bulkApproveParts() {
+        if (hubState.busy || !hasAdminAccess()) return;
+        var selected = Object.keys(hubState.selected).filter(Boolean);
+        var ids = selected.length
+            ? selected
+            : (hubState.partsRows || []).map(function (row) {
+                return row && row.id ? String(row.id) : '';
+            }).filter(Boolean);
+        if (!ids.length) return;
+        if (ids.length > 200) ids = ids.slice(0, 200);
+
+        hubState.busy = true;
+        syncBulkButton();
+        setHubBanner('批量通過中（' + ids.length + '）…', 'info');
+        try {
+            var data = await proxyAction({
+                action: 'bulkApproveQuestionPartsProposals',
+                proposalIds: ids,
+                confirmOverwrite: false
+            }, 180000);
+            if (!data || data.ok !== true) {
+                setHubBanner(
+                    (data && data.message && String(data.message)) || errorMessage(data && data.error),
+                    'error'
+                );
+                return;
+            }
+
+            var approved = Array.isArray(data.approved) ? data.approved : [];
+            var needsConfirm = Array.isArray(data.needsConfirm) ? data.needsConfirm : [];
+            var failed = Array.isArray(data.failed) ? data.failed : [];
+
+            async function applyApprovedList(list) {
+                var approvedIds = {};
+                for (var i = 0; i < list.length; i++) {
+                    var item = list[i];
+                    if (!item) continue;
+                    approvedIds[String(item.proposalId || '')] = true;
+                    delete hubState.selected[String(item.proposalId || '')];
+                    await applyApprovedPartsLocally(item.question);
+                }
+                hubState.partsRows = (hubState.partsRows || []).filter(function (row) {
+                    return !(row && approvedIds[String(row.id || '')]);
+                });
+            }
+
+            await applyApprovedList(approved);
+
+            if (needsConfirm.length) {
+                var previewLines = needsConfirm.slice(0, 8).map(function (item) {
+                    return '• ' + String(item.questionId || item.proposalId || '');
+                }).join('\n');
+                var more = needsConfirm.length > 8
+                    ? '\n…另有 ' + (needsConfirm.length - 8) + ' 題'
+                    : '';
+                var ok = global.confirm
+                    ? global.confirm(
+                        '有 ' + needsConfirm.length + ' 題已有分題資料。確定全部覆寫並通過？\n\n'
+                        + previewLines + more
+                    )
+                    : false;
+                if (!ok) {
+                    var bits = [];
+                    if (approved.length) bits.push('已通過 ' + approved.length + ' 題');
+                    bits.push('已取消覆寫 ' + needsConfirm.length + ' 題');
+                    if (failed.length) bits.push('失敗 ' + failed.length + ' 題');
+                    setHubBanner(bits.join('；') + '。', 'warn');
+                    renderHubList();
+                    return;
+                }
+                setHubBanner('覆寫並通過中（' + needsConfirm.length + '）…', 'info');
+                var confirmIds = needsConfirm.map(function (item) {
+                    return String(item.proposalId || '');
+                }).filter(Boolean);
+                data = await proxyAction({
+                    action: 'bulkApproveQuestionPartsProposals',
+                    proposalIds: confirmIds,
+                    confirmOverwrite: true
+                }, 180000);
+                if (!data || data.ok !== true) {
+                    setHubBanner(
+                        (data && data.message && String(data.message)) || errorMessage(data && data.error),
+                        'error'
+                    );
+                    renderHubList();
+                    return;
+                }
+                var approved2 = Array.isArray(data.approved) ? data.approved : [];
+                var failed2 = Array.isArray(data.failed) ? data.failed : [];
+                await applyApprovedList(approved2);
+                approved = approved.concat(approved2);
+                failed = failed.concat(failed2);
+                needsConfirm = Array.isArray(data.needsConfirm) ? data.needsConfirm : [];
+            }
+
+            var summary = [];
+            if (approved.length) summary.push('已通過 ' + approved.length + ' 題');
+            if (failed.length) summary.push('失敗 ' + failed.length + ' 題');
+            if (needsConfirm.length) summary.push('仍待確認 ' + needsConfirm.length + ' 題');
+            if (!summary.length) summary.push('沒有可通過的提案');
+            var firstFail = failed[0];
+            var failHint = firstFail && firstFail.message
+                ? '（例如：' + String(firstFail.message) + '）'
+                : '';
+            setHubBanner(summary.join('；') + failHint, failed.length && !approved.length ? 'error' : 'ok');
             renderHubList();
         } catch (err) {
             setHubBanner(errorMessage(err && err.code), 'error');
