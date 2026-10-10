@@ -23,6 +23,10 @@ function applyAccessRights(rights) {
         githubSync: flags.githubSync === true,
         mockTests: flags.mockTests === true
     };
+    // Keep CSS gates (AI解釋 filter, card AI buttons) in sync with rights.
+    if (document.body) {
+        document.body.classList.toggle('poe-ai-allowed', window.accessRights.ai === true);
+    }
     if (window.authManager) {
         window.authManager._canViewMockTests = window.accessRights.mockTests;
         window.authManager._canEdit = window.accessRights.admin;

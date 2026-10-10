@@ -548,12 +548,13 @@
 }
 
 /* ============================================
-   Hide AI Filter by Default (shown when data exists)
+   AI解釋 filter: JS unhides #ai-filter-item when
+   accessRights.ai; CSS hides when body lacks poe-ai-allowed
+   (same gate as AI出題 / card AI解釋 buttons).
    ============================================ */
 
-.dropdown-filter:has(#ai-options),
-.dropdown-filter:has(#ai-filter-btn) {
-    display: none;
+body:not(.poe-ai-allowed) #ai-filter-item {
+    display: none !important;
 }
 
 /* ============================================
