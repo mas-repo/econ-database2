@@ -232,7 +232,7 @@ Intentionally separate: stats state must not mutate until jump — correct produ
 3. **Feature multi-select is AND** across keys (each `Object.entries` filter in `applyFilters`). Checking both `有分題` and `沒有分題` → empty set.
 4. **AI checked values are AND** (`questionMatchesAiFilter`); two-layer UI mutual-excludes 有 vs 沒有 and nests 簡短／詳盡 under 有, but combining「簡短」+「詳盡」still requires both on one question.
 5. **Search scope `all`** omits concepts/patterns/stemPatterns (only dedicated scopes). ConditionMatch「字串」searches 題目+答案+評卷報告 via `questionSearchText`, not topic alone.
-6. **Confirmed-none vs 尚未輸入**: stored「沒有圖」≠ modal「尚未輸入」sentinel. Feature「複選」excludes「並非複選型」/「不適用」.
+6. **Confirmed-none vs 尚未輸入**: stored「沒有圖」≠ modal「尚未輸入」sentinel. Type filters (圖表／表格／計算／複選類型) cover presence; 特徵 no longer duplicates 含圖表／含表格／含計算／複選.
 7. **進階篩選 localStorage** survives `clearFilters` of the active layer (draft reopens); active `window.advancedFilter` is cleared by `clearFilters`.
 
 ---

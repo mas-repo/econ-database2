@@ -46,13 +46,13 @@ On submit, if `currentValues` for a blank-only field is non-empty, that field is
 
 - Upserts **one pending row per `questionId`**.
 - Never writes `database.json` / shards.
-- When `proposals.length >= 200` and the submit would add a **new** `questionId`, response is:
+- When `proposals.length >= 200`, submit **still accepts** new `questionId`s. Response includes a soft signal:
 
 ```json
-{ "ok": false, "paused": true, "pendingCount": 200, "pauseThreshold": 200, "error": "paused" }
+{ "ok": true, "paused": true, "pendingCount": 200, "pauseThreshold": 200, "message": "…" }
 ```
 
-Replacing an existing pending `questionId` is allowed while paused.
+Agents should treat `paused:true` as a backlog reminder (not a hard reject). Coordinator briefs 分類專員 when the soft pause is active.
 
 ### Single proposal body
 
@@ -72,7 +72,7 @@ Batch: `{ "proposals": [ … ] }` (cap 200 per call).
 
 ### Alternate: file PR (staging file only)
 
-Append objects to `proposals[]` with the same fields plus `id`, `createdAt`, `status:"pending"`. Prefer the API so the pause gate is enforced. **Never** PR direct edits to `database.json` / shards for classification.
+Append objects to `proposals[]` with the same fields plus `id`, `createdAt`, `status:"pending"`. Prefer the API so upsert + soft `paused` signal stay consistent. **Never** PR direct edits to `database.json` / shards for classification.
 
 ## Human review
 
@@ -85,7 +85,7 @@ Admin → **回饋／回報 → 分類審批**:
 - Always-eligible overwrite confirm when a targeted approve field is already non-empty **or** `reviewedByAI === 'Y'` (`confirmOverwrite: true`).
 - Blank-only: UI + server enforce empty-only; no overwrite path.
 - Approve bank writes are **shard-aware** (same dual-write as 分題審批: HKEAA / 雅集 shards + combined).
-- Banner when pending ≥ 200.
+- Warning banner when pending ≥ 200 (intake still open).
 
 ## Redeploy
 

@@ -38,7 +38,7 @@ If copies of the above are recovered from a private checkout or laptop, place th
 
 ## Why retire
 
-Duplicate write paths that patched the shared bank from Python raced with admin review, skipped the pending≥200 pause gate, and could overwrite `reviewedByAI Y` rows. Staging + **分類審批** is the single controlled path.
+Duplicate write paths that patched the shared bank from Python raced with admin review, bypassed staging intake (incl. the soft ≥200 backlog signal), and could overwrite `reviewedByAI Y` rows. Staging + **分類審批** is the single controlled path.
 
 ## Residual risk
 

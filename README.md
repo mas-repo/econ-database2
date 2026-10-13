@@ -137,7 +137,7 @@ Form / 批量編輯 can still edit parts directly on the bank. Redeploy Apps Scr
 
 AI / review bots must **not** write `concepts` or `stemPatterns` straight into `database.json`. They call Apps Script `submitClassificationProposal` (`admin` or `githubSync`), which upserts pending rows in `shared/data/classification-proposals.json` (one pending proposal per `questionId`). Always-eligible fields: `concepts`, `stemPatterns`, `patterns`, `graphType`, `tableType`, `calculationType`, `multipleSelectionType`. Blank-only (empty bank only): `AristochapterClassification`, `curriculumClassification`, `questionParts`. **Submit never touches the bank.**
 
-**Pause at 200:** when pending count ≥ 200, new-question intake is rejected with `{ ok:false, paused:true, pendingCount, pauseThreshold:200 }`. Replacing an existing pending `questionId` is still allowed. The admin **分類審批** tab shows a paused banner when the backlog is at the limit.
+**Soft warn at 200:** when pending count ≥ 200, submit still accepts new `questionId`s and returns `{ ok:true, paused:true, pendingCount, pauseThreshold:200, message }` as a reminder for agents. The admin **分類審批** tab shows a warning banner when the backlog is at the threshold. Coordinator briefs 分類專員 when the soft pause is active.
 
 **JSON shape (intake):**
 ```json
@@ -219,7 +219,7 @@ Shared bank JSON (`shared/data/database.json`) carries an integer root field `sc
 | 5 | 回報問題 side-file contract (`shared/data/issue-reports.json`) |
 | 6 | issue-reports + AI解釋 feedback `status` (open\|resolved) |
 | 7 | 分題提案 staging (`shared/data/question-parts-proposals.json`) |
-| 8 | 分類提案 staging (`shared/data/classification-proposals.json`; multi-field; pause ≥200) |
+| 8 | 分類提案 staging (`shared/data/classification-proposals.json`; multi-field; soft warn ≥200) |
 
 - **Upload / auto-sync:** before `syncDataUpload`, the client reads the cloud file and **blocks** if local `SCHEMA_VERSION` &lt; cloud `schemaVersion`, with a Traditional Chinese error (cloud written by a newer app — update before uploading). No merge that strips unknown fields. **Apps Script `handleGitUpload_` enforces the same gate** (`schema_version_stale` + client/cloud versions) and preserves `schemaVersion` / unknown top-level keys on write. Redeploy `Code.gs` after that change.
 - **Load / download / file import:** if cloud/file `schemaVersion` &gt; local, show a **warning notification** asking the user to update. If the payload has no usable `questions` array, the load fails clearly instead of half-importing. `syncDataDownload` returns `schemaVersion` for client notify.
@@ -236,7 +236,7 @@ Set `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `GITHUB_DATA
 
 Canonical path:
 
-1. **分類專員** (or any `admin` / `githubSync` bot) proposes via Apps Script **`submitClassificationProposal`** (batch OK; pause when pending ≥ 200).
+1. **分類專員** (or any `admin` / `githubSync` bot) proposes via Apps Script **`submitClassificationProposal`** (batch OK; soft `paused` warn when pending ≥ 200 — intake still open; coordinator briefs 分類專員).
 2. Rows land in private **`shared/data/classification-proposals.json`** only — staging never patches the bank.
 3. Human opens **回饋／回報 → 分類審批**, then **通過** / **拒絕** (`approveClassificationProposal` / `rejectClassificationProposal` + bulk).
 

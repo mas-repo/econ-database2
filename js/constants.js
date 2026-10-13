@@ -5,7 +5,7 @@
 
 // Printed when the page loads. Bump this on every change so a reader can
 // tell whether the open tab is current. Do not keep a changelog here.
-const APP_VERSION = '2026.10.14.20';
+const APP_VERSION = '2026.10.14.21';
 console.log('Question bank version:', APP_VERSION);
 
 // Integer stamped on shared bank JSON as schemaVersion. Also an app-capability
@@ -19,7 +19,7 @@ console.log('Question bank version:', APP_VERSION);
 // v5: 回報問題 side-file (shared/data/issue-reports.json).
 // v6: issue-reports + AI解釋 feedback `status` (open|resolved); AS upload field schema.
 // v7: 分題提案 staging (shared/data/question-parts-proposals.json); approve patches bank.
-// v8: 分類提案 staging (shared/data/classification-proposals.json; concepts / stemPatterns; pause≥200).
+// v8: 分類提案 staging (shared/data/classification-proposals.json; concepts / stemPatterns; soft warn ≥200).
 // data-checks.json is intentionally not reflected here.
 // Redeploy Apps Script after pulling this client (upload validation + hub status APIs).
 const SCHEMA_VERSION = 8;
@@ -86,11 +86,7 @@ const CURRICULUM_ORDER = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'E1'
 
 // Feature filter items
 const FEATURE_ITEMS = [
-    '含圖表',
     '有內嵌圖',
-    '含表格',
-    '含計算',
-    '複選',
     '跨課題',
     '跨章節',
     '有分題',

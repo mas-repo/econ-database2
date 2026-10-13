@@ -372,7 +372,7 @@
             + '    <button type="button" class="btn btn-primary btn-sm" id="feedback-hub-bulk-resolve" disabled>標記已關閉</button>'
             + '  </div>'
             + '  <p class="report-issue-status" id="feedback-hub-status" hidden></p>'
-            + '  <p class="feedback-hub-paused-banner" id="feedback-hub-class-paused" hidden>分類提案待審已達上限（≥200），新題 intake 已暫停。</p>'
+            + '  <p class="feedback-hub-paused-banner" id="feedback-hub-class-paused" hidden>分類提案待審已達提醒門檻（≥200）；新題仍可提交，請盡快審批。</p>'
             + '  <div class="feedback-hub-list" id="feedback-hub-list"></div>'
             + '  <footer class="report-issue-footer">'
             + '    <button type="button" class="btn btn-secondary" id="feedback-hub-done">關閉</button>'

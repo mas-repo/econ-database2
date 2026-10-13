@@ -591,20 +591,7 @@
     // Lives here (before condition-match.js) so advanced filter / data-checks
     // do not need a duplicate fallback body.
     function questionFeatureOn(q, value) {
-        if (value === '含圖表') {
-            return !!(q.graphType && q.graphType !== '' && q.graphType !== '-' && q.graphType !== '沒有圖');
-        }
         if (value === '有內嵌圖') return !!(q.inlineDiagrams && String(q.inlineDiagrams).trim());
-        if (value === '含表格') {
-            return !!(q.tableType && q.tableType !== '' && q.tableType !== '-' && q.tableType !== '沒有表格');
-        }
-        if (value === '複選') {
-            return !!(q.multipleSelectionType && q.multipleSelectionType !== '' && q.multipleSelectionType !== '-' &&
-                q.multipleSelectionType !== '並非複選型' && q.multipleSelectionType !== '不適用');
-        }
-        if (value === '含計算') {
-            return !!(q.calculationType && q.calculationType !== '' && q.calculationType !== '-' && q.calculationType !== '沒有計算');
-        }
         if (value === '跨課題') {
             return !!(q.curriculumClassification && Array.isArray(q.curriculumClassification) && q.curriculumClassification.length > 1);
         }

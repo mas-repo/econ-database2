@@ -149,7 +149,7 @@
  *   bulkRejectQuestionPartsProposals  → handleBulkRejectQuestionPartsProposals_  (admin)
  * 分類提案 staging (shared/data/classification-proposals.json; concepts / stemPatterns):
  *   listClassificationProposals       → handleListClassificationProposals_       (admin)
- *   submitClassificationProposal      → handleSubmitClassificationProposal_      (admin|githubSync; pause≥200)
+ *   submitClassificationProposal      → handleSubmitClassificationProposal_      (admin|githubSync; soft warn≥200)
  *   approveClassificationProposal     → handleApproveClassificationProposal_     (admin; shard bank patch; multi-field + blank-only)
  *   bulkApproveClassificationProposals → handleBulkApproveClassificationProposals_ (admin; bank patch)
  *   rejectClassificationProposal      → handleRejectClassificationProposal_      (admin; optional rejectFields keeps other fields)
@@ -3499,7 +3499,8 @@ function handleListClassificationProposals_(body) {
 }
 
 // Intake: admin|githubSync. Never writes database.json.
-// Upserts one pending proposal per questionId. Rejects when pending >= 200.
+// Upserts one pending proposal per questionId.
+// When pending >= 200, still accepts new questionIds; response sets paused:true as a soft reminder.
 function handleSubmitClassificationProposal_(body) {
   var username = normalizeUsername_(body.username);
   var rights = lookupRights_(username);
@@ -3548,29 +3549,8 @@ function handleSubmitClassificationProposal_(body) {
         keptWithoutReplace.push(list[j]);
       }
 
-      // Pause when backlog already >= 200 and intake would add a new questionId.
-      // Pure replacements (same questionId) remain allowed so bots can revise.
-      var grows = false;
-      var newCount = 0;
-      for (j = 0; j < prepared.length; j++) {
-        if (!existingByQid[prepared[j].questionId]) {
-          grows = true;
-          newCount += 1;
-        }
-      }
-      var pendingAfter = keptWithoutReplace.length + prepared.length;
-      if (grows && (list.length >= CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_
-          || pendingAfter > CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_)) {
-        return {
-          ok: false,
-          paused: true,
-          pendingCount: list.length,
-          pauseThreshold: CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_,
-          error: 'paused',
-          message: '待審批分類提案已達上限（' + CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_ + '）。請先審批後再提交。'
-        };
-      }
-
+      // Soft warn when backlog >= 200: still accept new questionIds.
+      // Response paused:true is a reminder for agents / admin banner only (not a hard reject).
       var upserted = [];
       var nowIso = new Date().toISOString();
       var kept = keptWithoutReplace.slice();
@@ -3609,16 +3589,6 @@ function handleSubmitClassificationProposal_(body) {
   );
 
   if (!saved || saved.ok !== true) {
-    if (saved && saved.paused === true) {
-      return {
-        ok: false,
-        paused: true,
-        pendingCount: saved.pendingCount,
-        pauseThreshold: saved.pauseThreshold || CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_,
-        error: 'paused',
-        message: saved.message || ''
-      };
-    }
     return { ok: false, error: (saved && saved.error) || 'github_error' };
   }
   writeLog_({
@@ -3627,12 +3597,17 @@ function handleSubmitClassificationProposal_(body) {
     success: true,
     metadata: { count: prepared.length, pendingCount: saved.pendingCount }
   }, true);
+  var pausedNow = saved.paused === true;
   return {
     ok: true,
     proposals: Array.isArray(saved.proposals) ? saved.proposals : [],
     pendingCount: saved.pendingCount,
     pauseThreshold: CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_,
-    paused: saved.paused === true,
+    paused: pausedNow,
+    message: pausedNow
+      ? ('待審批分類提案已達提醒門檻（' + CLASSIFICATION_PROPOSALS_PAUSE_THRESHOLD_
+         + '）。新題仍可提交；請盡快審批。')
+      : '',
     sha: saved.sha,
     path: saved.path
   };
