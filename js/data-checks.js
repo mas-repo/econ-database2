@@ -25,8 +25,8 @@
 // Automatic syncDataChecksDownload runs only on the first open in a session,
 // or when this browser has no usable cache; later opens reuse localStorage.
 // Use 「下載」 to pull the shared file manually. Mutating controls stay disabled
-// while a remote load is in flight. Saves upload only when the check list
-// actually changed.
+// while a remote load is in flight. 「新增檢查」 opens a local draft only;
+// upload runs on explicit 「儲存」 / delete when the list actually changed.
 //
 // The DEFAULT_DATA_CHECKS list below remains the seed / fallback when the
 // remote file is missing. You can still edit that list in source:
@@ -67,14 +67,22 @@
 //
 // Persistence
 // -----------
-// Source of truth across computers: shared/data/data-checks.json in
+// Modal has two tabs: 「資料檢查」(error/inconsistency checks) and
+// 「關注組合」(saved watch filter combos — match counts, not errors).
+//
+// 資料檢查 source of truth: shared/data/data-checks.json in
 // mas-repo/econ-database-data. Downloads prefer direct GitHub via
 // issueSharedReadToken; uploads stay on Apps Script syncDataChecksUpload
 // (ken + githubSync). localStorage key
 // econ_data_checks_v1:<username> is a session/cache. Auto-download is once
 // per session (or when cache is empty); 「下載」 forces a pull. Auto-upload
-// runs only after a real edit/add/delete. Missing remote file → keep
-// cache/defaults (does not wipe the bank).
+// runs only after explicit 「儲存」 or delete — not while a draft editor is
+// open. Remote refresh must not replace an in-progress draft. Missing remote
+// file → keep cache/defaults (does not wipe the bank).
+//
+// 關注組合 is local-only (econ_watch_combos_v1:<username>). It never calls
+// syncDataChecks* and never writes the shared checks file — so adding a
+// watch combo cannot clobber an in-progress check draft via upload refresh.
 //
 // Clicking a needs-handling ID clears the question filters, sets search scope
 // to 題目 ID, fills that id, switches to the 題目 tab, and runs filterQuestions
@@ -125,12 +133,17 @@
 
     var DATA_CHECKS_USERNAME = 'ken';
     var STORAGE_PREFIX = 'econ_data_checks_v1:';
+    var WATCH_STORAGE_PREFIX = 'econ_watch_combos_v1:';
     var REMOTE_SOURCE = 'remote';
     var DEFAULT_SOURCE = 'defaults';
     var CACHE_SOURCE = 'cache';
     var checksSource = DEFAULT_SOURCE;
     var checksBusy = false;
     var checksStatusText = '';
+    var activePanelTab = 'checks'; // 'checks' | 'watches'
+    var activeWatches = null;
+    var editingWatchId = null;
+    var unsavedWatchDraftIds = {};
     // Field catalog + matching live in condition-match.js (shared with 進階篩選).
     function Match() {
         return window.ConditionMatch || null;
@@ -149,6 +162,8 @@
     var overlay = null;
     var openDetails = {};
     var editingCheckId = null;
+    // Ids created by 「新增檢查」 that have not been saved/uploaded yet.
+    var unsavedDraftIds = {};
     var cachedQuestions = null;
     var activeChecks = null;
     var conditionRowSeq = 0;
@@ -256,6 +271,88 @@
         } catch (error) {
             return false;
         }
+    }
+
+
+    function watchStorageKeyForUser(username) {
+        var user = String(username || '').trim().toLowerCase();
+        if (!user) return '';
+        return WATCH_STORAGE_PREFIX + user;
+    }
+
+    function normalizeWatch(raw, index) {
+        if (!raw || typeof raw !== 'object') return null;
+        var id = String(raw.id == null ? '' : raw.id).trim();
+        if (!id) id = 'watch-' + String(index + 1) + '-' + Date.now().toString(36);
+        var conditions = Array.isArray(raw.conditions)
+            ? raw.conditions.map(normalizeCondition).filter(Boolean)
+            : [];
+        return {
+            id: id,
+            name: String(raw.name == null ? '' : raw.name).trim() || '未命名關注',
+            conditions: conditions
+        };
+    }
+
+    function normalizeWatches(list) {
+        if (!Array.isArray(list)) return [];
+        return list.map(normalizeWatch).filter(Boolean);
+    }
+
+    function readSavedWatches(username) {
+        var key = watchStorageKeyForUser(username);
+        if (!key) return [];
+        try {
+            var raw = localStorage.getItem(key);
+            if (!raw) return [];
+            var parsed = JSON.parse(raw);
+            var list = Array.isArray(parsed) ? parsed
+                : (parsed && Array.isArray(parsed.watches) ? parsed.watches : null);
+            return normalizeWatches(list || []);
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function writeSavedWatches(username, watches) {
+        var key = watchStorageKeyForUser(username);
+        if (!key) return false;
+        try {
+            localStorage.setItem(key, JSON.stringify({
+                version: 1,
+                watches: normalizeWatches(watches)
+            }));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function loadActiveWatches() {
+        if (!canSeeDataChecks()) {
+            activeWatches = [];
+            return activeWatches;
+        }
+        if (Array.isArray(activeWatches)) return activeWatches;
+        activeWatches = readSavedWatches(currentUsername());
+        return activeWatches;
+    }
+
+    function persistWatchesLocal() {
+        if (!canSeeDataChecks()) return false;
+        activeWatches = normalizeWatches(activeWatches);
+        var toSave = activeWatches.filter(function (watch) {
+            return !(watch && unsavedWatchDraftIds[watch.id]);
+        });
+        writeSavedWatches(currentUsername(), toSave);
+        setChecksStatus('關注組合已儲存本機');
+        return true;
+    }
+
+    function countWatchMatches(questions, watch) {
+        var m = Match();
+        if (!m || typeof m.matchingQuestionIds !== 'function') return 0;
+        return m.matchingQuestionIds(questions || [], (watch && watch.conditions) || []).length;
     }
 
     function setChecksStatus(text) {
@@ -383,9 +480,59 @@
 
     function applyToolbarLock() {
         var addBtn = document.getElementById('data-checks-add');
-        if (addBtn) addBtn.disabled = mutationsLocked;
+        if (addBtn) {
+            addBtn.disabled = mutationsLocked;
+            addBtn.textContent = activePanelTab === 'watches' ? '＋ 新增關注' : '＋ 新增檢查';
+        }
         var downloadBtn = document.getElementById('data-checks-download');
-        if (downloadBtn) downloadBtn.disabled = mutationsLocked;
+        if (downloadBtn) {
+            downloadBtn.disabled = mutationsLocked || activePanelTab === 'watches';
+            downloadBtn.hidden = activePanelTab === 'watches';
+        }
+    }
+
+    function updatePanelChrome() {
+        var subtitle = document.getElementById('data-checks-subtitle');
+        if (subtitle) {
+            if (activePanelTab === 'watches') {
+                subtitle.textContent = '儲存想持續留意的篩選組合（本機）。顯示符合題數；點題數或「套用」會以進階篩選套用該組合。關注組合不是錯誤檢查，也不會上傳到共用資料庫。';
+            } else {
+                subtitle.textContent = '列出仍需處理的題目（符合條件且不在該檢查的例外清單）。檢查模式可選普通檢查或同年跨卷重疊；可編輯標題、條件與例外；點題號會用既有「題目 ID」篩選顯示該題；「篩選全部待處理」會一次套用整批待處理編號（不經搜尋框）。';
+            }
+        }
+        if (overlay) {
+            overlay.querySelectorAll('[data-dc-tab]').forEach(function (btn) {
+                var on = btn.getAttribute('data-dc-tab') === activePanelTab;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        }
+        applyToolbarLock();
+    }
+
+    function switchPanelTab(tab) {
+        var next = tab === 'watches' ? 'watches' : 'checks';
+        if (next === activePanelTab) return;
+        // Leaving a tab abandons unsaved drafts on that tab (same as cancel).
+        if (activePanelTab === 'checks' && editingCheckId && unsavedDraftIds[editingCheckId]) {
+            loadActiveChecks();
+            activeChecks = activeChecks.filter(function (check) {
+                return check.id !== editingCheckId;
+            });
+            delete unsavedDraftIds[editingCheckId];
+        }
+        if (activePanelTab === 'watches' && editingWatchId && unsavedWatchDraftIds[editingWatchId]) {
+            loadActiveWatches();
+            activeWatches = activeWatches.filter(function (watch) {
+                return watch.id !== editingWatchId;
+            });
+            delete unsavedWatchDraftIds[editingWatchId];
+        }
+        editingCheckId = null;
+        editingWatchId = null;
+        activePanelTab = next;
+        updatePanelChrome();
+        renderFromCache();
     }
 
     function setMutationsLocked(locked) {
@@ -409,6 +556,13 @@
             var remote = await downloadChecksFromRemote();
             if (token !== remoteLoadToken) return;
             sessionRemoteFetchDone = true;
+            // Never replace an in-progress editor from a post-download refresh.
+            if (editingCheckId) {
+                setMutationsLocked(false);
+                if (!overlay || overlay.hidden) return;
+                setChecksStatus('編輯中，略過遠端覆寫');
+                return;
+            }
             activeChecks = remote;
             checksSource = REMOTE_SOURCE;
             writeSavedChecks(currentUsername(), activeChecks);
@@ -454,8 +608,12 @@
         if (!canSeeDataChecks()) return false;
         if (mutationsLocked) return false;
         activeChecks = normalizeChecks(activeChecks);
-        writeSavedChecks(currentUsername(), activeChecks);
-        var fingerprint = fingerprintChecks(activeChecks);
+        // Never upload / cache-stamp an open 「新增檢查」 draft — only explicit save.
+        var toPersist = activeChecks.filter(function (check) {
+            return !(check && unsavedDraftIds[check.id]);
+        });
+        writeSavedChecks(currentUsername(), toPersist);
+        var fingerprint = fingerprintChecks(toPersist);
         if (fingerprint === lastSyncedFingerprint) {
             setChecksStatus('沒有變更，略過上傳');
             return true;
@@ -464,10 +622,10 @@
         checksBusy = true;
         setChecksStatus('正在儲存到資料庫…');
         try {
-            await uploadChecksToRemote(activeChecks);
+            await uploadChecksToRemote(toPersist);
             checksSource = REMOTE_SOURCE;
-            writeSavedChecks(currentUsername(), activeChecks);
-            markChecksSynced(activeChecks);
+            writeSavedChecks(currentUsername(), toPersist);
+            markChecksSynced(toPersist);
             setChecksStatus('已儲存到共用資料庫');
             return true;
         } catch (error) {
@@ -725,10 +883,14 @@
             + '  <header class="data-checks-header">'
             + '    <div>'
             + '      <h2 id="data-checks-title">資料檢查</h2>'
-            + '      <p class="data-checks-subtitle">列出仍需處理的題目（符合條件且不在該檢查的例外清單）。檢查模式可選普通檢查或同年跨卷重疊；可編輯標題、條件與例外；點題號會用既有「題目 ID」篩選顯示該題；「篩選全部待處理」會一次套用整批待處理編號（不經搜尋框）。</p>'
+            + '      <p class="data-checks-subtitle" id="data-checks-subtitle">列出仍需處理的題目（符合條件且不在該檢查的例外清單）。檢查模式可選普通檢查或同年跨卷重疊；可編輯標題、條件與例外；點題號會用既有「題目 ID」篩選顯示該題；「篩選全部待處理」會一次套用整批待處理編號（不經搜尋框）。</p>'
             + '    </div>'
             + '    <button type="button" class="data-checks-close" aria-label="關閉">×</button>'
             + '  </header>'
+            + '  <div class="data-checks-tabs" role="tablist" aria-label="資料檢查分頁">'
+            + '    <button type="button" class="data-checks-tab is-active" role="tab" data-dc-tab="checks" aria-selected="true">資料檢查</button>'
+            + '    <button type="button" class="data-checks-tab" role="tab" data-dc-tab="watches" aria-selected="false">關注組合</button>'
+            + '  </div>'
             + '  <div class="data-checks-toolbar">'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-add">＋ 新增檢查</button>'
             + '    <button type="button" class="btn btn-outline-primary btn-sm" id="data-checks-download">下載</button>'
@@ -746,10 +908,16 @@
         overlay.querySelector('.data-checks-close').addEventListener('click', closeDataChecksPanel);
         overlay.querySelector('#data-checks-done').addEventListener('click', closeDataChecksPanel);
         overlay.querySelector('#data-checks-add').addEventListener('click', function () {
-            addBlankCheck();
+            if (activePanelTab === 'watches') addBlankWatch();
+            else addBlankCheck();
         });
         overlay.querySelector('#data-checks-download').addEventListener('click', function () {
             manualDownloadChecks();
+        });
+        overlay.querySelector('.data-checks-tabs').addEventListener('click', function (event) {
+            var tab = event.target.closest('[data-dc-tab]');
+            if (!tab) return;
+            switchPanelTab(tab.getAttribute('data-dc-tab'));
         });
         overlay.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
@@ -758,6 +926,46 @@
             }
         });
         overlay.addEventListener('click', function (event) {
+            var applyWatchBtn = event.target.closest('[data-dc-watch-apply]');
+            if (applyWatchBtn) {
+                event.preventDefault();
+                applyWatchCombo(applyWatchBtn.getAttribute('data-dc-watch-apply'));
+                return;
+            }
+            var editWatchBtn = event.target.closest('[data-dc-watch-edit]');
+            if (editWatchBtn) {
+                if (mutationsLocked) return;
+                editingWatchId = editWatchBtn.getAttribute('data-dc-watch-edit');
+                renderFromCache();
+                return;
+            }
+            var cancelWatchBtn = event.target.closest('[data-dc-watch-cancel]');
+            if (cancelWatchBtn) {
+                if (mutationsLocked) return;
+                var cancelWatchId = cancelWatchBtn.getAttribute('data-dc-watch-cancel');
+                if (cancelWatchId && unsavedWatchDraftIds[cancelWatchId]) {
+                    loadActiveWatches();
+                    activeWatches = activeWatches.filter(function (watch) {
+                        return watch.id !== cancelWatchId;
+                    });
+                    delete unsavedWatchDraftIds[cancelWatchId];
+                }
+                editingWatchId = null;
+                renderFromCache();
+                return;
+            }
+            var saveWatchBtn = event.target.closest('[data-dc-watch-save]');
+            if (saveWatchBtn) {
+                if (mutationsLocked) return;
+                saveEditedWatch(saveWatchBtn.getAttribute('data-dc-watch-save'));
+                return;
+            }
+            var deleteWatchBtn = event.target.closest('[data-dc-watch-delete]');
+            if (deleteWatchBtn) {
+                if (mutationsLocked) return;
+                deleteWatch(deleteWatchBtn.getAttribute('data-dc-watch-delete'));
+                return;
+            }
             var idBtn = event.target.closest('[data-dc-qid]');
             if (idBtn) {
                 event.preventDefault();
@@ -780,6 +988,14 @@
             var cancelBtn = event.target.closest('[data-dc-cancel]');
             if (cancelBtn) {
                 if (mutationsLocked) return;
+                var cancelId = cancelBtn.getAttribute('data-dc-cancel');
+                if (cancelId && unsavedDraftIds[cancelId]) {
+                    loadActiveChecks();
+                    activeChecks = activeChecks.filter(function (check) {
+                        return check.id !== cancelId;
+                    });
+                    delete unsavedDraftIds[cancelId];
+                }
                 editingCheckId = null;
                 renderFromCache();
                 return;
@@ -800,6 +1016,12 @@
             if (addCond) {
                 if (mutationsLocked) return;
                 addConditionRow(addCond.getAttribute('data-dc-add-cond'));
+                return;
+            }
+            var addWatchCond = event.target.closest('[data-dc-watch-add-cond]');
+            if (addWatchCond) {
+                event.preventDefault();
+                addWatchConditionRow(addWatchCond.getAttribute('data-dc-watch-add-cond'));
                 return;
             }
             var removeCond = event.target.closest('[data-dc-remove-cond]');
@@ -962,10 +1184,18 @@
             exceptions: []
         };
         activeChecks.push(check);
+        unsavedDraftIds[check.id] = true;
         editingCheckId = check.id;
+        // Local draft only — do not upload / re-render after remote save.
+        // Immediate persist + post-upload renderFromCache was wiping typing.
         renderFromCache();
-        await persistActiveChecks();
-        renderFromCache();
+        var nameInput = overlay && overlay.querySelector(
+            '[data-check-id="' + check.id + '"] [data-dc-name]'
+        );
+        if (nameInput) {
+            nameInput.focus();
+            nameInput.select();
+        }
     }
 
     async function deleteCheck(checkId) {
@@ -974,11 +1204,17 @@
         var next = activeChecks.filter(function (check) { return check.id !== checkId; });
         if (next.length === activeChecks.length) return;
         if (!window.confirm('刪除此檢查？')) return;
+        var wasDraft = !!unsavedDraftIds[checkId];
         activeChecks = next;
         if (editingCheckId === checkId) editingCheckId = null;
+        delete unsavedDraftIds[checkId];
         renderFromCache();
+        if (wasDraft) {
+            // Never uploaded — nothing to push; leave lastSyncedFingerprint as-is.
+            return;
+        }
         await persistActiveChecks();
-        renderFromCache();
+        if (!editingCheckId) renderFromCache();
     }
 
     function readEditorForm(checkId) {
@@ -1029,10 +1265,12 @@
             return edited;
         });
         if (!found) activeChecks.push(edited);
+        delete unsavedDraftIds[checkId];
         editingCheckId = null;
         renderFromCache();
         await persistActiveChecks();
-        renderFromCache();
+        // Upload can take seconds; do not clobber a newly opened editor.
+        if (!editingCheckId) renderFromCache();
     }
 
     function addConditionRow(checkId) {
@@ -1304,18 +1542,232 @@
         }
     }
 
+
+    function newWatchId() {
+        return 'watch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    }
+
+    function addWatchConditionRow(watchId) {
+        var row = overlay && overlay.querySelector('[data-watch-id="' + watchId + '"] .data-checks-cond-list');
+        if (!row) return;
+        var wrap = document.createElement('div');
+        wrap.innerHTML = conditionRowHtml({ type: 'textContains', value: '' });
+        row.appendChild(wrap.firstChild);
+    }
+
+    function readWatchEditorForm(watchId) {
+        var row = overlay && overlay.querySelector('[data-watch-id="' + watchId + '"]');
+        if (!row) return null;
+        var nameInput = row.querySelector('[data-dc-watch-name]');
+        var conditionRows = row.querySelectorAll('[data-dc-cond-row]');
+        var conditions = [];
+        conditionRows.forEach(function (condRow) {
+            var valueEl = condRow.querySelector('[data-dc-cond-value]');
+            var choices = readConditionChoices(condRow);
+            var normalized = normalizeCondition({
+                include: choices.include,
+                field: choices.field,
+                value: valueEl ? valueEl.value : ''
+            });
+            if (normalized) conditions.push(normalized);
+        });
+        return {
+            id: watchId,
+            name: String(nameInput && nameInput.value || '').trim() || '未命名關注',
+            conditions: conditions
+        };
+    }
+
+    async function addBlankWatch() {
+        if (!canSeeDataChecks() || mutationsLocked) return;
+        loadActiveWatches();
+        var watch = {
+            id: newWatchId(),
+            name: '新關注',
+            conditions: [{ include: true, field: 'text', value: '', type: 'textContains' }]
+        };
+        activeWatches.push(watch);
+        unsavedWatchDraftIds[watch.id] = true;
+        editingWatchId = watch.id;
+        renderFromCache();
+        var nameInput = overlay && overlay.querySelector(
+            '[data-watch-id="' + watch.id + '"] [data-dc-watch-name]'
+        );
+        if (nameInput) {
+            nameInput.focus();
+            nameInput.select();
+        }
+    }
+
+    function deleteWatch(watchId) {
+        if (!canSeeDataChecks() || mutationsLocked) return;
+        loadActiveWatches();
+        var next = activeWatches.filter(function (watch) { return watch.id !== watchId; });
+        if (next.length === activeWatches.length) return;
+        if (!window.confirm('刪除此關注組合？')) return;
+        var wasDraft = !!unsavedWatchDraftIds[watchId];
+        activeWatches = next;
+        if (editingWatchId === watchId) editingWatchId = null;
+        delete unsavedWatchDraftIds[watchId];
+        if (!wasDraft) persistWatchesLocal();
+        renderFromCache();
+    }
+
+    function saveEditedWatch(watchId) {
+        if (!canSeeDataChecks() || mutationsLocked) return;
+        loadActiveWatches();
+        var edited = readWatchEditorForm(watchId);
+        if (!edited) return;
+        if (!edited.conditions.length) {
+            window.alert('請至少保留一項條件。');
+            return;
+        }
+        var found = false;
+        activeWatches = activeWatches.map(function (watch) {
+            if (watch.id !== watchId) return watch;
+            found = true;
+            return edited;
+        });
+        if (!found) activeWatches.push(edited);
+        delete unsavedWatchDraftIds[watchId];
+        editingWatchId = null;
+        persistWatchesLocal();
+        renderFromCache();
+    }
+
+    function applyWatchCombo(watchId) {
+        if (!canSeeDataChecks()) {
+            refreshDataChecksVisibility();
+            return;
+        }
+        loadActiveWatches();
+        var watch = null;
+        (activeWatches || []).forEach(function (item) {
+            if (item && item.id === watchId) watch = item;
+        });
+        if (!watch || !watch.conditions || !watch.conditions.length) {
+            window.alert('此關注組合尚未設定條件。');
+            return;
+        }
+        closeDataChecksPanel();
+        if (typeof applyAdvancedConditionFilter === 'function') {
+            applyAdvancedConditionFilter(watch.conditions, {
+                clearIdSet: false,
+                label: '關注：' + watch.name
+            });
+        } else {
+            window.alert('進階篩選尚未載入。');
+        }
+    }
+
+    function renderWatchEditor(watch) {
+        var conditionsHtml = (watch.conditions.length ? watch.conditions : [{ type: 'textContains', value: '' }]).map(function (condition) {
+            return conditionRowHtml(condition);
+        }).join('');
+        return ''
+            + '<div class="data-checks-editor">'
+            + '  <label class="data-checks-field">'
+            + '    <span>標題</span>'
+            + '    <input type="text" data-dc-watch-name value="' + escapeAttr(watch.name) + '" maxlength="120">'
+            + '  </label>'
+            + '  <div class="data-checks-field">'
+            + '    <div class="data-checks-field-head">'
+            + '      <span>條件（全部 AND；關注組合，不是錯誤檢查）</span>'
+            + '      <button type="button" class="btn btn-outline-primary btn-sm" data-dc-watch-add-cond="' + escapeAttr(watch.id) + '">＋ 條件</button>'
+            + '    </div>'
+            + '    <div class="data-checks-cond-list">' + conditionsHtml + '</div>'
+            + '  </div>'
+            + '  <div class="data-checks-edit-actions">'
+            + '    <button type="button" class="btn btn-primary btn-sm" data-dc-watch-save="' + escapeAttr(watch.id) + '">儲存</button>'
+            + '    <button type="button" class="btn btn-secondary btn-sm" data-dc-watch-cancel="' + escapeAttr(watch.id) + '">取消</button>'
+            + '    <button type="button" class="btn btn-secondary btn-sm" data-dc-watch-delete="' + escapeAttr(watch.id) + '">刪除關注</button>'
+            + '  </div>'
+            + '</div>';
+    }
+
+    function renderWatches(questions) {
+        var body = document.getElementById('data-checks-body');
+        var note = document.getElementById('data-checks-footer-note');
+        if (!body) return;
+        body.textContent = '';
+        loadActiveWatches();
+        var watches = activeWatches || [];
+        if (!watches.length) {
+            var empty = document.createElement('p');
+            empty.className = 'data-checks-empty';
+            empty.textContent = '尚未設定關注組合。按上方「新增關注」儲存想留意的篩選條件。';
+            body.appendChild(empty);
+        } else {
+            watches.forEach(function (watch) {
+                var matchCount = countWatchMatches(questions, watch);
+                var row = document.createElement('section');
+                row.className = 'data-checks-row';
+                row.setAttribute('data-watch-id', watch.id);
+
+                var head = document.createElement('div');
+                head.className = 'data-checks-row-head';
+                var title = document.createElement('h3');
+                title.className = 'data-checks-row-title';
+                title.textContent = watch.name;
+                head.appendChild(title);
+
+                var counts = document.createElement('div');
+                counts.className = 'data-checks-counts';
+                counts.innerHTML = ''
+                    + '<button type="button" class="data-checks-count is-watch" data-dc-watch-apply="' + escapeAttr(watch.id) + '"'
+                    + ' title="套用此關注組合到題目列表">符合 <strong>' + matchCount + '</strong></button>';
+                head.appendChild(counts);
+                row.appendChild(head);
+
+                if (editingWatchId === watch.id) {
+                    var editorWrap = document.createElement('div');
+                    editorWrap.innerHTML = renderWatchEditor(watch);
+                    row.appendChild(editorWrap.firstChild);
+                } else {
+                    var summary = document.createElement('p');
+                    summary.className = 'data-checks-row-summary';
+                    summary.textContent = conditionSummary(watch) || '（尚未設定條件）';
+                    row.appendChild(summary);
+
+                    var actions = document.createElement('div');
+                    actions.className = 'data-checks-row-actions';
+                    actions.innerHTML = ''
+                        + '<button type="button" class="btn btn-outline-primary btn-sm" data-dc-watch-apply="' + escapeAttr(watch.id) + '"'
+                        + (matchCount ? '' : ' disabled')
+                        + '>套用篩選'
+                        + (matchCount ? ('（' + matchCount + '）') : '')
+                        + '</button>'
+                        + '<button type="button" class="btn btn-outline-primary btn-sm" data-dc-watch-edit="' + escapeAttr(watch.id) + '">編輯</button>'
+                        + '<button type="button" class="btn btn-secondary btn-sm" data-dc-watch-delete="' + escapeAttr(watch.id) + '">刪除</button>';
+                    row.appendChild(actions);
+                }
+                body.appendChild(row);
+            });
+        }
+        if (note) {
+            var base = '已載入 ' + (questions || []).length + ' 題 · 共 ' + watches.length + ' 項關注 · 本機儲存';
+            note.setAttribute('data-dc-base', base);
+            note.textContent = checksStatusText ? (base + ' · ' + checksStatusText) : base;
+        }
+    }
+
     function renderFromCache() {
         if (!canSeeDataChecks()) {
             refreshDataChecksVisibility();
             return;
         }
-        loadActiveChecks();
         var questions = Array.isArray(cachedQuestions) ? cachedQuestions : [];
+        if (activePanelTab === 'watches') {
+            renderWatches(questions);
+            return;
+        }
+        loadActiveChecks();
         var results = activeChecks.map(function (check) {
             return evaluateCheck(questions, check);
         });
         renderResults(results, questions.length);
     }
+
 
     async function loadQuestionsForChecks() {
         var questions = [];
@@ -1344,9 +1796,15 @@
         overlay.hidden = false;
         document.body.classList.add('data-checks-open');
         editingCheckId = null;
+        unsavedDraftIds = {};
+        editingWatchId = null;
+        unsavedWatchDraftIds = {};
+        activeWatches = null;
+        activePanelTab = 'checks';
         checksStatusText = '';
         loadChecksFromLocalCache();
         markChecksSynced(activeChecks);
+        updatePanelChrome();
 
         var autoDownload = shouldAutoDownloadOnOpen();
         if (autoDownload) {
@@ -1395,10 +1853,27 @@
             + '  flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid var(--border-light);'
             + '  border-radius: 999px; background: #fff; color: var(--text-color); font-size: 22px; line-height: 1;'
             + '}'
+            + '.data-checks-tabs {'
+            + '  display: flex; gap: 0; padding: 0 18px;'
+            + '  border-bottom: 1px solid var(--border-light); background: #fff;'
+            + '}'
+            + '.data-checks-tab {'
+            + '  appearance: none; border: 0; border-bottom: 2px solid transparent;'
+            + '  background: transparent; padding: 10px 14px; font: inherit; font-size: 14px;'
+            + '  cursor: pointer; color: #556677;'
+            + '}'
+            + '.data-checks-tab.is-active {'
+            + '  border-bottom-color: var(--primary-color); color: var(--primary-color); font-weight: 700;'
+            + '}'
             + '.data-checks-toolbar {'
             + '  display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 18px;'
             + '  border-bottom: 1px solid var(--border-light); background: #fff;'
             + '}'
+            + '.data-checks-count.is-watch {'
+            + '  background: #eef6ff; border-color: #bfd6f0; color: var(--secondary-color);'
+            + '  cursor: pointer; font: inherit;'
+            + '}'
+            + '.data-checks-count.is-watch:hover { background: #e0effc; }'
             + '.data-checks-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 24px; background: #f4f7fb; }'
             + '.data-checks-row {'
             + '  margin-bottom: 12px; padding: 14px 16px; border: 1px solid #d7e3ef;'
