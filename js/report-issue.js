@@ -614,7 +614,7 @@
             + '</div></div>';
         document.body.appendChild(overlay);
         overlay.addEventListener('click', function (ev) {
-            if (ev.target === overlay) closePendingQueuePanel();
+            if (ev.target === overlay && shouldCloseOnBackdropClick()) closePendingQueuePanel();
         });
         var closeBtn = overlay.querySelector('#staging-pending-queue-close');
         var closeBtn2 = overlay.querySelector('#staging-pending-queue-close-2');

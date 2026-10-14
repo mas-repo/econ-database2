@@ -1090,7 +1090,7 @@
             + '</div>';
         document.body.appendChild(feedbackOverlay);
         feedbackOverlay.addEventListener('click', function (event) {
-            if (event.target === feedbackOverlay) closeFeedbackPrompt();
+            if (event.target === feedbackOverlay && shouldCloseOnBackdropClick()) closeFeedbackPrompt();
         });
         feedbackOverlay.querySelector('.ai-explain-close').addEventListener('click', closeFeedbackPrompt);
         feedbackOverlay.querySelector('#ai-fb-cancel').addEventListener('click', closeFeedbackPrompt);

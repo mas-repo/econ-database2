@@ -44,6 +44,7 @@ sequenceDiagram
 | Side-file 落地 | `ai-explanations.json` + Apps Script CRUD／vote／feedback |
 | 雙語 reference | 產生時固定帶 CN+EN，減少單語漏答 |
 | Hub 合併 Feedback | admin 在回饋 hub 處理，不另開頂欄入口 |
+| Backdrop 跟設定（.38） | Feedback 小窗點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`；主 AI解釋 modal 本來已 gated |
 
 ## 待辦
 
@@ -57,3 +58,4 @@ sequenceDiagram
 3. 重新整理後仍可從 side-file 讀回（非僅記憶體）。  
 4. Admin：hub → AI Feedback 可關單／刪解釋（刪後題卡同步）。  
 5. Poe upstream 失敗時應看到狀態／錯誤類型（非空白失敗）。
+6. 使用者設定關閉「點擊背景關閉視窗」時：Feedback 小窗點背景不應關閉；×／取消仍可關。

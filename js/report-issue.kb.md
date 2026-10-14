@@ -110,6 +110,7 @@ sequenceDiagram
 - Panel 列出每筆 `pendingOps`：`questionId`、種類（分題／分類）、動作（通過／拒絕／保留原值）、短預覽（`bankSnap`／`values`／`proposalSnap`）。
 - **撤銷**：`removePendingOp(localId)`；若有 `proposalSnap` 則插回 `partsRows`／`classRows`，否則 `ensureStagingCache(true)` 由雲端重拉（提案尚未 flush 仍在 staging）；approve 若有 `undoBankSnap` 則還原本機樂觀題庫套用。
 - 撤銷後刷新 hub 列表（若開著）、題目卡 staging、chip；flush 中不可撤銷。
+- **Backdrop（.38）**：點 panel 背景關閉受 `shouldCloseOnBackdropClick()` 控制（使用者設定「點擊背景關閉視窗」）；×／關閉／Esc 不受影響。
 
 
 ## .37 批次 validate-then-commit（設計筆記／實作）
@@ -170,6 +171,7 @@ sequenceDiagram
 | `.35` 待上傳佇列撤銷 | chip「檢視佇列」panel；`proposalSnap`／`undoBankSnap`；單項撤銷還原 staging＋本機 bank |
 | `.36` hub-close 背景 flush | 關窗立即 hide；`flushPendingOps({reason:'hub-close'})` fire-and-forget |
 | `.37` 批次 validate-then-commit | `flushStagingApprovals`：validate-all → 每檔一次 Git；mixed parts/class/reject；cap 50；noop idempotent；needsConfirm skip |
+| `.38` 待上傳佇列 backdrop | 「待上傳審批佇列」panel 點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`（與 hub／其他 modal 一致；Esc／×／關閉仍可用） |
 
 ## 待辦
 

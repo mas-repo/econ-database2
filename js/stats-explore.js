@@ -374,7 +374,7 @@
         // this overlay or the crosstab path runs.
 
         detailOverlay.addEventListener('click', function (event) {
-            if (event.target === detailOverlay) {
+            if (event.target === detailOverlay && shouldCloseOnBackdropClick()) {
                 closeStatsDetailModal();
                 return;
             }
