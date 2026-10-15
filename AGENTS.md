@@ -41,6 +41,7 @@
 | [`js/github-sync.kb.md`](js/github-sync.kb.md) | 題庫 load／save、shards、dirty upload、schemaVersion |
 | [`js/ai-explanation.kb.md`](js/ai-explanation.kb.md) | AI解釋 side-file；`accessRights.ai`；Poe proxy |
 | [`js/storage-core.kb.md`](js/storage-core.kb.md) | IndexedDB 本地鏡像 vs GitHub 真相來源 |
+| [`js/stats-explore.kb.md`](js/stats-explore.kb.md) | 統計 tab（一維瀏覽／交叉分析）、詳細統計 modal；點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`（.38） |
 | [`apps-script/AGENTS.md`](apps-script/AGENTS.md) | Apps Script 目錄入口 |
 | [`apps-script/Code.kb.md`](apps-script/Code.kb.md) | staging／approve、clasp deploy |
 
