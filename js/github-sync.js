@@ -548,14 +548,22 @@ async function downloadQuestionsFromGit(options) {
         try {
             var importedPayload = null;
             var data = null;
-            if (typeof fetchSharedJsonDirectOrProxy === 'function') {
+            // D2 shards-only: prefer fetchSharedQuestionBank (merge HKEAA[+雅集]).
+            // On failure, Apps Script syncDataDownload is also shards-only (no combined).
+            if (typeof fetchSharedQuestionBank === 'function') {
                 try {
-                    var direct = await fetchSharedJsonDirectOrProxy('data/database.json', 180000);
-                    if (direct && direct.data) {
-                        importedPayload = direct.data;
-                        data = { ok: true, data: direct.data, sha: direct.sha || '' };
+                    importedPayload = await fetchSharedQuestionBank();
+                    if (importedPayload) {
+                        data = {
+                            ok: true,
+                            data: importedPayload,
+                            sha: '',
+                            schemaVersion: (typeof readSchemaVersion === 'function')
+                                ? readSchemaVersion(importedPayload)
+                                : 0
+                        };
                     }
-                } catch (directErr) {
+                } catch (shardErr) {
                     importedPayload = null;
                 }
             }
