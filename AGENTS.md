@@ -39,6 +39,7 @@
 | [`js/report-issue.kb.md`](js/report-issue.kb.md) | 回饋／回報 hub：local-first；關窗立即 hide + 背景 flush（.36）；批次 validate-then-commit flush（.37）；題目卡 ✓／✕（.30）+ 提案預覽（.33）；外層跟「自動同步」`readAutoSync`／chip（.31）；flush 跳過失敗＋`console.error`（.34）；待上傳佇列檢視／撤銷（.35） |
 | [`js/filters.kb.md`](js/filters.kb.md) | 題目篩選；特徵 vs admin「空白／缺漏」（含有未審批事項）；考生表現 |
 | [`js/github-sync.kb.md`](js/github-sync.kb.md) | 題庫 load／save、shards、dirty upload、schemaVersion |
+| [`js/shared-assets.kb.md`](js/shared-assets.kb.md) | 短命 read token、共用資產讀取、shards-only bank load（D2）、combined diagnostic helper |
 | [`js/ai-explanation.kb.md`](js/ai-explanation.kb.md) | AI解釋 side-file；`accessRights.ai`；Poe proxy |
 | [`js/storage-core.kb.md`](js/storage-core.kb.md) | IndexedDB 本地鏡像 vs GitHub 真相來源 |
 | [`js/stats-explore.kb.md`](js/stats-explore.kb.md) | 統計 tab（一維瀏覽／交叉分析）、詳細統計 modal；點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`（.38） |
@@ -76,6 +77,7 @@
 | UI「考生表現」 | 原「分題表現」改名；storage keys 不變（`partPerformance`） |
 | Approve unlock | Hub：pendingOps＋關窗立即 hide＋背景 flush（.36）；`.37` `flushStagingApprovals` 批次寫入。題目 tab：跟 `readAutoSync` 即時 flush 或留 queue＋「立即上傳」chip；`beforeunload` 有 pending 時 |
 | HKEAA vs 雅集 | 可分屬不同 shard 檔 |
+| D2 load | shards-only（無 silent combined fallback）；combined 僅 dual-write／診斷至 D10 |
 | PR 流程 | OutliersEcon 推 branch；mas-repo merge |
 
 ## 建議閱讀順序（新 chat）
@@ -87,4 +89,4 @@
 
 ## 待補知識檔（尚未 colocate）
 
-`js/stats-filters.js`、`js/poe-generate-*.js`、`js/forms.js`／`bulk-edit.js`、`js/data-checks.js`、`js/shared-assets.js` 等 — 改到時再補 `.kb.md`。
+`js/stats-filters.js`、`js/poe-generate-*.js`、`js/forms.js`／`bulk-edit.js`、`js/data-checks.js` 等 — 改到時再補 `.kb.md`。
