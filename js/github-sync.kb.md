@@ -16,9 +16,8 @@ flowchart TD
   Rights -->|否| HOnly[只抓 database-hkeaa.json]
   Both --> OK{成功?}
   HOnly --> OK
-  OK -->|否| Combined[fallback database.json<br/>+ mock strip]
+  OK -->|否| Err[顯示錯誤／不寫入<br/>無 combined silent fallback]
   OK -->|是| IDB[寫入 IndexedDB]
-  Combined --> IDB
 ```
 
 - 真相來源：私有 repo **econ-database-data** 的 `shared/data/…`  
@@ -53,19 +52,20 @@ flowchart TD
 
 | 方向 | 說明 |
 | --- | --- |
-| Phase 2 merge-on-load | 有 shard 時優先分片讀；失敗才 combined |
+| Phase 2 merge-on-load | 分片讀（mock 雙 shard；否則 HKEAA） |
+| D2 shards-only download | 取消 silent combined fallback；`downloadQuestionsFromGit`／`syncDataDownload` 走 shards |
 | Phase 3 dirty-shard | 只上傳變更分片 + dual-write combined |
 | 未知 publisher 硬拒 | 避免靜默寫錯分片 |
 
 ## 待辦
 
-- [ ] Download 路徑與 auto-sync 是否永遠走 merge-on-load（對照 `downloadQuestionsFromGit` 實作；若仍有 combined-only 分支標「待核實」）  
+- [x] D2：Download／`syncDataDownload` 改 shards-only（無 combined silent fallback）  
 - [ ] 上傳進度 UI／可取消
 
 ## 文字版 E2E 測試描述
 
 1. mockTests 使用者載入後應同時有 HKEAA + 雅集題（若雲端雙 shard 存在）。  
-2. 無 mockTests：不應出現 mock／雅集限定列（HKEAA-only 或 strip）。  
+2. 無 mockTests：只載入 HKEAA shard（不下載 aristo；不 fallback combined）。  
 3. 只改 HKEAA 題後上傳：應更新 `database-hkeaa.json`（若 dirty）且 **不** 用空檔蓋 `database-aristo.json`。  
 4. 故意把某題 `publisher` 改成未知字串 → 上傳應失敗並提示。  
 5. 用舊前端（較低 `SCHEMA_VERSION`）對新 bank 上傳 → 應被 schema gate 擋住。

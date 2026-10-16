@@ -28,7 +28,8 @@
  * paths under the shared prefix — data/database-hkeaa.json, data/database-aristo.json,
  * and combined data/database.json (GITHUB_DATA_PATH). Legacy body.data still
  * writes combined only. Empty shard payloads are refused (no silent wipe).
- * syncDataDownload still returns the combined file.
+ * syncDataDownload (D2) returns shards merge: mockTests → hkeaa+aristo;
+ * otherwise HKEAA only. No silent fallback to combined database.json.
  * Username is required for auth only and must not appear in the bank path.
  * Bank paths under users/ are rejected.
  * Admin data-checks (ken only, githubSync) use a sibling shared file:
@@ -69,7 +70,8 @@
  * diagrams/…, originals/…, or papers/….
  * Publisher shards (hkeaa / aristo) are readable the same way as database.json
  * for known users; database-aristo.json is mockTests-only (sharedMockOnly_).
- * Client load merges shards when present (fallback: combined + strip).
+ * Client load (D2) is shards-only (mock merges both; else HKEAA);
+ * no silent combined fallback. Combined remains for dual-write / schema peek (D4).
  * Upload (Phase 3) writes dirty publisher shards + combined dual-write.
  * Approve bank patches resolve questionId into the owning shard and update combined.
  * The script reads <prefix>/<relative path> and will not read users/.
@@ -6735,20 +6737,66 @@ function handleGitUpload_(body) {
 }
 
 // Shared question-bank download for githubSync users (Apps Script body path).
+// D2 shards-only download: mockTests merges hkeaa+aristo; otherwise HKEAA only.
+// Missing / unreadable shard → error (no silent combined database.json fallback).
 function handleGitDownload_(body) {
   var username = normalizeUsername_(body.username);
-  if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
+  var rights = username ? lookupRights_(username) : null;
+  if (!username || !rights || !rights.githubSync) return gitClientError_('feature_unavailable');
   var cfg = githubConfig_();
   if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
-  var dataPath = githubSharedBankPath_(cfg);
-  if (!dataPath) return gitClientError_('github_error');
+  var hkeaaPath = githubSharedBankShardPath_(cfg, 'hkeaa');
+  if (!hkeaaPath) return gitClientError_('github_error');
   try {
-    var read = githubReadText_(cfg, dataPath);
+    var hkeaa = tryReadBankFile_(cfg, hkeaaPath);
+    if (!hkeaa || !hkeaa.bank || !Array.isArray(hkeaa.bank.questions)) {
+      writeLog_({
+        username: username,
+        action: 'syncDataDownload',
+        success: false,
+        metadata: { error: 'github_not_found', shard: 'hkeaa' }
+      }, true);
+      return gitClientError_('github_not_found');
+    }
     var parsed;
-    try {
-      parsed = JSON.parse(read.text);
-    } catch (ignore) {
-      return gitClientError_('github_error');
+    var sha;
+    var pathMeta;
+    var bytesApprox = 0;
+    if (rights.mockTests === true) {
+      var aristoPath = githubSharedBankShardPath_(cfg, 'aristo');
+      if (!aristoPath) return gitClientError_('github_error');
+      var aristo = tryReadBankFile_(cfg, aristoPath);
+      if (!aristo || !aristo.bank || !Array.isArray(aristo.bank.questions)) {
+        writeLog_({
+          username: username,
+          action: 'syncDataDownload',
+          success: false,
+          metadata: { error: 'github_not_found', shard: 'aristo' }
+        }, true);
+        return gitClientError_('github_not_found');
+      }
+      var questions = hkeaa.bank.questions.concat(aristo.bank.questions);
+      parsed = {};
+      var baseKeys = Object.keys(hkeaa.bank);
+      for (var bi = 0; bi < baseKeys.length; bi++) {
+        var bk = baseKeys[bi];
+        if (bk === 'questions' || bk === 'questionCount') continue;
+        parsed[bk] = hkeaa.bank[bk];
+      }
+      parsed.questions = questions;
+      parsed.questionCount = questions.length;
+      parsed.schemaVersion = Math.max(
+        readBankSchemaVersion_(hkeaa.bank),
+        readBankSchemaVersion_(aristo.bank)
+      );
+      sha = hkeaa.sha || aristo.sha || '';
+      pathMeta = 'data/database-hkeaa.json+data/database-aristo.json';
+      bytesApprox = JSON.stringify(parsed).length;
+    } else {
+      parsed = hkeaa.bank;
+      sha = hkeaa.sha || '';
+      pathMeta = 'data/database-hkeaa.json';
+      bytesApprox = JSON.stringify(parsed).length;
     }
     if (!parsed || typeof parsed !== 'object') return gitClientError_('github_error');
     writeLog_({
@@ -6756,13 +6804,14 @@ function handleGitDownload_(body) {
       action: 'syncDataDownload',
       success: true,
       metadata: {
-        bytes: String(read.text || '').length,
-        schemaVersion: readBankSchemaVersion_(parsed)
+        bytes: bytesApprox,
+        schemaVersion: readBankSchemaVersion_(parsed),
+        shards: pathMeta
       }
     }, true);
     return gitOk_({
-      sha: read.sha,
-      path: dataPath,
+      sha: sha,
+      path: pathMeta,
       data: parsed,
       schemaVersion: readBankSchemaVersion_(parsed)
     });
@@ -8141,9 +8190,9 @@ function githubUserSegment_(username) {
 }
 
 // Shared combined question-bank path (GITHUB_DATA_PATH under shared prefix).
-// syncDataDownload always uses this combined path.
-// syncDataUpload Phase 3 also writes allowlisted shard paths via body.files;
-// this helper remains the combined-path resolver (and legacy single-file target).
+// D2: syncDataDownload uses publisher shards (see handleGitDownload_); this
+// helper remains the combined-path resolver for dual-write / schema peek / approve.
+// syncDataUpload Phase 3 also writes allowlisted shard paths via body.files.
 // If dataPath already starts with the shared prefix, do not double-prefix.
 // Rejects any bank path under users/. Username is never part of this path.
 function githubSharedBankPath_(cfg) {

@@ -374,7 +374,9 @@ async function fetchSharedAssetDirectOrProxy(rel, timeoutMs) {
 }
 
 // Publisher shards in the private data repo.
-// Phase 2 load: mock merges both shards; non-mock loads HKEAA only; fallback combined.
+// Phase 2 load (D2 shards-only): mock merges both shards; non-mock loads HKEAA only.
+// Failures propagate — no silent combined database.json fallback (admin diagnostic
+// helper may still read combined; see fetchSharedQuestionBankCombinedFallback).
 // Phase 3 upload: partition by exact publisher, write only dirty shards (+ combined
 // dual-write when any shard is dirty). Unknown / empty / "-" publishers are rejected.
 // Safety: never upload an empty shard over cloud (skip absent publishers entirely).
@@ -504,28 +506,21 @@ async function parseSharedBankAsset(rel) {
     }
 }
 
+// Admin / diagnostic only (D2). Not called automatically by fetchSharedQuestionBank.
+// Kept until D10 (combined shadow retired). Do not wire as silent load fallback.
 async function fetchSharedQuestionBankCombinedFallback() {
     return parseSharedBankAsset(SHARED_BANK_COMBINED_REL);
 }
 
 async function fetchSharedQuestionBank() {
-    // mockTests: HKEAA shard then 雅集 shard, concat, questionCount = sum.
-    // without mockTests: HKEAA only (do not download 雅集).
-    // any shard failure → combined database.json + existing strip behavior.
-    try {
-        if (sharedBankHasMockAccess()) {
-            var hkeaa = await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
-            var aristo = await parseSharedBankAsset(SHARED_BANK_ARISTO_REL);
-            return mergeSharedBankShards(hkeaa, aristo);
-        }
-        return await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
-    } catch (shardErr) {
-        try {
-            return await fetchSharedQuestionBankCombinedFallback();
-        } catch (fallbackErr) {
-            throw shardErr && shardErr.code ? shardErr : fallbackErr;
-        }
+    // D2 shards-only: mockTests merges HKEAA + 雅集; otherwise HKEAA only.
+    // Shard read/parse failures propagate — no silent combined fallback.
+    if (sharedBankHasMockAccess()) {
+        var hkeaa = await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
+        var aristo = await parseSharedBankAsset(SHARED_BANK_ARISTO_REL);
+        return mergeSharedBankShards(hkeaa, aristo);
     }
+    return await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
 }
 
 async function fetchSharedJsonDirectOrProxy(rel, timeoutMs) {

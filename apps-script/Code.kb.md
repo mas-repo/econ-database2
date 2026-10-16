@@ -39,6 +39,7 @@ sequenceDiagram
 | 分類直寫 bank | **禁止**；staging 檔 | 人審閘門；可軟暫停 |
 | Soft pause | ≥**200** pending 仍接受 | 不堵 agent；提醒協調者 |
 | 大檔讀取 | 短命 read token + 直打 GitHub | 避開 Apps Script 回傳體積／逾時 |
+| syncDataDownload（D2） | **shards-only** merge（mock→hkeaa+aristo；否則 hkeaa） | 取消 silent combined fallback |
 | 寫入 | 一律 Apps Script + `GITHUB_TOKEN` | 前端永不持寫入 PAT |
 | Hub flush 批次（.37） | `flushStagingApprovals` 一鎖驗證後寫 | 避免 N 次 commit／半寫 bank；rate limit 以整批計 |
 | 單檔 Code.gs | 維持單檔 + 地圖註解 | 部署簡單；用 banner 導航 |
@@ -60,6 +61,7 @@ sequenceDiagram
 | Approve 多分欄／blank-only | 與前端 hub 對齊 |
 | Shard-aware bank patch | 與 Phase 3 上傳模型一致 |
 | flushStagingApprovals | validate-all；ok 一次寫 bank／proposals；cap 50 |
+| D2 shards-only download | `handleGitDownload_` 讀 publisher shards 再 merge；缺 shard 回錯誤 |
 
 ## 待辦
 
