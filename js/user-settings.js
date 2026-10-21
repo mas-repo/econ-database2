@@ -50,7 +50,7 @@
             },
             ai: {
                 // System defaults for new / empty prefs (UI label「詳盡」= detailed).
-                defaultModel: 'GPT-6.1-Sol',
+                defaultModel: 'Claude-Sonnet-5.5',
                 provider: 'poe',
                 explainStyle: 'detailed',
                 showQuickPrompts: true
@@ -235,7 +235,7 @@
         if (!String(base.ai.defaultModel || '').trim()) {
             base.ai.defaultModel = base.ai.provider === 'openrouter'
                 ? (global.PoeGenerate && PoeGenerate.OPENROUTER_DEFAULT_MODEL) || 'openai/gpt-4o-mini'
-                : 'GPT-6.1-Sol';
+                : 'Claude-Sonnet-5.5';
         }
         if (base.ui.defaultTab !== 'stats') base.ui.defaultTab = 'questions';
         // Missing / non-false → ON (current backdrop-click-to-close behaviour).
@@ -606,7 +606,7 @@
         // Fallback if Poe helpers are unavailable: keep a minimal known list.
         var list = provider === 'openrouter'
             ? ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-sonnet-4']
-            : ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'Gemini-4-Argon', 'GLM-5.3-flash', 'GLM-5.3'];
+            : ['Claude-Opus-4.8', 'Claude-Sonnet-5.5', 'Grok-4.7', 'Gemini-3.8-Flash', 'MiniMax-M3', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'GPT-5.4'];
         var selected = String(selectedModel || '').trim() || list[0];
         selectEl.textContent = '';
         var seen = false;
@@ -681,7 +681,7 @@
         setVal('us-lang', s.display.lang);
         setVal('us-qa-default', s.display.questionsExpandedByDefault ? 'expanded' : 'collapsed');
         setVal('us-ai-provider', s.ai.provider || 'poe');
-        fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || 'GPT-6.1-Sol');
+        fillUsAiModelControls(s.ai.provider || 'poe', s.ai.defaultModel || 'Claude-Sonnet-5.5');
         setVal('us-ai-explain', s.ai.explainStyle === 'short' ? 'short' : 'detailed');
         setCheck('us-ai-quick-prompts', s.ai.showQuickPrompts !== false);
         var aiAllowed = hasAiAccess();
