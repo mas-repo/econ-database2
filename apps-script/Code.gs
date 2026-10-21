@@ -194,7 +194,7 @@ var POE_MODEL_MAX_ = 120;
 // Dropdown presets for Poe (keep in sync with POE_MODELS in js/poe-generate-state.js).
 // Clients may also send a sanitized free-text Poe bot id (isAllowedPoeModelId_).
 // OpenRouter accepts free-text ids (validated by isAllowedOpenRouterModel_).
-var POE_ALLOWED_MODELS_ = ['Claude-Sonnet-5.5', 'GPT-6.1-Sol', 'Gemini-3.8-Flash', 'Gemini-4-Argon', 'GLM-5.3-flash', 'GLM-5.3'];
+var POE_ALLOWED_MODELS_ = ['Claude-Opus-4.8', 'Claude-Sonnet-5.5', 'Grok-4.7', 'Gemini-3.8-Flash', 'MiniMax-M3', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'GPT-5.4'];
 // Ids and display names only. Prompts stay in POE_GENERATION_MODES on the client
 // and arrive as `instruction`. Keep ids and names in sync with that object.
 var POE_MODE_NAMES_ = {
@@ -6104,7 +6104,7 @@ function selfTestPromptShape() {
   if (singleBuilt.indexOf('測試題幹') === -1 || singleBuilt.indexOf('測試答案A') === -1) throw new Error('single_missing_qa');
   if (singleBuilt.indexOf('只附上使用者指定的一題') === -1) throw new Error('single_prompt_frame');
   if (singleBuilt.indexOf('答案：') === -1) throw new Error('single_answer_label');
-  if (resolveModel_('GPT-6.1-Sol', 'poe') !== 'GPT-6.1-Sol') throw new Error('model_allow');
+  if (resolveModel_('Claude-Opus-4.8', 'poe') !== 'Claude-Opus-4.8') throw new Error('model_allow');
   if (resolveModel_('  Gemini-3.8-Flash ', 'poe') !== 'Gemini-3.8-Flash') throw new Error('model_trim');
   if (resolveModel_('Claude-Sonnet-4.6', 'poe') !== 'Claude-Sonnet-4.6') throw new Error('model_custom_allow');
   if (resolveModel_('bad model!!', 'poe') !== POE_DEFAULT_MODEL_) throw new Error('model_reject');
