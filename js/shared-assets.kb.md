@@ -36,7 +36,8 @@ flowchart TD
 ```
 
 - `downloadQuestionsFromGit`／`syncDataDownload` 偏好呼叫本函式（見 [`github-sync.kb.md`](github-sync.kb.md)）。
-- `fetchSharedQuestionBankCombinedFallback`：**admin／診斷 only**（至 D10）；**勿**再接回 silent load fallback。
+- `data/database.json` 在讀取閘門直接拒絕。沒有 combined diagnostic helper。
+- mock 同時讀到兩片時，`schemaVersion` 必須相同，否則 `schema_inconsistent`。
 
 ### 路徑閘門
 
@@ -55,8 +56,8 @@ flowchart TD
 | 選項 | 選擇 | 原因 |
 | --- | --- | --- |
 | 大檔經 Apps Script echo | **否**（優先短命 read token 直連 GitHub） | 避開 googleusercontent 體積／逾時 |
-| Bank load 失敗時 silent `database.json` | **否**（D2） | 失敗要可見；combined 僅 dual-write／診斷至 D10 |
-| Combined helper 保留 | `fetchSharedQuestionBankCombinedFallback` 顯式、非自動 | 給 admin 對帳；勿當預設路徑 |
+| Bank load 失敗時 silent `database.json` | **否** | 失敗要可見；合併檔已停用 |
+| 對帳 | `reconcileBankShards`（Apps Script，見 github-sync） | 不靠 combined 對題數／schema／id |
 | 未知 publisher 分片 | `unknown` 桶；上傳硬拒 | 防靜默寫錯 shard（見 github-sync） |
 | 寫 token 放前端 | **否** | 突變只經 Apps Script |
 
@@ -66,12 +67,13 @@ flowchart TD
 | --- | --- |
 | 短命 read token | `issueSharedReadToken` → Contents／blob；失敗才 `fetchSharedAsset` |
 | Phase 2 merge-on-load | mock 雙 shard；否則 HKEAA |
-| D2 shards-only download（PR #89） | 取消 silent combined fallback；診斷 helper 獨立保留 |
+| D2 shards-only download（PR #89） | 取消 silent combined fallback |
+| D4／D10 | 拿掉 combined 讀取與 diagnostic helper；兩片 schema 不一致即失敗 |
 | Phase 3 helpers colocated | partition／fingerprint 在此；寫入流程在 github-sync |
 
 ## 待辦
 
-- [ ] D10：確認無外部依賴後停寫／退役 combined shadow（診斷 helper 一併收）
+- [x] D10：combined 不再是讀取路徑；diagnostic helper 已移除
 - [ ] 上傳進度 UI（屬 github-sync；本檔不負責）
 
 ## 文字版 E2E 測試描述
@@ -80,4 +82,4 @@ flowchart TD
 2. mockTests 使用者：`fetchSharedQuestionBank` 應同時有 HKEAA + 雅集題。  
 3. 無 mockTests：只載入 HKEAA；請求 `database-aristo.json`／`diagrams/…` 應被拒。  
 4. 故意令某 shard 404／壞 JSON：load 應失敗並顯示錯誤，**不**默默改讀 `database.json`。  
-5. Admin 手動呼叫 `fetchSharedQuestionBankCombinedFallback` 仍可讀 combined（診斷）；一般 load 路徑不應呼叫它。
+5. 請求 `data/database.json` 應被拒。一般 load 不應出現該路徑。

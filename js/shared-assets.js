@@ -29,6 +29,8 @@ var SHARED_ERROR_TEXT = {
     github_not_found: '共用題庫尚未上傳',
     github_error: '共用題庫讀取失敗',
     bad_request: '檔案路徑不正確',
+    shards_missing: '雲端出版社分片缺失或不完整',
+    schema_inconsistent: '分片 schemaVersion 不一致',
     payload_too_large: '檔案太大，無法經由網站讀取',
     rate_limited: '讀取太頻繁，請稍後再試',
     network: '無法連線到題庫服務',
@@ -75,27 +77,6 @@ function sharedMockOnlyPath(rel) {
     return false;
 }
 
-function sharedIsMockQuestion(question) {
-    if (!question || typeof question !== 'object') return false;
-    var id = String(question.id || '');
-    if (/^MT?\d/i.test(id)) return true;
-    var publisher = String(question.publisher || '');
-    return publisher !== '' && publisher !== 'HKEAA' && publisher !== '-';
-}
-
-function sharedStripMockQuestions(payload) {
-    if (!payload || typeof payload !== 'object') return payload;
-    if (Array.isArray(payload)) {
-        return payload.filter(function (item) { return !sharedIsMockQuestion(item); });
-    }
-    var list = Array.isArray(payload.questions) ? payload.questions : null;
-    if (!list) return payload;
-    var kept = list.filter(function (item) { return !sharedIsMockQuestion(item); });
-    payload.questions = kept;
-    if (typeof payload.questionCount === 'number') payload.questionCount = kept.length;
-    return payload;
-}
-
 function sharedExt(path) {
     var file = String(path || '').split('/').pop() || '';
     var dot = file.lastIndexOf('.');
@@ -129,8 +110,9 @@ function sharedMediaType(ext) {
 
 function sharedAssetFailure(data) {
     var code = data && data.error ? data.error : 'github_error';
-    var error = new Error(sharedErrorMessage(code));
-    error.code = SHARED_ERROR_TEXT[code] ? code : 'github_error';
+    var known = SHARED_ERROR_TEXT[code] ? code : 'github_error';
+    var error = new Error((data && data.message) || sharedErrorMessage(known));
+    error.code = known;
     return error;
 }
 
@@ -344,6 +326,12 @@ function sharedPathAllowedForSession(session, rel) {
 }
 
 async function fetchSharedAssetDirectOrProxy(rel, timeoutMs) {
+    if (rel === 'data/database.json') {
+        throw sharedAssetFailure({
+            error: 'bad_request',
+            message: '合併題庫 data/database.json 已停用。請改讀出版社分片。'
+        });
+    }
     if (!sharedAssetPathOk(rel) && rel !== 'data/data-checks.json') {
         throw sharedAssetFailure({ error: 'bad_request' });
     }
@@ -353,16 +341,6 @@ async function fetchSharedAssetDirectOrProxy(rel, timeoutMs) {
             throw sharedAssetFailure({ error: 'feature_unavailable' });
         }
         var direct = await githubReadSharedFile(session, rel, timeoutMs);
-        if (rel === 'data/database.json' && !session.mockTests && direct.encoding === 'utf8') {
-            try {
-                var parsed = JSON.parse(direct.content);
-                parsed = sharedStripMockQuestions(parsed);
-                direct.content = JSON.stringify(parsed);
-                direct.bytes = direct.content.length;
-            } catch (stripErr) {
-                throw sharedAssetFailure({ error: 'github_error' });
-            }
-        }
         return direct;
     } catch (error) {
         if (error && error.code === 'feature_unavailable') throw error;
@@ -374,13 +352,12 @@ async function fetchSharedAssetDirectOrProxy(rel, timeoutMs) {
 }
 
 // Publisher shards in the private data repo.
-// Phase 2 load (D2 shards-only): mock merges both shards; non-mock loads HKEAA only.
-// Failures propagate — no silent combined database.json fallback (admin diagnostic
-// helper may still read combined; see fetchSharedQuestionBankCombinedFallback).
-// Phase 3 upload: partition by exact publisher, write only dirty shards (+ combined
-// dual-write when any shard is dirty). Unknown / empty / "-" publishers are rejected.
+// Load (D2/D10 shards-only): mock merges both shards; non-mock loads HKEAA only.
+// Schema gate (D4) reads those shards. Missing shard or unequal schemaVersion fails
+// clearly. Combined data/database.json is obsolete and is not a fallback.
+// Upload (D5): partition by exact publisher, write only dirty shards.
+// Unknown / empty / "-" publishers are rejected.
 // Safety: never upload an empty shard over cloud (skip absent publishers entirely).
-var SHARED_BANK_COMBINED_REL = 'data/database.json';
 var SHARED_BANK_HKEAA_REL = 'data/database-hkeaa.json';
 var SHARED_BANK_ARISTO_REL = 'data/database-aristo.json';
 var SHARED_BANK_PUBLISHER_HKEAA = 'HKEAA';
@@ -397,8 +374,46 @@ function sharedBankPublisherShardKey(publisher) {
 function sharedBankShardRelPath(key) {
     if (key === 'hkeaa') return SHARED_BANK_HKEAA_REL;
     if (key === 'aristo') return SHARED_BANK_ARISTO_REL;
-    if (key === 'combined') return SHARED_BANK_COMBINED_REL;
     return '';
+}
+
+// Both payloads required. schemaVersion must match. Never consult combined.
+function sharedBankSchemaPairStatus(hkeaaPayload, aristoPayload) {
+    function versionOf(payload) {
+        if (typeof readSchemaVersion === 'function') return readSchemaVersion(payload);
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 0;
+        var n = Number(payload.schemaVersion);
+        if (!isFinite(n) || n < 0) return 0;
+        return Math.floor(n);
+    }
+    if (hkeaaPayload == null) {
+        return {
+            ok: false,
+            code: 'shards_missing',
+            shard: 'hkeaa',
+            message: '雲端 HKEAA 分片缺失（data/database-hkeaa.json）。已停止，不會改讀合併題庫。'
+        };
+    }
+    if (aristoPayload == null) {
+        return {
+            ok: false,
+            code: 'shards_missing',
+            shard: 'aristo',
+            message: '雲端雅集分片缺失（data/database-aristo.json）。已停止，不會改讀合併題庫。'
+        };
+    }
+    var hv = versionOf(hkeaaPayload);
+    var av = versionOf(aristoPayload);
+    if (hv !== av) {
+        return {
+            ok: false,
+            code: 'schema_inconsistent',
+            hkeaa: hv,
+            aristo: av,
+            message: '分片 schemaVersion 不一致（HKEAA ' + hv + '／雅集 ' + av + '）。已停止，不會改讀合併題庫。'
+        };
+    }
+    return { ok: true, schemaVersion: hv };
 }
 
 // Partition export questions by exact publisher. Prefer reject unknowns over silent mis-shard.
@@ -506,21 +521,36 @@ async function parseSharedBankAsset(rel) {
     }
 }
 
-// Admin / diagnostic only (D2). Not called automatically by fetchSharedQuestionBank.
-// Kept until D10 (combined shadow retired). Do not wire as silent load fallback.
-async function fetchSharedQuestionBankCombinedFallback() {
-    return parseSharedBankAsset(SHARED_BANK_COMBINED_REL);
+async function parseRequiredSharedBankShard(rel, label) {
+    try {
+        return await parseSharedBankAsset(rel);
+    } catch (err) {
+        if (err && err.code === 'github_not_found') {
+            throw sharedAssetFailure({
+                error: 'shards_missing',
+                message: '雲端' + label + '分片缺失（' + rel + '）。已停止，不會改讀合併題庫。'
+            });
+        }
+        throw err;
+    }
 }
 
 async function fetchSharedQuestionBank() {
-    // D2 shards-only: mockTests merges HKEAA + 雅集; otherwise HKEAA only.
-    // Shard read/parse failures propagate — no silent combined fallback.
+    // Shards-only: mockTests merges HKEAA + 雅集; otherwise HKEAA only.
+    // Missing shard or (when both are read) unequal schemaVersion throws.
+    // No combined database.json fallback.
     if (sharedBankHasMockAccess()) {
-        var hkeaa = await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
-        var aristo = await parseSharedBankAsset(SHARED_BANK_ARISTO_REL);
-        return mergeSharedBankShards(hkeaa, aristo);
+        var hkeaa = await parseRequiredSharedBankShard(SHARED_BANK_HKEAA_REL, 'HKEAA');
+        var aristo = await parseRequiredSharedBankShard(SHARED_BANK_ARISTO_REL, '雅集');
+        var status = sharedBankSchemaPairStatus(hkeaa, aristo);
+        if (!status.ok) {
+            throw sharedAssetFailure({ error: status.code, message: status.message });
+        }
+        var merged = mergeSharedBankShards(hkeaa, aristo);
+        merged.schemaVersion = status.schemaVersion;
+        return merged;
     }
-    return await parseSharedBankAsset(SHARED_BANK_HKEAA_REL);
+    return await parseRequiredSharedBankShard(SHARED_BANK_HKEAA_REL, 'HKEAA');
 }
 
 async function fetchSharedJsonDirectOrProxy(rel, timeoutMs) {

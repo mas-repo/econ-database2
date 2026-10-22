@@ -19,10 +19,10 @@
 
 1. **分類欄位禁止直寫共用題庫**  
    `concepts`／`stemPatterns`／`patterns`／類型 scalars／chapters／curriculum／`questionParts` 等，**只** 走 staging：`submitClassificationProposal` → admin 審批。  
-   禁止 Python／腳本／Contents API 直接改 `database.json` 或 shards。詳見 [`docs/classification-proposals.md`](docs/classification-proposals.md)。
+   禁止 Python／腳本／Contents API 直接改出版社分片（`database-hkeaa.json`／`database-aristo.json`）。合併 `database.json` 已停用，不要重建。詳見 [`docs/classification-proposals.md`](docs/classification-proposals.md)。
 
-2. **Shard dual-write**  
-   上傳時依 `publisher`（`HKEAA`／`雅集出版社`）分片；dirty shard + 必要時 dual-write combined `database.json`。本地某出版社 0 列 → **跳過** 該 shard（勿用空檔覆蓋雲端）。詳見 [`js/github-sync.kb.md`](js/github-sync.kb.md)。
+2. **Shard-only 上傳**  
+   上傳時依 `publisher`（`HKEAA`／`雅集出版社`）只寫 dirty shard。本地某出版社 0 列 → **跳過** 該 shard（勿用空檔覆蓋雲端）。不寫 combined `database.json`。詳見 [`js/github-sync.kb.md`](js/github-sync.kb.md)。
 
 3. **軟暫停 ≥200 pending 分類提案**  
    `pendingCount >= 200` 時 intake **仍接受** 新 `questionId`；回傳 `paused:true` 僅提醒 backlog，不是硬拒絕。
@@ -39,7 +39,7 @@
 | [`js/report-issue.kb.md`](js/report-issue.kb.md) | 回饋／回報 hub：local-first；關窗立即 hide + 背景 flush（.36）；批次 validate-then-commit flush（.37）；題目卡 ✓／✕（.30）+ 提案預覽（.33）；外層跟「自動同步」`readAutoSync`／chip（.31）；flush 跳過失敗＋`console.error`（.34）；待上傳佇列檢視／撤銷（.35） |
 | [`js/filters.kb.md`](js/filters.kb.md) | 題目篩選；特徵 vs admin「空白／缺漏」（含有未審批事項）；考生表現 |
 | [`js/github-sync.kb.md`](js/github-sync.kb.md) | 題庫 load／save、shards、dirty upload、schemaVersion |
-| [`js/shared-assets.kb.md`](js/shared-assets.kb.md) | 短命 read token、共用資產讀取、shards-only bank load（D2）、combined diagnostic helper |
+| [`js/shared-assets.kb.md`](js/shared-assets.kb.md) | 短命 read token、共用資產讀取、shards-only bank load（combined 已停用） |
 | [`js/ai-explanation.kb.md`](js/ai-explanation.kb.md) | AI解釋 side-file；`accessRights.ai`；Poe proxy |
 | [`js/storage-core.kb.md`](js/storage-core.kb.md) | IndexedDB 本地鏡像 vs GitHub 真相來源 |
 | [`js/stats-explore.kb.md`](js/stats-explore.kb.md) | 統計 tab（一維瀏覽／交叉分析）、詳細統計 modal；點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`（.38） |
@@ -77,7 +77,7 @@
 | UI「考生表現」 | 原「分題表現」改名；storage keys 不變（`partPerformance`） |
 | Approve unlock | Hub：pendingOps＋關窗立即 hide＋背景 flush（.36）；`.37` `flushStagingApprovals` 批次寫入。題目 tab：跟 `readAutoSync` 即時 flush 或留 queue＋「立即上傳」chip；`beforeunload` 有 pending 時 |
 | HKEAA vs 雅集 | 可分屬不同 shard 檔 |
-| D2 load | shards-only（無 silent combined fallback）；combined 僅 dual-write／診斷至 D10 |
+| Bank I/O | shards-only。`database.json` 已停用（D4–D12）；schema／上傳／approve 都不讀寫它 |
 | PR 流程 | OutliersEcon 推 branch；mas-repo merge |
 
 ## 建議閱讀順序（新 chat）

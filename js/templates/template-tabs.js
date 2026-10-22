@@ -91,6 +91,7 @@ function renderTabContentsTemplate() {
                 </label>
                 <button type="button" class="btn btn-outline-primary" id="git-upload-btn">上傳到 GitHub</button>
                 <button type="button" class="btn btn-outline-primary" id="git-download-btn">從 GitHub 載入</button>
+                <button type="button" class="btn btn-outline-primary" id="git-reconcile-btn" title="比對 HKEAA 與雅集分片的題數、schemaVersion、id 重疊。不讀合併 database.json。">對帳分片</button>
                 <span id="git-sync-status" class="git-sync-status" aria-live="polite"></span>
             </div>
         </div>

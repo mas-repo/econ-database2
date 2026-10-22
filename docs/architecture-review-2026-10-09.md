@@ -1,5 +1,9 @@
 # Architecture review — econ-database2 (2026-10-09)
 
+> **2026-10-22：** 題庫正常讀寫已改為出版社分片（`database-hkeaa.json`／`database-aristo.json`）。下文若把 `shared/data/database.json` 寫成現行題庫路徑，那是當時快照。合併檔已停用。
+
+
+
 Scope: `mas-repo/econ-database2` **main** after PR #12, plus coupling notes for Apps Script and the private data repo (`mas-repo/econ-database-data`).
 
 **Constraint of this review:** recommendations only. No user-visible feature, layout, wording, or CSS behavior changes are proposed as “do now” unless marked **safe no-UX**. When a change might affect filter counts, Escape handling, or deploy gates, it stays **recommendation / care**.

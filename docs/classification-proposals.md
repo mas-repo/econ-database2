@@ -84,7 +84,7 @@ Admin → **回饋／回報 → 分類審批**:
 - Partial approve/reject leaves remaining fields on the staging row until all are decided.
 - Always-eligible overwrite confirm when a targeted approve field is already non-empty **or** `reviewedByAI === 'Y'` (`confirmOverwrite: true`).
 - Blank-only: UI + server enforce empty-only; no overwrite path.
-- Approve bank writes are **shard-aware** (same dual-write as 分題審批: HKEAA / 雅集 shards + combined).
+- Approve bank writes patch the **owning publisher shard only**. Combined `database.json` is obsolete and is not written.
 - Warning banner when pending ≥ 200 (intake still open).
 
 ## Redeploy

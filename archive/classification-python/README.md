@@ -2,7 +2,7 @@
 
 **Status:** retired as day-to-day entry points (2026-10-13).
 
-Do **not** run these (or any local batch) to write `concepts` / `stemPatterns` into `database.json` / publisher shards. The only production write path is:
+Do **not** run these (or any local batch) to write `concepts` / `stemPatterns` into publisher shards. Combined `shared/data/database.json` is obsolete — do not restore a script that reads or writes it. The only production write path is:
 
 **分類專員 → staging (`submitClassificationProposal`) → 審批與回報 → 分類審批**
 
@@ -42,4 +42,4 @@ Duplicate write paths that patched the shared bank from Python raced with admin 
 
 ## Residual risk
 
-Agents with a GitHub PAT to **econ-database-data** can still edit `database.json` / shards outside the app. Policy and docs forbid that for classification; there is no code lock in this public repo against a direct Contents API write. Prefer `submitClassificationProposal` (or a PR only to `classification-proposals.json`).
+Agents with a GitHub PAT to **econ-database-data** can still edit publisher shards outside the app. Policy and docs forbid that for classification; there is no code lock in this public repo against a direct Contents API write. Prefer `submitClassificationProposal` (or a PR only to `classification-proposals.json`). Do not recreate `shared/data/database.json`.

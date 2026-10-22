@@ -26,6 +26,9 @@ var GIT_ERROR_TEXT = {
     schema_too_new: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
     schema_version_stale: '共用題庫是由較新版本寫入的，請先更新網頁再上傳',
     schema_unreadable: '無法安全載入較新格式的題庫，請先更新網頁',
+    schema_inconsistent: '分片 schemaVersion 不一致，已停止同步',
+    shards_missing: '雲端出版社分片缺失或不完整，已停止同步',
+    combined_retired: '合併題庫 database.json 已停用',
     validation_failed: '上傳已拒絕：題目欄位驗證失敗',
     unknown_publisher: '上傳已拒絕：有題目的出版社不是 HKEAA 或 雅集出版社',
     empty_shard_refused: '上傳已拒絕：不可覆寫空白分片（請確認 wipe）',
@@ -86,6 +89,11 @@ function gitFailureText(error) {
     if (error && error.code === 'empty_shard_refused') {
         return error.message || GIT_ERROR_TEXT.empty_shard_refused;
     }
+    if (error && (error.code === 'schema_inconsistent' || error.code === 'shards_missing' || error.code === 'combined_retired')) {
+        return (error.message && String(error.message).indexOf('token') === -1)
+            ? String(error.message)
+            : GIT_ERROR_TEXT[error.code];
+    }
     if (error && error.code && GIT_ERROR_TEXT[error.code]) return GIT_ERROR_TEXT[error.code];
     var message = error && error.message ? String(error.message) : '';
     if (message && message.length <= 80 && message.indexOf('token') === -1 && message.indexOf('github.com') === -1) {
@@ -94,30 +102,42 @@ function gitFailureText(error) {
     return gitErrorMessage(error && error.code ? error.code : 'network');
 }
 
-// Read the shared bank for schemaVersion only (full JSON). Missing file → null.
-async function peekCloudQuestionBankForSchema() {
-    if (typeof fetchSharedJsonDirectOrProxy === 'function') {
-        try {
-            var direct = await fetchSharedJsonDirectOrProxy('data/database.json', 180000);
-            if (direct && direct.data) return direct.data;
-        } catch (directErr) {
-            var directCode = directErr && directErr.code ? String(directErr.code) : '';
-            if (directCode === 'github_not_found') return null;
-            // Fall through to admin syncDataDownload when direct read fails.
-        }
+// Schema gate reads publisher shards only. Missing required shard or unequal
+// schemaVersion throws. Combined database.json is never consulted.
+async function readCloudShardStrict(rel, label) {
+    if (typeof fetchSharedJsonDirectOrProxy !== 'function') {
+        var unavailable = new Error('無法讀取雲端' + label + '分片。已停止，不會改讀合併題庫。');
+        unavailable.code = 'shards_missing';
+        throw unavailable;
     }
-    var data = await gitProxyRequest({
-        action: 'syncDataDownload',
-        username: gitUsername()
-    }, 180000);
-    if (!data || data.ok !== true) {
-        var code = data && data.error ? String(data.error) : 'github_error';
-        if (code === 'github_not_found') return null;
-        var failed = new Error(code);
-        failed.code = code;
+    try {
+        var direct = await fetchSharedJsonDirectOrProxy(rel, 180000);
+        if (direct && direct.data) return direct.data;
+    } catch (err) {
+        var code = err && err.code ? String(err.code) : '';
+        if (code === 'github_not_found') {
+            var missing = new Error('雲端' + label + '分片缺失（' + rel + '）。已停止，不會改讀合併題庫。');
+            missing.code = 'shards_missing';
+            throw missing;
+        }
+        if (err && err.code) throw err;
+        var failed = new Error(code || 'github_error');
+        failed.code = code || 'github_error';
         throw failed;
     }
-    return data.data || null;
+    var empty = new Error('雲端' + label + '分片缺失（' + rel + '）。已停止，不會改讀合併題庫。');
+    empty.code = 'shards_missing';
+    throw empty;
+}
+
+function throwShardSchemaStatus(status) {
+    if (!status || status.ok) return;
+    var error = new Error(status.message || status.code || 'github_error');
+    error.code = status.code || 'github_error';
+    if (typeof status.hkeaa === 'number' || typeof status.aristo === 'number') {
+        error.cloudSchemaVersion = Math.max(Number(status.hkeaa) || 0, Number(status.aristo) || 0);
+    }
+    throw error;
 }
 
 function setGitStatus(text, kind) {
@@ -129,7 +149,7 @@ function setGitStatus(text, kind) {
 
 function setGitBusy(busy) {
     gitSyncState.busy = busy;
-    ['git-upload-btn', 'git-download-btn'].forEach(function (id) {
+    ['git-upload-btn', 'git-download-btn', 'git-reconcile-btn'].forEach(function (id) {
         var button = document.getElementById(id);
         if (button) button.disabled = busy;
     });
@@ -151,9 +171,9 @@ function parseGitProxyJson(text) {
 // A parsed JSON body (ok:true or ok:false) is never retried.
 var GIT_PROXY_RETRY_MAX = 3;
 var GIT_PROXY_RETRY_BASE_MS = 1200;
-// Bank upload (dirty shards + combined) can exceed 3 minutes for multi-MB JSON
-// through Apps Script → GitHub. Keep download peeks at 180s; uploads get 15 min
-// per file so one AbortController does not kill a still-running AS write.
+// Bank upload (dirty publisher shards only) can exceed 3 minutes for multi-MB JSON
+// through Apps Script → GitHub. Uploads get 15 min per file so one AbortController
+// does not kill a still-running AS write. Combined database.json is not written.
 var GIT_PROXY_UPLOAD_TIMEOUT_MS = 900000;
 
 function gitProxyError(code) {
@@ -291,26 +311,12 @@ function formatGitHubUploadLogTime(date) {
     }
 }
 
-// Phase 3 dirty-shard upload:
+// Dirty-shard upload (shards only):
 // 1) Partition IndexedDB by exact publisher (HKEAA / 雅集出版社); reject unknowns.
-// 2) Compare fingerprints (sorted ids + content) vs cloud shards; write only dirty.
-// 3) Safety: if local has zero rows for a publisher, skip that shard entirely
-//    (never upload an empty shard over cloud — protects non-mock HKEAA-only IndexedDB).
-// 4) When any shard is dirty, also dual-write combined database.json as
-//    (local present shards) ∪ (cloud shards for absent local publishers).
-async function peekCloudShardPayload(rel) {
-    if (typeof fetchSharedJsonDirectOrProxy !== 'function') return null;
-    try {
-        var direct = await fetchSharedJsonDirectOrProxy(rel, 180000);
-        if (direct && direct.data) return direct.data;
-    } catch (err) {
-        var code = err && err.code ? String(err.code) : '';
-        if (code === 'github_not_found') return null;
-        // Missing shard or read failure → treat as absent (force dirty if local present).
-        console.warn('[GitHub upload] peek shard failed for ' + rel + ': ' + code);
-    }
-    return null;
-}
+// 2) Schema gate reads publisher shards. Missing required shard, or unequal
+//    schemaVersion, fails clearly. Combined database.json is not read or written.
+// 3) Compare fingerprints vs those shards; write only dirty shards.
+// 4) Local zero rows for a publisher → skip that shard (never empty-wipe).
 
 async function uploadQuestionsToGit(options) {
     options = options || {};
@@ -328,11 +334,6 @@ async function uploadQuestionsToGit(options) {
         console.log('[GitHub upload] ' + formatGitHubUploadLogTime(new Date()) + ' starting (' + mode + ')');
         setGitStatus(options.auto ? '正在自動同步到 GitHub…' : '正在上傳到 GitHub…', '');
         try {
-            setGitStatus('正在檢查共用題庫版本…', '');
-            var cloudCombined = await peekCloudQuestionBankForSchema();
-            if (typeof assertCanUploadOverCloud === 'function') {
-                assertCanUploadOverCloud(cloudCombined);
-            }
             setGitStatus(options.auto ? '正在自動同步到 GitHub…' : '正在上傳到 GitHub…', '');
             var exportData = typeof buildQuestionExport === 'function'
                 ? await buildQuestionExport(true)
@@ -359,14 +360,6 @@ async function uploadQuestionsToGit(options) {
                 throw Object.assign(new Error(unkMsg), { code: 'unknown_publisher', message: unkMsg });
             }
 
-            setGitStatus('正在比對雲端分片…', '');
-            var cloudHkeaa = await peekCloudShardPayload(
-                typeof SHARED_BANK_HKEAA_REL === 'string' ? SHARED_BANK_HKEAA_REL : 'data/database-hkeaa.json'
-            );
-            var cloudAristo = await peekCloudShardPayload(
-                typeof SHARED_BANK_ARISTO_REL === 'string' ? SHARED_BANK_ARISTO_REL : 'data/database-aristo.json'
-            );
-
             function questionsOf(payload) {
                 if (typeof sharedBankQuestionsFromPayload === 'function') {
                     return sharedBankQuestionsFromPayload(payload) || [];
@@ -380,6 +373,31 @@ async function uploadQuestionsToGit(options) {
             // Safety: never treat a missing local publisher as an empty dirty wipe.
             var hkeaaPresent = localHkeaa.length > 0;
             var aristoPresent = localAristo.length > 0;
+
+            setGitStatus('正在檢查分片格式版本…', '');
+            var hkeaaRel = typeof SHARED_BANK_HKEAA_REL === 'string' ? SHARED_BANK_HKEAA_REL : 'data/database-hkeaa.json';
+            var aristoRel = typeof SHARED_BANK_ARISTO_REL === 'string' ? SHARED_BANK_ARISTO_REL : 'data/database-aristo.json';
+            var cloudHkeaa = await readCloudShardStrict(hkeaaRel, 'HKEAA');
+            var needAristo = aristoPresent
+                || (typeof sharedBankHasMockAccess === 'function' && sharedBankHasMockAccess());
+            var cloudAristo = null;
+            var cloudSchemaVersion = (typeof readSchemaVersion === 'function')
+                ? readSchemaVersion(cloudHkeaa)
+                : 0;
+            if (needAristo) {
+                cloudAristo = await readCloudShardStrict(aristoRel, '雅集');
+                var pairStatus = (typeof sharedBankSchemaPairStatus === 'function')
+                    ? sharedBankSchemaPairStatus(cloudHkeaa, cloudAristo)
+                    : { ok: true, schemaVersion: cloudSchemaVersion };
+                throwShardSchemaStatus(pairStatus);
+                if (pairStatus && typeof pairStatus.schemaVersion === 'number') {
+                    cloudSchemaVersion = pairStatus.schemaVersion;
+                }
+            }
+            if (typeof assertCanUploadOverCloud === 'function') {
+                assertCanUploadOverCloud({ schemaVersion: cloudSchemaVersion });
+            }
+            setGitStatus('正在比對雲端分片…', '');
 
             var fp = typeof sharedBankShardFingerprint === 'function'
                 ? sharedBankShardFingerprint
@@ -438,20 +456,7 @@ async function uploadQuestionsToGit(options) {
                 });
             }
 
-            // Combined dual-write: local present shards + cloud shards for absent locals.
-            var combinedQs = [];
-            if (hkeaaPresent) combinedQs = combinedQs.concat(localHkeaa);
-            else combinedQs = combinedQs.concat(questionsOf(cloudHkeaa));
-            if (aristoPresent) combinedQs = combinedQs.concat(localAristo);
-            else combinedQs = combinedQs.concat(questionsOf(cloudAristo));
-            files.push({
-                path: typeof SHARED_BANK_COMBINED_REL === 'string' ? SHARED_BANK_COMBINED_REL : 'data/database.json',
-                data: buildPayload(exportData, combinedQs)
-            });
-
-            // Upload one allowlisted file per Apps Script call so each write stays
-            // under AS ~6 min and the client AbortController is not shared across
-            // HKEAA + combined (~2.5MB + ~6MB) in a single 180s body.
+            // Upload one allowlisted shard per Apps Script call. Combined is not written.
             var uploadTimeoutMs = typeof GIT_PROXY_UPLOAD_TIMEOUT_MS === 'number'
                 ? GIT_PROXY_UPLOAD_TIMEOUT_MS
                 : 900000;
@@ -463,9 +468,7 @@ async function uploadQuestionsToGit(options) {
                 var pathLabel = String(fileSpec.path || '');
                 var shortLabel = pathLabel.indexOf('hkeaa') !== -1
                     ? ('HKEAA ' + localHkeaa.length)
-                    : (pathLabel.indexOf('aristo') !== -1
-                        ? ('雅集 ' + localAristo.length)
-                        : ('合併 ' + combinedQs.length));
+                    : ('雅集 ' + localAristo.length);
                 setGitStatus('正在上傳髒分片（'
                     + shortLabel
                     + '；'
@@ -507,20 +510,17 @@ async function uploadQuestionsToGit(options) {
             if (!writtenSchema && typeof readSchemaVersion === 'function') {
                 writtenSchema = readSchemaVersion(exportData) || 0;
             }
-            var count = combinedQs.length;
             var writtenPaths = writtenList.map(function (w) {
                 return w && (w.relPath || w.path) ? String(w.relPath || w.path) : '';
             }).filter(Boolean);
             console.log('[GitHub upload] ' + formatGitHubUploadLogTime(new Date())
-                + ' succeeded (' + count + ' combined; dirty hkeaa=' + hkeaaDirty
+                + ' succeeded (dirty hkeaa=' + hkeaaDirty
                 + ' aristo=' + aristoDirty + '; wrote ' + writtenPaths.join(', ') + ')');
-            var message = '已上傳髒分片到 GitHub（合併 '
-                + count + ' 題'
-                + (hkeaaDirty ? '；HKEAA ' + localHkeaa.length : '')
-                + (aristoDirty ? '；雅集 ' + localAristo.length : '')
+            var message = '已上傳髒分片到 GitHub'
+                + (hkeaaDirty ? '（HKEAA ' + localHkeaa.length + ' 題）' : '')
+                + (aristoDirty ? '（雅集 ' + localAristo.length + ' 題）' : '')
                 + (!aristoPresent ? '；本機無雅集→未動 aristo 分片' : '')
-                + (!hkeaaPresent ? '；本機無 HKEAA→未動 hkeaa 分片' : '')
-                + '）';
+                + (!hkeaaPresent ? '；本機無 HKEAA→未動 hkeaa 分片' : '');
             if (writtenSchema > 0) message += '（格式版本 ' + writtenSchema + '）';
             setGitStatus(message, 'ok');
             if (typeof showNotification === 'function') showNotification(message, 'success');
@@ -564,6 +564,8 @@ async function downloadQuestionsFromGit(options) {
                         };
                     }
                 } catch (shardErr) {
+                    var shardCode = shardErr && shardErr.code ? String(shardErr.code) : '';
+                    if (shardCode === 'schema_inconsistent' || shardCode === 'shards_missing') throw shardErr;
                     importedPayload = null;
                 }
             }
@@ -574,8 +576,9 @@ async function downloadQuestionsFromGit(options) {
                 }, 180000);
             }
             if (!data || data.ok !== true) {
-                var failed = new Error((data && data.error) || 'github_error');
+                var failed = new Error((data && (data.message || data.error)) || 'github_error');
                 failed.code = data && data.error ? data.error : 'github_error';
+                if (data && typeof data.message === 'string' && data.message) failed.message = data.message;
                 throw failed;
             }
             if (!window.questionJsonSource || typeof window.questionJsonSource.importPayload !== 'function') {
@@ -620,6 +623,60 @@ async function downloadQuestionsFromGit(options) {
     });
 }
 
+function formatShardReconcileStatus(summary) {
+    summary = summary || {};
+    var h = summary.hkeaa || {};
+    var a = summary.aristo || {};
+    var msg = '分片對帳：HKEAA '
+        + (h.present === false ? '缺失' : ((h.questionCount || 0) + ' 題（schema ' + (h.schemaVersion || 0) + '）'))
+        + '／雅集 '
+        + (a.present === false ? '缺失' : ((a.questionCount || 0) + ' 題（schema ' + (a.schemaVersion || 0) + '）'))
+        + '；合計 ' + (summary.totalQuestions || 0)
+        + '；id 重疊 ' + (summary.overlapCount || 0);
+    if (summary.missing && summary.missing.length) msg += '；缺失 ' + summary.missing.join('、');
+    if (summary.schemaConsistent === false && h.present !== false && a.present !== false) {
+        msg += '；schema 不一致';
+    }
+    if (summary.declaredCountMismatch) msg += '；questionCount 與陣列長度不符';
+    msg += summary.consistent ? '；一致' : '；不一致';
+    return msg;
+}
+
+async function reconcileBankShardsFromGit() {
+    if (!gitSyncState.allowed) {
+        setGitStatus(gitErrorMessage('feature_unavailable'), 'error');
+        if (typeof showNotification === 'function') {
+            showNotification(gitErrorMessage('feature_unavailable'), 'error');
+        }
+        return;
+    }
+    await runGitJob('manual', async function () {
+        setGitStatus('正在對帳出版社分片…', '');
+        try {
+            var data = await gitProxyRequest({
+                action: 'reconcileBankShards',
+                username: gitUsername()
+            }, 300000);
+            if (!data || data.ok !== true) {
+                var failed = new Error((data && (data.message || data.error)) || 'github_error');
+                failed.code = data && data.error ? data.error : 'github_error';
+                if (data && typeof data.message === 'string' && data.message) failed.message = data.message;
+                throw failed;
+            }
+            var message = formatShardReconcileStatus(data);
+            console.log('[GitHub reconcile] ' + formatGitHubUploadLogTime(new Date()) + ' ' + message);
+            setGitStatus(message, data.consistent ? 'ok' : 'error');
+            if (typeof showNotification === 'function') {
+                showNotification(message, data.consistent ? 'success' : 'error');
+            }
+        } catch (error) {
+            var message = gitFailureText(error);
+            setGitStatus(message, 'error');
+            if (typeof showNotification === 'function') showNotification(message, 'error');
+        }
+    });
+}
+
 async function maybeAutoSyncQuestions() {
     if (gitSyncState.suppressAuto || !readAutoSync()) return;
     gitSyncState.localChanged = true;
@@ -653,6 +710,12 @@ function bindGitSyncControls() {
             downloadQuestionsFromGit({ auto: false });
         });
     }
+    var reconcile = document.getElementById('git-reconcile-btn');
+    if (reconcile) {
+        reconcile.addEventListener('click', function () {
+            reconcileBankShardsFromGit();
+        });
+    }
 }
 
 function initGitSyncFeature() {
@@ -669,3 +732,5 @@ function initGitSyncFeature() {
 
 window.maybeAutoSyncQuestions = maybeAutoSyncQuestions;
 window.initGitSyncFeature = initGitSyncFeature;
+window.reconcileBankShardsFromGit = reconcileBankShardsFromGit;
+window.formatShardReconcileStatus = formatShardReconcileStatus;

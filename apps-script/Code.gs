@@ -14,22 +14,25 @@
  *   GITHUB_OWNER
  *   GITHUB_REPO
  *   GITHUB_BRANCH        (optional; main when empty)
- *   GITHUB_DATA_PATH     (under shared prefix; shape data/database.json → shared/data/database.json)
+ *   GITHUB_DATA_PATH     (obsolete for bank I/O; publisher shards are fixed paths.
+ *                         Left unread by upload/download/approve. Migration: was
+ *                         data/database.json → shared/data/database.json.)
  *   GITHUB_AI_BACKUP_DIR (inside each user's folder; shape ai-backups)
  *   GITHUB_SHARED_PREFIX (optional; shared when empty)
  *   GITHUB_READ_TOKEN    (optional; fine-grained Contents: Read only — browser direct reads)
  *   GITHUB_APP_ID / GITHUB_APP_INSTALLATION_ID / GITHUB_APP_PRIVATE_KEY
  *                        (optional; preferred short-lived installation tokens for browser reads)
  *
- * Question-bank upload/download is shared for every githubSync user:
- *   <GITHUB_SHARED_PREFIX>/<GITHUB_DATA_PATH>
- *   e.g. shared/data/database.json
- * syncDataUpload accepts multi-file dirty-shard writes (Phase 3): allowlisted
- * paths under the shared prefix — data/database-hkeaa.json, data/database-aristo.json,
- * and combined data/database.json (GITHUB_DATA_PATH). Legacy body.data still
- * writes combined only. Empty shard payloads are refused (no silent wipe).
- * syncDataDownload (D2) returns shards merge: mockTests → hkeaa+aristo;
- * otherwise HKEAA only. No silent fallback to combined database.json.
+ * Question-bank upload/download is shared for every githubSync user.
+ * Live files are publisher shards only:
+ *   <GITHUB_SHARED_PREFIX>/data/database-hkeaa.json
+ *   <GITHUB_SHARED_PREFIX>/data/database-aristo.json
+ * Combined shared/data/database.json is obsolete (D4–D12) and is not read or
+ * written. syncDataUpload accepts dirty shard files only. Legacy body.data and
+ * data/database.json are rejected (combined_retired). Empty shard payloads are
+ * refused (no silent wipe). syncDataDownload returns a shards merge:
+ * mockTests → hkeaa+aristo; otherwise HKEAA only. A missing required shard or
+ * unequal shard schemaVersion fails clearly (no combined fallback).
  * Username is required for auth only and must not appear in the bank path.
  * Bank paths under users/ are rejected.
  * Admin data-checks (ken only, githubSync) use a sibling shared file:
@@ -43,7 +46,7 @@
  * 回報問題 (any known user; admin list):
  *   <GITHUB_SHARED_PREFIX>/data/issue-reports.json
  *   e.g. shared/data/issue-reports.json
- * 分題提案 staging (propose never writes bank; approve patches owning shard + combined):
+ * 分題提案 staging (propose never writes bank; approve patches the owning shard only):
  *   <GITHUB_SHARED_PREFIX>/data/question-parts-proposals.json
  *   e.g. shared/data/question-parts-proposals.json
  * 分類提案 staging (concepts / stemPatterns; pause at 200 pending):
@@ -66,14 +69,13 @@
  *
  * Shared diagrams, the question bank, and paper packs live under the same prefix.
  * GITHUB_SHARED_PREFIX defaults to shared. The site asks for a relative path
- * such as data/database.json, data/database-hkeaa.json, data/database-aristo.json,
+ * such as data/database-hkeaa.json, data/database-aristo.json,
  * diagrams/…, originals/…, or papers/….
- * Publisher shards (hkeaa / aristo) are readable the same way as database.json
- * for known users; database-aristo.json is mockTests-only (sharedMockOnly_).
- * Client load (D2) is shards-only (mock merges both; else HKEAA);
- * no silent combined fallback. Combined remains for dual-write / schema peek (D4).
- * Upload (Phase 3) writes dirty publisher shards + combined dual-write.
- * Approve bank patches resolve questionId into the owning shard and update combined.
+ * data/database.json is retired and fetchSharedAsset rejects it.
+ * Publisher shards are the bank. database-aristo.json is mockTests-only
+ * (sharedMockOnly_). Client load is shards-only (mock merges both; else HKEAA).
+ * Upload writes dirty publisher shards only.
+ * Approve bank patches write the owning shard only.
  * The script reads <prefix>/<relative path> and will not read users/.
  * A static host such as GitHub Pages cannot read a private repository:
  * raw file URLs for a private repo answer 404 unless a token is sent, and
@@ -171,8 +173,9 @@
  *   uploadSharedAsset → handleUploadSharedAsset_  (githubSync; diagrams/|originals/ only)
  *   describeImage     → handleDescribeImage_      (ai; multimodal Poe/OpenRouter)
  * Admin Git sync (shared bank write/read via server GITHUB_TOKEN):
- *   syncDataUpload   → handleGitUpload_  (multi-file dirty shards; schema_version_stale)
- *   syncDataDownload → handleGitDownload_ (returns schemaVersion)
+ *   syncDataUpload   → handleGitUpload_  (dirty shards only; schema gate on shards)
+ *   syncDataDownload → handleGitDownload_ (shards-only; schema from shards)
+ *   reconcileBankShards → handleReconcileBankShards_ (admin; counts + id digests)
  * Data-checks sync (ken + githubSync; shared/data/data-checks.json):
  *   syncDataChecksUpload   → handleDataChecksUpload_
  *   syncDataChecksDownload → handleDataChecksDownload_
@@ -281,6 +284,7 @@ function handlePost_(e) {
   if (action === 'reviewStemPatterns') return handleReviewStemPatterns_(body);
   if (action === 'syncDataUpload') return handleGitUpload_(body);
   if (action === 'syncDataDownload') return handleGitDownload_(body);
+  if (action === 'reconcileBankShards') return handleReconcileBankShards_(body);
   if (action === 'syncDataChecksUpload') return handleDataChecksUpload_(body);
   if (action === 'syncDataChecksDownload') return handleDataChecksDownload_(body);
   if (action === 'fetchSharedAsset') return handleFetchShared_(body);
@@ -1011,10 +1015,7 @@ function mutateAiExplanationsStore_(username, message, mutator) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -1685,10 +1686,7 @@ function mutateIssueReportsStore_(username, message, mutator) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -2038,8 +2036,8 @@ function removePartsProposalAt_(store, index) {
   return removed;
 }
 
-// --- Phase 3 approve bank workspace (shards + combined dual-write) ---
-// Resolve questionId into HKEAA / 雅集 shards when present; always refresh combined.
+// --- Approve bank workspace (owning shard only; combined retired D6/D11) ---
+// Resolve questionId across HKEAA / 雅集 shards. Write only shards whose questions changed.
 function tryReadBankFile_(cfg, path) {
   if (!path) return null;
   try {
@@ -2065,7 +2063,6 @@ function githubSharedBankShardPath_(cfg, key) {
   var rel = '';
   if (key === 'hkeaa') rel = 'data/database-hkeaa.json';
   else if (key === 'aristo') rel = 'data/database-aristo.json';
-  else if (key === 'combined') return githubSharedBankPath_(cfg);
   else return '';
   var full = joinGithubPath_(prefix, rel);
   if (!full || full === 'users' || full.indexOf('users/') === 0) return '';
@@ -2081,190 +2078,130 @@ function publisherShardKeyForApprove_(publisher) {
 }
 
 function readSharedBankForPartsApprove_(cfg) {
-  var combinedPath = githubSharedBankPath_(cfg);
-  if (!combinedPath) throw gitFail_('github_error');
   var hkeaaPath = githubSharedBankShardPath_(cfg, 'hkeaa');
   var aristoPath = githubSharedBankShardPath_(cfg, 'aristo');
+  if (!hkeaaPath || !aristoPath) throw gitFail_('github_error');
   var hkeaa = tryReadBankFile_(cfg, hkeaaPath);
   var aristo = tryReadBankFile_(cfg, aristoPath);
-  var combined = tryReadBankFile_(cfg, combinedPath);
-
+  if (!hkeaa) {
+    throw gitFail_('shards_missing', null, {
+      message: 'HKEAA 分片缺失或無法讀取（data/database-hkeaa.json）。已停止，不會改讀合併題庫。'
+    });
+  }
+  if (!aristo) {
+    throw gitFail_('shards_missing', null, {
+      message: '雅集分片缺失或無法讀取（data/database-aristo.json）。已停止，不會改讀合併題庫。'
+    });
+  }
+  var hv = readBankSchemaVersion_(hkeaa.bank);
+  var av = readBankSchemaVersion_(aristo.bank);
+  if (hv !== av) {
+    var inconsistent = gitFail_('schema_inconsistent', null, {
+      message: '分片 schemaVersion 不一致（HKEAA ' + hv + '／雅集 ' + av + '）。已停止，不會改寫合併題庫。'
+    });
+    inconsistent.cloudSchemaVersion = Math.max(hv, av);
+    throw inconsistent;
+  }
   var questions = [];
-  var usedShards = false;
-  if (hkeaa && Array.isArray(hkeaa.bank.questions)) {
-    usedShards = true;
-    for (var i = 0; i < hkeaa.bank.questions.length; i++) {
-      questions.push(hkeaa.bank.questions[i]);
-    }
-  }
-  if (aristo && Array.isArray(aristo.bank.questions)) {
-    usedShards = true;
-    for (var j = 0; j < aristo.bank.questions.length; j++) {
-      questions.push(aristo.bank.questions[j]);
-    }
-  }
-  if (!usedShards) {
-    if (!combined) throw gitFail_('github_not_found');
-    questions = combined.bank.questions;
-  } else if (!combined) {
-    // Shards exist but combined missing — synthesize a combined view for dual-write.
-    combined = {
-      bank: {
-        version: (hkeaa && hkeaa.bank.version) || (aristo && aristo.bank.version) || '1.0',
-        schemaVersion: Math.max(
-          readBankSchemaVersion_(hkeaa && hkeaa.bank),
-          readBankSchemaVersion_(aristo && aristo.bank)
-        ),
-        questions: [],
-        questionCount: 0
-      },
-      sha: '',
-      path: combinedPath
-    };
-  }
-
+  var i;
+  for (i = 0; i < hkeaa.bank.questions.length; i++) questions.push(hkeaa.bank.questions[i]);
+  for (i = 0; i < aristo.bank.questions.length; i++) questions.push(aristo.bank.questions[i]);
   var viewBank = {
-    version: (combined && combined.bank.version) || (hkeaa && hkeaa.bank.version) || '1.0',
-    schemaVersion: Math.max(
-      readBankSchemaVersion_(combined && combined.bank),
-      readBankSchemaVersion_(hkeaa && hkeaa.bank),
-      readBankSchemaVersion_(aristo && aristo.bank)
-    ),
-    exportDate: (combined && combined.bank.exportDate) || '',
+    version: hkeaa.bank.version || aristo.bank.version || '1.0',
+    schemaVersion: hv,
+    exportDate: hkeaa.bank.exportDate || '',
     questions: questions,
     questionCount: questions.length
   };
-  // Keep unknown top-level keys from combined when present.
-  if (combined && combined.bank) {
-    var keys = Object.keys(combined.bank);
-    for (var k = 0; k < keys.length; k++) {
-      var key = keys[k];
-      if (key === 'questions' || key === 'questionCount' || key === 'exportDate') continue;
-      if (!Object.prototype.hasOwnProperty.call(viewBank, key)) {
-        viewBank[key] = combined.bank[key];
-      }
-    }
+  var keys = Object.keys(hkeaa.bank);
+  for (var k = 0; k < keys.length; k++) {
+    var key = keys[k];
+    if (key === 'questions' || key === 'questionCount' || key === 'exportDate') continue;
+    if (!Object.prototype.hasOwnProperty.call(viewBank, key)) viewBank[key] = hkeaa.bank[key];
   }
   viewBank.__approveWs = {
     hkeaa: hkeaa,
     aristo: aristo,
-    combined: combined,
-    combinedPath: combinedPath,
-    usedShards: usedShards
+    hkeaaSnapshot: JSON.stringify(hkeaa.bank.questions || []),
+    aristoSnapshot: JSON.stringify(aristo.bank.questions || [])
   };
   return {
     bank: viewBank,
-    sha: (combined && combined.sha) || (hkeaa && hkeaa.sha) || (aristo && aristo.sha) || '',
-    path: combinedPath
+    sha: hkeaa.sha || aristo.sha || '',
+    path: hkeaaPath
   };
-}
-
-function writeBankFilePayload_(cfg, path, bank, message) {
-  if (!path) throw gitFail_('github_error');
-  bank.exportDate = new Date().toISOString();
-  bank.questionCount = Array.isArray(bank.questions) ? bank.questions.length : 0;
-  var text = JSON.stringify(bank);
-  if (utf8Length_(text) > GITHUB_DATA_MAX_BYTES_) throw gitFail_('payload_too_large');
-  return githubWriteText_(cfg, path, text, message || 'Update question bank');
 }
 
 function writeSharedBankForPartsApprove_(cfg, bank, message) {
   var ws = bank && bank.__approveWs;
-  var combinedPath = githubSharedBankPath_(cfg);
-  if (!combinedPath) throw gitFail_('github_error');
+  if (!ws || !ws.hkeaa || !ws.hkeaa.path || !ws.aristo || !ws.aristo.path) {
+    throw gitFail_('github_error', null, {
+      message: 'Approve 需要出版社分片。合併題庫已停用。'
+    });
+  }
+  var hkeaaQs = [];
+  var aristoQs = [];
+  var unknown = [];
+  var list = Array.isArray(bank.questions) ? bank.questions : [];
+  var i;
+  for (i = 0; i < list.length; i++) {
+    var q = list[i];
+    var key = publisherShardKeyForApprove_(q && q.publisher);
+    if (key === 'hkeaa') hkeaaQs.push(q);
+    else if (key === 'aristo') aristoQs.push(q);
+    else unknown.push(q);
+  }
+  if (unknown.length) {
+    throw gitFail_('bad_request', null, {
+      message: 'Approve write refused: question publisher not HKEAA/雅集出版社 ('
+        + unknown.length + ')'
+    });
+  }
 
-  // Legacy / no workspace: write combined only.
-  if (!ws) {
-    var writtenLegacy = writeBankFilePayload_(cfg, combinedPath, bank, message);
-    return { sha: writtenLegacy.sha, path: combinedPath };
+  function cloneShell_(source, questions) {
+    var out = {};
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      var sk = Object.keys(source);
+      for (var s = 0; s < sk.length; s++) {
+        var skk = sk[s];
+        if (skk === 'questions' || skk === 'questionCount' || skk === 'exportDate') continue;
+        if (skk === '__approveWs') continue;
+        out[skk] = source[skk];
+      }
+    }
+    out.questions = questions;
+    out.questionCount = questions.length;
+    if (typeof out.schemaVersion !== 'number') out.schemaVersion = readBankSchemaVersion_(bank);
+    return out;
   }
 
   var msg = message || 'Approve bank patch';
-  var last = { sha: '', path: combinedPath };
+  var last = { sha: ws.hkeaa.sha || '', path: ws.hkeaa.path };
+  var wrote = false;
 
-  if (ws.usedShards) {
-    // Partition the (possibly mutated) view questions back into shards by publisher.
-    // Question objects are shared refs with shard arrays when loaded from shards;
-    // re-partition still required if publisher moved (rare on approve).
-    var hkeaaQs = [];
-    var aristoQs = [];
-    var unknown = [];
-    var list = Array.isArray(bank.questions) ? bank.questions : [];
-    for (var i = 0; i < list.length; i++) {
-      var q = list[i];
-      var key = publisherShardKeyForApprove_(q && q.publisher);
-      if (key === 'hkeaa') hkeaaQs.push(q);
-      else if (key === 'aristo') aristoQs.push(q);
-      else unknown.push(q);
-    }
-    if (unknown.length) {
+  function maybeWrite_(file, questions, snapshot, label) {
+    var next = JSON.stringify(questions);
+    if (next === snapshot) return;
+    var beforeCount = 0;
+    try {
+      var before = JSON.parse(snapshot || '[]');
+      if (Array.isArray(before)) beforeCount = before.length;
+    } catch (ignore) {}
+    if (questions.length === 0 && beforeCount > 0) {
       throw gitFail_('bad_request', null, {
-        message: 'Approve write refused: question publisher not HKEAA/雅集出版社 ('
-          + unknown.length + ')'
+        message: 'Refuse emptying ' + label + ' shard on approve'
       });
     }
-
-    function cloneShell_(source, questions) {
-      var out = {};
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        var sk = Object.keys(source);
-        for (var s = 0; s < sk.length; s++) {
-          var skk = sk[s];
-          if (skk === 'questions' || skk === 'questionCount' || skk === 'exportDate') continue;
-          if (skk === '__approveWs') continue;
-          out[skk] = source[skk];
-        }
-      }
-      out.questions = questions;
-      out.questionCount = questions.length;
-      if (typeof out.schemaVersion !== 'number') {
-        out.schemaVersion = readBankSchemaVersion_(bank);
-      }
-      return out;
-    }
-
-    // Safety: never write an empty shard over a non-empty cloud shard unless the
-    // view truly has zero of that publisher after partition (possible wipe).
-    // Approve patches should not empty a shard; refuse empty overwrite of existing.
-    if (ws.hkeaa && ws.hkeaa.path) {
-      if (hkeaaQs.length === 0 && (ws.hkeaa.bank.questions || []).length > 0) {
-        throw gitFail_('bad_request', null, {
-          message: 'Refuse emptying HKEAA shard on approve'
-        });
-      }
-      var hPayload = cloneShell_(ws.hkeaa.bank, hkeaaQs);
-      last = writeBankFilePayload_(cfg, ws.hkeaa.path, hPayload, msg + ' [hkeaa]');
-      ws.hkeaa.bank = hPayload;
-    }
-    if (ws.aristo && ws.aristo.path) {
-      if (aristoQs.length === 0 && (ws.aristo.bank.questions || []).length > 0) {
-        throw gitFail_('bad_request', null, {
-          message: 'Refuse emptying 雅集 shard on approve'
-        });
-      }
-      var aPayload = cloneShell_(ws.aristo.bank, aristoQs);
-      last = writeBankFilePayload_(cfg, ws.aristo.path, aPayload, msg + ' [aristo]');
-      ws.aristo.bank = aPayload;
-    }
+    var payload = cloneShell_(file.bank, questions);
+    last = writeBankFilePayload_(cfg, file.path, payload, msg + ' [' + label + ']');
+    file.bank = payload;
+    wrote = true;
   }
 
-  // Dual-write combined for fallback / old readers.
-  var combinedShell = {};
-  var base = (ws.combined && ws.combined.bank) || bank;
-  var bk = Object.keys(base);
-  for (var b = 0; b < bk.length; b++) {
-    var bkey = bk[b];
-    if (bkey === 'questions' || bkey === 'questionCount' || bkey === 'exportDate') continue;
-    if (bkey === '__approveWs') continue;
-    combinedShell[bkey] = base[bkey];
-  }
-  combinedShell.questions = Array.isArray(bank.questions) ? bank.questions : [];
-  combinedShell.questionCount = combinedShell.questions.length;
-  if (typeof combinedShell.schemaVersion !== 'number') {
-    combinedShell.schemaVersion = readBankSchemaVersion_(bank);
-  }
-  last = writeBankFilePayload_(cfg, combinedPath, combinedShell, msg + ' [combined]');
-  return { sha: last.sha, path: combinedPath };
+  maybeWrite_(ws.hkeaa, hkeaaQs, ws.hkeaaSnapshot, 'hkeaa');
+  maybeWrite_(ws.aristo, aristoQs, ws.aristoSnapshot, 'aristo');
+  if (!wrote) return { sha: last.sha, path: last.path };
+  return { sha: last.sha, path: last.path };
 }
 
 function findBankQuestionIndex_(bank, questionId) {
@@ -2459,10 +2396,7 @@ function mutateQuestionPartsProposalsStore_(username, message, mutator) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -2477,7 +2411,7 @@ function handleApproveQuestionPartsProposal_(body) {
   if (!proposalId && !questionIdHint) return { ok: false, error: 'bad_request' };
 
   var cfg = githubConfig_();
-  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+  if (!githubDataReady_(cfg)) {
     return gitClientError_('github_not_configured');
   }
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
@@ -2603,10 +2537,7 @@ function handleApproveQuestionPartsProposal_(body) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -2635,7 +2566,7 @@ function handleBulkApproveQuestionPartsProposals_(body) {
     || body.confirmOverwrite === 1;
 
   var cfg = githubConfig_();
-  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+  if (!githubDataReady_(cfg)) {
     return gitClientError_('github_not_configured');
   }
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
@@ -2805,10 +2736,7 @@ function handleBulkApproveQuestionPartsProposals_(body) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -3630,7 +3558,7 @@ function handleApproveClassificationProposal_(body) {
   if (!proposalId && !questionIdHint) return { ok: false, error: 'bad_request' };
 
   var cfg = githubConfig_();
-  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+  if (!githubDataReady_(cfg)) {
     return gitClientError_('github_not_configured');
   }
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
@@ -3867,10 +3795,7 @@ function handleApproveClassificationProposal_(body) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -3897,7 +3822,7 @@ function handleBulkApproveClassificationProposals_(body) {
     || body.confirmOverwrite === 1;
 
   var cfg = githubConfig_();
-  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+  if (!githubDataReady_(cfg)) {
     return gitClientError_('github_not_configured');
   }
   if (!takeGitSlot_(username, 8)) return gitClientError_('rate_limited');
@@ -4073,10 +3998,7 @@ function handleBulkApproveClassificationProposals_(body) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -4269,7 +4191,7 @@ function handleFlushStagingApprovals_(body) {
   }
 
   var cfg = githubConfig_();
-  if (!githubDataReady_(cfg) || !githubSharedBankPath_(cfg)) {
+  if (!githubDataReady_(cfg)) {
     return gitClientError_('github_not_configured');
   }
 
@@ -4559,10 +4481,7 @@ function handleFlushStagingApprovals_(body) {
     }
     safeLog_(err);
     releaseGitSlot_(username);
-    var code = err && err.code ? err.code : 'github_error';
-    if (code === 'payload_too_large') return gitClientError_('payload_too_large');
-    if (code === 'github_not_found') return gitClientError_('github_not_found');
-    return gitClientError_('github_error');
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -6460,7 +6379,6 @@ var AI_USAGE_RECORD_USERS_ = ['ryan', 'user57'];
 // Allowlisted relative bank paths for Phase 3 multi-file syncDataUpload.
 // Joined with GITHUB_SHARED_PREFIX → shared/data/database*.json.
 var GITHUB_UPLOAD_ALLOWLIST_RELS_ = {
-  'data/database.json': true,
   'data/database-hkeaa.json': true,
   'data/database-aristo.json': true
 };
@@ -6552,10 +6470,43 @@ function prepareUploadFileWrite_(cfg, relPath, payload, confirmEmptyWipe) {
   };
 }
 
-// Shared question-bank upload for githubSync users (Phase 3 dirty-shard).
-// body.files: [{ path: 'data/database-hkeaa.json', data: {...} }, ...] under lock.
-// Legacy body.data: writes combined GITHUB_DATA_PATH only (backward compatible).
-// Schema gate per file written. Empty shard overwrite refused unless confirmEmptyWipe.
+// After per-file schema gates: both publisher shards must exist (a missing shard
+// may be created only when this request writes it) and end with the same schemaVersion.
+function assertUploadShardsPresentAndConsistent_(cfg, prepared) {
+  var keys = ['hkeaa', 'aristo'];
+  var versions = {};
+  var i;
+  for (i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var rel = key === 'hkeaa' ? 'data/database-hkeaa.json' : 'data/database-aristo.json';
+    var fromReq = null;
+    var p;
+    for (p = 0; p < prepared.length; p++) {
+      if (prepared[p].relPath === rel) fromReq = prepared[p];
+    }
+    var cloud = null;
+    if (!fromReq) cloud = readCloudBankOrNull_(cfg, githubSharedBankShardPath_(cfg, key));
+    if (!fromReq && !cloud) {
+      throw gitFail_('shards_missing', null, {
+        message: '雲端分片缺失或無法讀取（' + rel + '）。已停止，不會改寫合併題庫。'
+      });
+    }
+    versions[key] = fromReq ? fromReq.schemaVersion : readBankSchemaVersion_(cloud);
+  }
+  if (versions.hkeaa !== versions.aristo) {
+    var err = gitFail_('schema_inconsistent', null, {
+      message: '分片 schemaVersion 不一致（HKEAA ' + versions.hkeaa + '／雅集 ' + versions.aristo + '）。'
+    });
+    err.cloudSchemaVersion = Math.max(versions.hkeaa, versions.aristo);
+    throw err;
+  }
+}
+
+// Shared question-bank upload for githubSync users. Dirty publisher shards only.
+// body.files: [{ path: 'data/database-hkeaa.json'|'data/database-aristo.json', data }].
+// Legacy body.data / data/database.json → combined_retired.
+// Schema gate per file, then both shards must agree. Empty shard overwrite refused
+// unless confirmEmptyWipe.
 function handleGitUpload_(body) {
   var username = normalizeUsername_(body.username);
   if (!username || !lookupRights_(username).githubSync) return gitClientError_('feature_unavailable');
@@ -6575,28 +6526,29 @@ function handleGitUpload_(body) {
         releaseGitSlot_(username);
         return gitClientError_('bad_request');
       }
+      var relPath = String(spec.path || '').replace(/^\/+|\/+$/g, '');
+      if (relPath === 'data/database.json' || relPath === 'shared/data/database.json') {
+        releaseGitSlot_(username);
+        return gitClientError_('combined_retired', {
+          message: '合併題庫上傳已停用。請只上傳 data/database-hkeaa.json 或 data/database-aristo.json。'
+        });
+      }
       fileSpecs.push({
-        path: String(spec.path || '').replace(/^\/+|\/+$/g, ''),
+        path: relPath,
         data: coerceJson_(spec.data)
       });
     }
   } else {
-    // Legacy single combined write.
-    var dataPathRel = String(cfg.dataPath || '').replace(/^\/+|\/+$/g, '');
-    // Normalize to allowlisted relative form.
-    if (dataPathRel === 'shared/data/database.json') dataPathRel = 'data/database.json';
-    if (!dataPathRel) dataPathRel = 'data/database.json';
-    fileSpecs.push({
-      path: dataPathRel.indexOf('data/') === 0 ? dataPathRel : 'data/database.json',
-      data: coerceJson_(body && body.data)
+    releaseGitSlot_(username);
+    return gitClientError_('combined_retired', {
+      message: '合併題庫上傳已停用。請只上傳 data/database-hkeaa.json 或 data/database-aristo.json。'
     });
   }
   if (!fileSpecs.length) {
     releaseGitSlot_(username);
     return gitClientError_('bad_request');
   }
-  // Cap files (combined + 2 shards).
-  if (fileSpecs.length > 3) {
+  if (fileSpecs.length > 2) {
     releaseGitSlot_(username);
     return gitClientError_('bad_request');
   }
@@ -6619,6 +6571,7 @@ function handleGitUpload_(body) {
         confirmEmptyWipe
       ));
     }
+    assertUploadShardsPresentAndConsistent_(cfg, prepared);
 
     var writtenList = [];
     var maxSchema = 0;
@@ -6627,9 +6580,7 @@ function handleGitUpload_(body) {
     var lastPath = '';
     for (var w = 0; w < prepared.length; w++) {
       var item = prepared[w];
-      var label = item.relPath.indexOf('hkeaa') !== -1
-        ? 'hkeaa'
-        : (item.relPath.indexOf('aristo') !== -1 ? 'aristo' : 'combined');
+      var label = item.relPath.indexOf('aristo') !== -1 ? 'aristo' : 'hkeaa';
       var written = githubWriteText_(
         cfg,
         item.fullPath,
@@ -6723,8 +6674,14 @@ function handleGitUpload_(body) {
     if (code === 'payload_too_large') {
       return gitClientError_('payload_too_large');
     }
-    if (code === 'bad_request') {
-      return gitClientError_('bad_request', { message: err.clientMessage || '' });
+    if (code === 'schema_inconsistent' || code === 'shards_missing' || code === 'combined_retired' || code === 'bad_request') {
+      writeLog_({
+        username: username,
+        action: 'syncDataUpload',
+        success: false,
+        metadata: { error: code, detail: clip_(err.clientMessage || '', 120) }
+      }, true);
+      return gitClientErrorFromThrown_(err);
     }
     writeLog_({
       username: username,
@@ -6737,8 +6694,8 @@ function handleGitUpload_(body) {
 }
 
 // Shared question-bank download for githubSync users (Apps Script body path).
-// D2 shards-only download: mockTests merges hkeaa+aristo; otherwise HKEAA only.
-// Missing / unreadable shard → error (no silent combined database.json fallback).
+// Shards-only: mockTests merges hkeaa+aristo; otherwise HKEAA only.
+// Missing shard or unequal schemaVersion → error. Combined is not read.
 function handleGitDownload_(body) {
   var username = normalizeUsername_(body.username);
   var rights = username ? lookupRights_(username) : null;
@@ -6754,9 +6711,11 @@ function handleGitDownload_(body) {
         username: username,
         action: 'syncDataDownload',
         success: false,
-        metadata: { error: 'github_not_found', shard: 'hkeaa' }
+        metadata: { error: 'shards_missing', shard: 'hkeaa' }
       }, true);
-      return gitClientError_('github_not_found');
+      return gitClientError_('shards_missing', {
+        message: 'HKEAA 分片缺失或無法讀取（data/database-hkeaa.json）。已停止，不會改讀合併題庫。'
+      });
     }
     var parsed;
     var sha;
@@ -6768,12 +6727,28 @@ function handleGitDownload_(body) {
       var aristo = tryReadBankFile_(cfg, aristoPath);
       if (!aristo || !aristo.bank || !Array.isArray(aristo.bank.questions)) {
         writeLog_({
+        username: username,
+        action: 'syncDataDownload',
+        success: false,
+        metadata: { error: 'shards_missing', shard: 'aristo' }
+      }, true);
+      return gitClientError_('shards_missing', {
+        message: '雅集分片缺失或無法讀取（data/database-aristo.json）。已停止，不會改讀合併題庫。'
+      });
+    }
+      var hv = readBankSchemaVersion_(hkeaa.bank);
+      var av = readBankSchemaVersion_(aristo.bank);
+      if (hv !== av) {
+        writeLog_({
           username: username,
           action: 'syncDataDownload',
           success: false,
-          metadata: { error: 'github_not_found', shard: 'aristo' }
+          metadata: { error: 'schema_inconsistent', hkeaa: hv, aristo: av }
         }, true);
-        return gitClientError_('github_not_found');
+        return gitClientError_('schema_inconsistent', {
+          message: '分片 schemaVersion 不一致（HKEAA ' + hv + '／雅集 ' + av + '）。',
+          cloudSchemaVersion: Math.max(hv, av)
+        });
       }
       var questions = hkeaa.bank.questions.concat(aristo.bank.questions);
       parsed = {};
@@ -6785,10 +6760,7 @@ function handleGitDownload_(body) {
       }
       parsed.questions = questions;
       parsed.questionCount = questions.length;
-      parsed.schemaVersion = Math.max(
-        readBankSchemaVersion_(hkeaa.bank),
-        readBankSchemaVersion_(aristo.bank)
-      );
+      parsed.schemaVersion = hv;
       sha = hkeaa.sha || aristo.sha || '';
       pathMeta = 'data/database-hkeaa.json+data/database-aristo.json';
       bytesApprox = JSON.stringify(parsed).length;
@@ -6825,6 +6797,131 @@ function handleGitDownload_(body) {
       metadata: { error: code === 'github_not_found' ? 'github_not_found' : 'github_error' }
     }, true);
     return gitClientError_(code);
+  }
+}
+
+function shardQuestionIds_(bank) {
+  var list = bank && Array.isArray(bank.questions) ? bank.questions : [];
+  var ids = [];
+  var i;
+  for (i = 0; i < list.length; i++) ids.push(String(list[i] && list[i].id || ''));
+  return ids;
+}
+
+function duplicateIdCount_(ids) {
+  var seen = {};
+  var n = 0;
+  var i;
+  for (i = 0; i < ids.length; i++) {
+    var id = ids[i];
+    if (seen[id]) n++;
+    else seen[id] = true;
+  }
+  return n;
+}
+
+function summarizeShardForReconcile_(label, loaded) {
+  if (!loaded || !loaded.bank || !Array.isArray(loaded.bank.questions)) {
+    return {
+      summary: {
+        label: label,
+        present: false,
+        questionCount: 0,
+        schemaVersion: 0,
+        idDigest: '',
+        sha: '',
+        declaredCount: 0,
+        duplicateIds: 0
+      },
+      ids: []
+    };
+  }
+  var ids = shardQuestionIds_(loaded.bank);
+  var declared = typeof loaded.bank.questionCount === 'number' ? loaded.bank.questionCount : ids.length;
+  return {
+    summary: {
+      label: label,
+      present: true,
+      questionCount: ids.length,
+      schemaVersion: readBankSchemaVersion_(loaded.bank),
+      idDigest: sha256Hex_(ids.slice().sort().join('\n')),
+      sha: loaded.sha || '',
+      declaredCount: declared,
+      duplicateIds: duplicateIdCount_(ids)
+    },
+    ids: ids
+  };
+}
+
+// Compare publisher shards without reading combined database.json.
+// idDigest is SHA-256 hex of sorted question ids joined by newline.
+function reconcileBankShardsSummary_(hkeaaLoaded, aristoLoaded) {
+  var h = summarizeShardForReconcile_('hkeaa', hkeaaLoaded);
+  var a = summarizeShardForReconcile_('aristo', aristoLoaded);
+  var missing = [];
+  if (!h.summary.present) missing.push('hkeaa');
+  if (!a.summary.present) missing.push('aristo');
+  var overlap = [];
+  if (h.summary.present && a.summary.present) {
+    var set = {};
+    var i;
+    for (i = 0; i < h.ids.length; i++) set[h.ids[i]] = true;
+    for (i = 0; i < a.ids.length; i++) {
+      if (set[a.ids[i]]) overlap.push(a.ids[i]);
+    }
+  }
+  var schemaConsistent = h.summary.present && a.summary.present
+    && h.summary.schemaVersion === a.summary.schemaVersion;
+  var declaredCountMismatch = (h.summary.present && h.summary.declaredCount !== h.summary.questionCount)
+    || (a.summary.present && a.summary.declaredCount !== a.summary.questionCount);
+  var dup = (h.summary.duplicateIds || 0) + (a.summary.duplicateIds || 0);
+  return {
+    hkeaa: h.summary,
+    aristo: a.summary,
+    totalQuestions: h.summary.questionCount + a.summary.questionCount,
+    overlapCount: overlap.length,
+    overlapSample: overlap.slice(0, 20),
+    missing: missing,
+    schemaConsistent: schemaConsistent,
+    declaredCountMismatch: declaredCountMismatch,
+    consistent: missing.length === 0 && schemaConsistent && overlap.length === 0
+      && !declaredCountMismatch && dup === 0
+  };
+}
+
+// Admin read-only check of HKEAA + 雅集 shards (counts, schemaVersion, id digest, overlap).
+function handleReconcileBankShards_(body) {
+  var username = normalizeUsername_(body.username);
+  if (!username || !lookupRights_(username).admin) return { ok: false, error: 'feature_unavailable' };
+  var cfg = githubConfig_();
+  if (!githubDataReady_(cfg)) return gitClientError_('github_not_configured');
+  try {
+    var hkeaa = tryReadBankFile_(cfg, githubSharedBankShardPath_(cfg, 'hkeaa'));
+    var aristo = tryReadBankFile_(cfg, githubSharedBankShardPath_(cfg, 'aristo'));
+    var summary = reconcileBankShardsSummary_(hkeaa, aristo);
+    writeLog_({
+      username: username,
+      action: 'reconcileBankShards',
+      success: true,
+      metadata: {
+        hkeaa: summary.hkeaa.questionCount,
+        aristo: summary.aristo.questionCount,
+        consistent: summary.consistent,
+        overlapCount: summary.overlapCount,
+        missing: summary.missing.join(',')
+      }
+    }, true);
+    summary.ok = true;
+    return summary;
+  } catch (err) {
+    safeLog_(err);
+    writeLog_({
+      username: username,
+      action: 'reconcileBankShards',
+      success: false,
+      metadata: { error: err && err.code ? err.code : 'github_error' }
+    }, true);
+    return gitClientErrorFromThrown_(err);
   }
 }
 
@@ -7038,6 +7135,11 @@ function handleFetchShared_(body) {
     return gitClientError_('feature_unavailable');
   }
   if (!rights.mockTests && sharedMockOnly_(rel)) return gitClientError_('feature_unavailable');
+  if (rel === 'data/database.json') {
+    return gitClientError_('combined_retired', {
+      message: '合併題庫 data/database.json 已停用。請改讀出版社分片。'
+    });
+  }
   var ext = sharedExt_(rel);
   try {
     var read = githubReadBase64_(cfg, full);
@@ -7048,10 +7150,6 @@ function handleFetchShared_(body) {
     var textExt = sharedTextExt_(ext);
     var content = textExt ? decodeGithubBase64_(read.b64) : read.b64;
     var bytes = read.bytes;
-    if (textExt && !rights.mockTests && rel === 'data/database.json') {
-      content = stripMockQuestions_(content);
-      bytes = utf8Length_(content);
-    }
     logSharedRead_(username, 'fetchSharedAsset', true, {
       path: clip_(rel, 180),
       bytes: bytes
@@ -7901,7 +7999,8 @@ function issueGithubDirectReadCredential_(cfg) {
 // === Shared GitHub path / Contents / Git Data I/O ===
 
 function githubDataReady_(cfg) {
-  return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo) && githubBranchOk_(cfg.branch) && githubSharedBankPath_(cfg));
+  return !!(cfg && cfg.token && githubIdentOk_(cfg.owner) && githubIdentOk_(cfg.repo) && githubBranchOk_(cfg.branch)
+    && githubSharedBankShardPath_(cfg, 'hkeaa') && githubSharedBankShardPath_(cfg, 'aristo'));
 }
 
 function githubBackupReady_(cfg) {
@@ -8189,12 +8288,10 @@ function githubUserSegment_(username) {
   return segment;
 }
 
-// Shared combined question-bank path (GITHUB_DATA_PATH under shared prefix).
-// D2: syncDataDownload uses publisher shards (see handleGitDownload_); this
-// helper remains the combined-path resolver for dual-write / schema peek / approve.
-// syncDataUpload Phase 3 also writes allowlisted shard paths via body.files.
+// Legacy joiner for GITHUB_DATA_PATH. Bank read/write no longer calls this.
+// Publisher shards use githubSharedBankShardPath_. Kept so path-joining tests
+// still reject users/ and double-prefix. Do not wire it back as the live bank.
 // If dataPath already starts with the shared prefix, do not double-prefix.
-// Rejects any bank path under users/. Username is never part of this path.
 function githubSharedBankPath_(cfg) {
   var prefix = githubSharedPrefix_(cfg);
   if (!prefix) return '';
@@ -8466,6 +8563,17 @@ function gitFail_(code, httpStatus, extra) {
   return err;
 }
 
+function gitClientErrorFromThrown_(err) {
+  var code = err && err.code ? String(err.code) : 'github_error';
+  var extra = {};
+  if (err && typeof err.clientMessage === 'string' && err.clientMessage) extra.message = err.clientMessage;
+  if (err && typeof err.clientSchemaVersion === 'number') extra.clientSchemaVersion = err.clientSchemaVersion;
+  if (err && typeof err.cloudSchemaVersion === 'number') extra.cloudSchemaVersion = err.cloudSchemaVersion;
+  if (err && Array.isArray(err.failingIds)) extra.failingIds = err.failingIds;
+  if (err && typeof err.failingCount === 'number') extra.failingCount = err.failingCount;
+  return gitClientError_(code, extra);
+}
+
 function gitClientError_(code, extra) {
   var allowed = {
     feature_unavailable: true,
@@ -8480,6 +8588,9 @@ function gitClientError_(code, extra) {
     rate_limited: true,
     server_error: true,
     schema_version_stale: true,
+    schema_inconsistent: true,
+    shards_missing: true,
+    combined_retired: true,
     validation_failed: true,
     empty_shard_refused: true,
     unknown_publisher: true
@@ -8883,8 +8994,8 @@ function selfTestGitPaths() {
   if (githubResolveUploadBankPath_({ sharedPrefix: 'shared' }, 'data/database-aristo.json') !== 'shared/data/database-aristo.json') {
     throw new Error('upload_allow_aristo');
   }
-  if (githubResolveUploadBankPath_({ sharedPrefix: 'shared' }, 'data/database.json') !== 'shared/data/database.json') {
-    throw new Error('upload_allow_combined');
+  if (githubResolveUploadBankPath_({ sharedPrefix: 'shared' }, 'data/database.json')) {
+    throw new Error('upload_reject_combined');
   }
   if (githubResolveUploadBankPath_({ sharedPrefix: 'shared' }, 'data/other.json')) throw new Error('upload_reject_other');
   if (githubResolveUploadBankPath_({ sharedPrefix: 'shared' }, 'users/x/data/database.json')) throw new Error('upload_reject_users');
@@ -9149,6 +9260,43 @@ function selfTestGitPaths() {
   if (sharedOut.path !== 'diagrams/MT27-P1-24.jpg' || sharedOut.encoding !== 'base64') throw new Error('shared_response_keep');
   if (JSON.stringify(sharedOut).indexOf('secret-token') !== -1) throw new Error('shared_response_secret');
   if (JSON.stringify(sharedOut).indexOf('private-data') !== -1) throw new Error('shared_response_repo');
+  var consistent = reconcileBankShardsSummary_({
+    bank: { schemaVersion: 8, questionCount: 2, questions: [{ id: 'a' }, { id: 'b' }] },
+    sha: '0123456789abcdef0123456789abcdef01234567',
+    path: 'shared/data/database-hkeaa.json'
+  }, {
+    bank: { schemaVersion: 8, questionCount: 1, questions: [{ id: 'c' }] },
+    sha: '0123456789abcdef0123456789abcdef01234567',
+    path: 'shared/data/database-aristo.json'
+  });
+  if (!consistent.consistent || consistent.totalQuestions !== 3 || consistent.overlapCount !== 0) {
+    throw new Error('reconcile_ok');
+  }
+  if (!consistent.hkeaa.idDigest || consistent.hkeaa.idDigest.length !== 64) throw new Error('reconcile_digest');
+  var overlap = reconcileBankShardsSummary_({
+    bank: { schemaVersion: 8, questions: [{ id: 'a' }] }, sha: '', path: 'h'
+  }, {
+    bank: { schemaVersion: 8, questions: [{ id: 'a' }] }, sha: '', path: 'a'
+  });
+  if (overlap.consistent || overlap.overlapCount !== 1 || overlap.overlapSample[0] !== 'a') {
+    throw new Error('reconcile_overlap');
+  }
+  var skew = reconcileBankShardsSummary_({
+    bank: { schemaVersion: 8, questions: [{ id: 'a' }] }, sha: '', path: 'h'
+  }, {
+    bank: { schemaVersion: 7, questions: [{ id: 'b' }] }, sha: '', path: 'a'
+  });
+  if (skew.schemaConsistent || skew.consistent) throw new Error('reconcile_schema');
+  var missingShard = reconcileBankShardsSummary_(null, {
+    bank: { schemaVersion: 8, questions: [{ id: 'b' }] }, sha: '', path: 'a'
+  });
+  if (missingShard.consistent || missingShard.missing.join(',') !== 'hkeaa') throw new Error('reconcile_missing');
+  var countSkew = reconcileBankShardsSummary_({
+    bank: { schemaVersion: 8, questionCount: 9, questions: [{ id: 'a' }] }, sha: '', path: 'h'
+  }, {
+    bank: { schemaVersion: 8, questionCount: 1, questions: [{ id: 'b' }] }, sha: '', path: 'a'
+  });
+  if (!countSkew.declaredCountMismatch || countSkew.consistent) throw new Error('reconcile_count');
   console.log('selfTestGitPaths ok');
 }
 
