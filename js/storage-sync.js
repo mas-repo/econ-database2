@@ -130,9 +130,9 @@ class QuestionJsonSource {
     }
 
     async fetchPayload() {
-        // Private-repo bank via fetchSharedQuestionBank (D2 shards-only
-        // merge-on-load; no silent combined fallback). Upload is Phase 3
-        // dirty-shard (see github-sync.js). Direct GitHub read or Apps Script
+        // Private-repo bank via fetchSharedQuestionBank (shards-only
+        // merge-on-load; no combined fallback). Upload writes dirty publisher
+        // shards only (see github-sync.js). Direct GitHub read or Apps Script
         // proxy. A failed load leaves the page without questions.
         if (window.databaseReady) {
             const pending = window.databaseReady;

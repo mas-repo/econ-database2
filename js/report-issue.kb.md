@@ -152,7 +152,7 @@ sequenceDiagram
   end
 ```
 
-- **Commit 行為：** 10 筆成功 approve ≈ **1–3 Git write groups**（bank dual-write 可能 1–3 檔 + 最多 2 個 proposals 檔），**唔**係每題一 commit。
+- **Commit 行為：** 10 筆成功 approve ≈ **1–4 Git write groups**（有改動的 owning shard，通常 1 個、跨出版社最多 2 個 + 最多 2 個 proposals 檔）。不寫 combined `database.json`。**唔**係每題一 commit。
 - **失敗：** 逐項 `console.error` + 摘要；失敗／needsConfirm 留 `pendingOps`；chip「立即上傳」可重試。
 
 ## 修改史（決策型）

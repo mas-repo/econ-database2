@@ -12,7 +12,7 @@ sequenceDiagram
   participant Agent
   participant AS as Code.gs
   participant St as classification-proposals.json
-  participant Bank as database shards + combined
+  participant Bank as owning publisher shard
 
   Agent->>AS: submitClassificationProposal
   AS->>St: upsert pending by questionId
@@ -39,7 +39,8 @@ sequenceDiagram
 | 分類直寫 bank | **禁止**；staging 檔 | 人審閘門；可軟暫停 |
 | Soft pause | ≥**200** pending 仍接受 | 不堵 agent；提醒協調者 |
 | 大檔讀取 | 短命 read token + 直打 GitHub | 避開 Apps Script 回傳體積／逾時 |
-| syncDataDownload（D2） | **shards-only** merge（mock→hkeaa+aristo；否則 hkeaa） | 取消 silent combined fallback |
+| 題庫讀寫 | **shards-only**（mock→hkeaa+aristo；否則 hkeaa） | combined `database.json` 已停用 |
+| 對帳 | `reconcileBankShards`（admin） | 題數／schema／id digest／重疊；不讀 combined |
 | 寫入 | 一律 Apps Script + `GITHUB_TOKEN` | 前端永不持寫入 PAT |
 | Hub flush 批次（.37） | `flushStagingApprovals` 一鎖驗證後寫 | 避免 N 次 commit／半寫 bank；rate limit 以整批計 |
 | 單檔 Code.gs | 維持單檔 + 地圖註解 | 部署簡單；用 banner 導航 |
@@ -48,6 +49,7 @@ sequenceDiagram
 
 - **scriptId（bound 專案）：** `1M1CO1YpfpzSHL7n8g5H-8zpxAP0diXLXkss0Bf6a-5UtsNwOElZTfFx_`  
 - **Web app deployment id（／exec）：** `AKfycbyWyuSs8FIpga0fwy8z8A3IGqE3T51FE24Ak3xuLawj5GmD81p3PwvDQjIRzLhIa53y`（改 Code.gs 後需 New version／clasp redeploy）  
+- **D4–D12：** 合併本 PR 後必須 redeploy 上述 deployment，線上舊碼才會停止寫 combined。此雲端環境沒有 clasp 憑證，無法代為部署。  
 - 合併改到 `Code.gs` 後必須 **Manage deployments → Edit → New version**（保留同一 `/exec` URL），或 `clasp push` 後部署新版本。  
 - **只改 Script properties** → 立即生效；**改程式碼** → 舊 deployment 仍跑舊碼。  
 - 註解-only 變更可不 redeploy（無 runtime 差）。
@@ -62,6 +64,7 @@ sequenceDiagram
 | Shard-aware bank patch | 與 Phase 3 上傳模型一致 |
 | flushStagingApprovals | validate-all；ok 一次寫 bank／proposals；cap 50 |
 | D2 shards-only download | `handleGitDownload_` 讀 publisher shards 再 merge；缺 shard 回錯誤 |
+| D4–D6／D9／D11 | schema 與 approve 只碰分片；`reconcileBankShards`；拒絕 combined 上傳 |
 
 ## 待辦
 
@@ -72,6 +75,7 @@ sequenceDiagram
 
 1. 以 githubSync／admin 呼叫 `submitClassificationProposal` 寫入一題 concepts → staging 有 pending；bank 未變。  
 2. 堆到 ≥200 pending 再 submit → `ok:true` 且 `paused:true`。  
-3. Admin approve 一欄 → 該欄進正确 shard／combined；staging 該欄消失。  
+3. Admin approve 一欄 → 該欄只進 owning shard（另一片與 combined 都不寫）；staging 該欄消失。  
 4. Blank-only 對已填 bank 欄 approve → `blank_only_filled`。  
-5. 改 `Code.gs` 後若未 New version，舊客户端行為不變（驗證 redeploy 習慣）。
+5. 改 `Code.gs` 後若未 New version，舊客户端行為不變（驗證 redeploy 習慣）。  
+6. Admin `reconcileBankShards` → 回傳兩邊題數與 `consistent`，body 不含題幹、不含 `database.json`。
