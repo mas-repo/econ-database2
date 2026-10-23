@@ -23,7 +23,8 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  # A newer push to main supersedes an in-flight Pages deploy.
+  cancel-in-progress: true
 
 jobs:
   deploy:
