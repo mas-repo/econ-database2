@@ -9,6 +9,10 @@
 #   .pages-rebuild-stamp, .gitignore, and any other non-runtime file.
 # diagrams/ is not a Pages URL: inline images use data-shared-src and are
 # fetched from the private data repo (shared/diagrams/) via shared-assets.
+#
+# Pre-deploy checks run after _site/ is assembled and before upload.
+# Cache-bust ?v= values are stripped when resolving references. They are
+# not required to equal APP_VERSION (per-file query strings differ).
 name: Deploy GitHub Pages
 
 on:
@@ -41,7 +45,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, re, shutil, sys
+          import os, shutil, sys
+
+          missing_src = [
+              name for name in ("index.html", "favicon.ico", "icon.svg", "robots.txt")
+              if not os.path.isfile(name)
+          ]
+          for dirname in ("css", "js", "vendor"):
+              if not os.path.isdir(dirname):
+                  missing_src.append(dirname + "/")
+          if missing_src:
+              sys.exit(
+                  "assemble: source tree is incomplete\n  "
+                  + "\n  ".join(missing_src)
+              )
 
           root = "_site"
           if os.path.isdir(root):
@@ -67,51 +84,233 @@ jobs:
           # Agent notes sit next to scripts and are never requested by the browser.
           copy_tree("js", os.path.join(root, "js"), lambda name: name.endswith(".md"))
 
-          missing = []
+          count = sum(len(files) for _, _, files in os.walk(root))
+          print("assembled runtime site:", count, "files")
+          PY
+      - name: Pre-deploy checks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, shutil, subprocess, sys
 
-          def check(rel, base):
+          root = "_site"
+          errors = []
+
+          def add(msg):
+              errors.append(msg.rstrip())
+              one = " ".join(msg.split())
+              one = one.replace("%", "%25").replace("\r", "")
+              print(f"::error title=Pre-deploy checks::{one}")
+
+          if not os.path.isdir(root):
+              add("assembled site is missing: _site/")
+
+          required = [
+              "index.html",
+              "js/constants.js",
+              "js/main.js",
+              "css/main.css",
+              "vendor/katex/katex.min.js",
+              "vendor/katex/katex.min.css",
+              "favicon.ico",
+              "icon.svg",
+              "robots.txt",
+          ]
+          missing_required = [
+              rel for rel in required
+              if not os.path.isfile(os.path.join(root, rel))
+          ]
+          if missing_required:
+              add(
+                  "missing required runtime files:\n  "
+                  + "\n  ".join(missing_required)
+              )
+
+          version = ""
+          constants_rel = "js/constants.js"
+          constants_path = os.path.join(root, constants_rel)
+          if os.path.isfile(constants_path):
+              text = open(constants_path, encoding="utf-8").read()
+              for raw in text.splitlines():
+                  line = raw.split("//", 1)[0]
+                  match = re.search(
+                      r"""(?:const|let|var)\s+APP_VERSION\s*=\s*(['"])(.*)\1""",
+                      line,
+                  )
+                  if match:
+                      version = match.group(2).strip()
+                      break
+              if not version:
+                  add(
+                      "js/constants.js must define a non-empty APP_VERSION string "
+                      "(const APP_VERSION = '...';)"
+                  )
+              else:
+                  print("APP_VERSION:", version)
+          elif "js/constants.js" not in missing_required:
+              add("js/constants.js must define a non-empty APP_VERSION string")
+
+          missing_refs = []
+          html_refs = 0
+          css_refs = 0
+
+          def check(rel, base, source):
               rel = rel.split("?", 1)[0].split("#", 1)[0].strip()
               if not rel or rel.startswith(("http://", "https://", "data:", "//")):
                   return
               path = os.path.normpath(os.path.join(base, rel))
               if not os.path.isfile(path):
-                  missing.append(os.path.relpath(path, root))
+                  try:
+                      shown = os.path.relpath(path, root)
+                  except ValueError:
+                      shown = path
+                  missing_refs.append(f"{shown} (from {source})")
 
-          html = open(os.path.join(root, "index.html"), encoding="utf-8").read()
-          # Query strings (?v=…) stay in the attribute; check() strips them.
-          for ref in re.findall(r'(?:src|href)="([^"]+)"', html):
-              check(ref, root)
+          index_path = os.path.join(root, "index.html")
+          if os.path.isfile(index_path):
+              html = open(index_path, encoding="utf-8").read()
+              # Query strings (?v=…) stay in the attribute; check() strips them.
+              for ref in re.findall(r'(?:src|href)="([^"]+)"', html):
+                  html_refs += 1
+                  check(ref, root, "index.html")
 
-          for dirpath, _, filenames in os.walk(root):
-              for name in filenames:
-                  if not name.endswith(".css"):
-                      continue
-                  text = open(os.path.join(dirpath, name), encoding="utf-8", errors="replace").read()
-                  for ref in re.findall(r"""(?:@import\s+)?url\(\s*['"]?([^'")]+)""", text):
-                      check(ref, dirpath)
+          if os.path.isdir(root):
+              for dirpath, _, filenames in os.walk(root):
+                  for name in filenames:
+                      if not name.endswith(".css"):
+                          continue
+                      css_path = os.path.join(dirpath, name)
+                      source = os.path.relpath(css_path, root)
+                      text = open(css_path, encoding="utf-8", errors="replace").read()
+                      for ref in re.findall(
+                          r"""(?:@import\s+)?url\(\s*['"]?([^'")]+)""",
+                          text,
+                      ):
+                          css_refs += 1
+                          check(ref, dirpath, source)
+          if missing_refs:
+              add("missing references:\n  " + "\n  ".join(missing_refs))
 
-          forbidden = [
+          forbidden_dirs = {"apps-script", "docs", "archive", "diagrams", ".github"}
+          forbidden_names = [
               "apps-script", "docs", "archive", "diagrams", ".github",
               "AGENTS.md", "README.md", "Readme.txt", "_d1_inventory_raw.txt",
               "_readme_stem_stats.md", ".gitignore", ".pages-rebuild-stamp",
               "favicon2.ico", "icon2.svg",
           ]
-          leaked = [name for name in forbidden if os.path.exists(os.path.join(root, name))]
+          leaked = []
           notes = []
-          for dirpath, _, filenames in os.walk(root):
-              for name in filenames:
-                  if name.endswith(".kb.md") or name.endswith(".md"):
-                      notes.append(os.path.relpath(os.path.join(dirpath, name), root))
-          if missing or leaked or notes:
-              sys.exit(
-                  "pages artifact check failed\n"
-                  + ("missing: " + ", ".join(missing) + "\n" if missing else "")
-                  + ("leaked: " + ", ".join(leaked) + "\n" if leaked else "")
-                  + ("notes: " + ", ".join(notes) + "\n" if notes else "")
-              )
-          count = sum(len(files) for _, _, files in os.walk(root))
-          print("pages artifact ok:", count, "files")
+          if os.path.isdir(root):
+              for name in forbidden_names:
+                  if os.path.exists(os.path.join(root, name)):
+                      leaked.append(name)
+              for dirpath, dirnames, filenames in os.walk(root):
+                  rel_dir = os.path.relpath(dirpath, root)
+                  for dirname in dirnames:
+                      if dirname not in forbidden_dirs:
+                          continue
+                      rel = dirname if rel_dir == "." else os.path.join(rel_dir, dirname)
+                      if rel not in leaked:
+                          leaked.append(rel)
+                  for name in filenames:
+                      if name.endswith(".md"):
+                          rel = name if rel_dir == "." else os.path.join(rel_dir, name)
+                          notes.append(rel)
+          if leaked:
+              add("leaked forbidden paths:\n  " + "\n  ".join(leaked))
+          if notes:
+              add("leaked markdown:\n  " + "\n  ".join(notes))
+
+          if shutil.which("node") is None:
+              add("node is not on PATH; cannot run node --check")
+              js_files = []
+              katex_note = "not checked"
+          else:
+              js_files = []
+              js_root = os.path.join(root, "js")
+              if os.path.isdir(js_root):
+                  for dirpath, _, filenames in os.walk(js_root):
+                      for name in filenames:
+                          if name.endswith(".js"):
+                              js_files.append(os.path.join(dirpath, name))
+              js_files.sort()
+              if not js_files:
+                  add("no project JavaScript under _site/js")
+              syntax = []
+              for path in js_files:
+                  proc = subprocess.run(
+                      ["node", "--check", path],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if proc.returncode != 0:
+                      detail = (proc.stderr or proc.stdout or "node --check failed").strip()
+                      syntax.append(os.path.relpath(path, root) + "\n" + detail)
+              if syntax:
+                  add("JavaScript syntax errors:\n" + "\n".join(syntax))
+
+              katex = os.path.join(root, "vendor/katex/katex.min.js")
+              if not os.path.isfile(katex):
+                  katex_note = "not present"
+              else:
+                  proc = subprocess.run(
+                      ["node", "--check", katex],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if proc.returncode == 0:
+                      katex_note = "passed node --check"
+                  else:
+                      # Minified vendor is optional. A failure here must not
+                      # hide or replace the project js/ syntax gate above.
+                      katex_note = "skipped (node --check failed; vendor is not a hard gate)"
+                      print(
+                          "note: vendor/katex/katex.min.js failed node --check; "
+                          "continuing with project js/ only",
+                          file=sys.stderr,
+                      )
+
+          file_count = 0
+          if os.path.isdir(root):
+              file_count = sum(len(files) for _, _, files in os.walk(root))
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              status = "failed" if errors else "passed"
+              lines = [
+                  f"## Pre-deploy checks {status}",
+                  "",
+                  f"- **APP_VERSION:** `{version or '(missing)'}`",
+                  f"- **Runtime files:** {file_count}",
+                  f"- **Project JS `node --check`:** {len(js_files)} file(s) under `_site/js`",
+                  f"- **HTML references scanned:** {html_refs}",
+                  f"- **CSS url() references scanned:** {css_refs}",
+                  f"- **Vendor KaTeX:** {katex_note}",
+                  "",
+              ]
+              if errors:
+                  lines.append("### Errors")
+                  lines.append("")
+                  for msg in errors:
+                      for line in msg.splitlines():
+                          lines.append(f"- {line}" if line else "")
+                      lines.append("")
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write("\n".join(lines).rstrip() + "\n")
+
+          if errors:
+              sys.exit("pre-deploy checks failed\n\n" + "\n\n".join(errors))
+
+          print(
+              "pre-deploy ok:",
+              f"APP_VERSION={version}",
+              f"files={file_count}",
+              f"js={len(js_files)}",
+              f"html_refs={html_refs}",
+              f"css_refs={css_refs}",
+          )
           PY
+      # Upload and Deploy run only after Pre-deploy checks exits 0.
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
