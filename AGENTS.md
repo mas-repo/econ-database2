@@ -45,6 +45,7 @@
 | [`js/stats-explore.kb.md`](js/stats-explore.kb.md) | 統計 tab（一維瀏覽／交叉分析）、詳細統計 modal；點背景關閉跟 `shouldCloseOnBackdropClick`／`ui.closeOnBackdropClick`（.38） |
 | [`apps-script/AGENTS.md`](apps-script/AGENTS.md) | Apps Script 目錄入口 |
 | [`apps-script/Code.kb.md`](apps-script/Code.kb.md) | staging／approve、clasp deploy |
+| [`.github/workflows/deploy-pages.kb.md`](.github/workflows/deploy-pages.kb.md) | Pages 部署（runtime-only `_site`、concurrency、pre-deploy checks） |
 
 慣例說明：[`docs/agent-knowledge-convention.md`](docs/agent-knowledge-convention.md)。
 
@@ -78,6 +79,7 @@
 | Approve unlock | Hub：pendingOps＋關窗立即 hide＋背景 flush（.36）；`.37` `flushStagingApprovals` 批次寫入。題目 tab：跟 `readAutoSync` 即時 flush 或留 queue＋「立即上傳」chip；`beforeunload` 有 pending 時 |
 | HKEAA vs 雅集 | 可分屬不同 shard 檔 |
 | Bank I/O | shards-only。`database.json` 已停用（D4–D12）；schema／上傳／approve 都不讀寫它 |
+| Pages 產物 | 只發布 runtime 靜態前端；pre-deploy 失敗唔上傳／唔上線（見 deploy-pages.kb） |
 | PR 流程 | OutliersEcon 推 branch；mas-repo merge |
 
 ## 建議閱讀順序（新 chat）
