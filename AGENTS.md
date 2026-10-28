@@ -39,6 +39,7 @@
 | [`js/report-issue.kb.md`](js/report-issue.kb.md) | 回饋／回報 hub：local-first；關窗立即 hide + 背景 flush（.36）；批次 validate-then-commit flush（.37）；題目卡 ✓／✕（.30）+ 提案預覽（.33）；外層跟「自動同步」`readAutoSync`／chip（.31）；flush 跳過失敗＋`console.error`（.34）；待上傳佇列檢視／撤銷（.35） |
 | [`js/filters.kb.md`](js/filters.kb.md) | 題目篩選；特徵 vs admin「空白／缺漏」（含有未審批事項）；考生表現 |
 | [`js/filter-contract.kb.md`](js/filter-contract.kb.md) | Shared Filter Contract v1：`window.__SFC__` 讀寫同一套篩選；空欄＝不限制 |
+| [`tools/sfc-apply.kb.md`](tools/sfc-apply.kb.md) | 無頭套用：`node tools/sfc-apply.js` 用同一套 apply 把分片濾成分類 workset |
 | [`js/github-sync.kb.md`](js/github-sync.kb.md) | 題庫 load／save、shards、dirty upload、schemaVersion |
 | [`js/shared-assets.kb.md`](js/shared-assets.kb.md) | 短命 read token、共用資產讀取、shards-only bank load（combined 已停用） |
 | [`js/ai-explanation.kb.md`](js/ai-explanation.kb.md) | AI解釋 side-file；`accessRights.ai`；Poe proxy |
