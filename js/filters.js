@@ -481,8 +481,14 @@ function updateFilterIndicators() {
 // ============================================
 
 function gatherFilterState() {
+    // Live legacy object for applyFilters. Same fields as before; the
+    // snapshot agents read is FilterContract.readQuestionsFromUI().
+    if (typeof FilterContract !== 'undefined' && typeof FilterContract.readQuestionsLegacy === 'function') {
+        return FilterContract.readQuestionsLegacy();
+    }
+    var searchEl = document.getElementById('search');
     return {
-        search: document.getElementById('search').value,
+        search: searchEl ? searchEl.value : '',
         searchScope: window.searchScope || 'all',
         percentageFilter: window.percentageFilter,
         marksFilter: window.marksFilter,

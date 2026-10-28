@@ -221,6 +221,10 @@
     }
 
     Poe.currentFilters = function currentFilters() {
+        // Same live filters as the 題目 list (includes idSet / advanced).
+        // Omitting those keys used to inherit window.* inside applyFilters;
+        // passing them explicitly is the same membership.
+        if (typeof gatherFilterState === 'function') return gatherFilterState();
         var searchEl = document.getElementById('search');
         return {
             search: searchEl ? searchEl.value : '',

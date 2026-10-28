@@ -38,6 +38,7 @@
 | --- | --- |
 | [`js/report-issue.kb.md`](js/report-issue.kb.md) | 回饋／回報 hub：local-first；關窗立即 hide + 背景 flush（.36）；批次 validate-then-commit flush（.37）；題目卡 ✓／✕（.30）+ 提案預覽（.33）；外層跟「自動同步」`readAutoSync`／chip（.31）；flush 跳過失敗＋`console.error`（.34）；待上傳佇列檢視／撤銷（.35） |
 | [`js/filters.kb.md`](js/filters.kb.md) | 題目篩選；特徵 vs admin「空白／缺漏」（含有未審批事項）；考生表現 |
+| [`js/filter-contract.kb.md`](js/filter-contract.kb.md) | Shared Filter Contract v1：`window.__SFC__` 讀寫同一套篩選；空欄＝不限制 |
 | [`js/github-sync.kb.md`](js/github-sync.kb.md) | 題庫 load／save、shards、dirty upload、schemaVersion |
 | [`js/shared-assets.kb.md`](js/shared-assets.kb.md) | 短命 read token、共用資產讀取、shards-only bank load（combined 已停用） |
 | [`js/ai-explanation.kb.md`](js/ai-explanation.kb.md) | AI解釋 side-file；`accessRights.ai`；Poe proxy |
@@ -54,6 +55,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | [`docs/classification-proposals.md`](docs/classification-proposals.md) | 分類 staging SOP、欄位表、soft pause、審批 UI |
+| [`FILTER-SPEC.md`](FILTER-SPEC.md) | 篩選合約 v1（人用 UI、代理用 `window.__SFC__`） |
 | [`docs/filter-system-map.md`](docs/filter-system-map.md) | 篩選架構地圖（題目／統計／進階／ConditionMatch） |
 | [`docs/architecture-review-2026-10-09.md`](docs/architecture-review-2026-10-09.md) | 系統草圖、模組耦合、Apps Script 表面 |
 | [`docs/filters-review-2026-10-09.md`](docs/filters-review-2026-10-09.md) | 篩選痛點與改進清單（歷史） |

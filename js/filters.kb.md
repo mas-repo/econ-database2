@@ -1,7 +1,8 @@
 # filters.kb.md — 題目篩選
 
-> 程式：`js/filters.js`（UI／狀態）；常數 `js/constants.js`；套用 `js/storage-filters.js`；特徵邏輯 `js/question-fields.js`；「有未審批事項」→ `js/report-issue.js` staging cache  
-> 長文地圖：[`docs/filter-system-map.md`](../docs/filter-system-map.md)
+> 程式：`js/filters.js`（UI／狀態）；常數 `js/constants.js`；套用 `js/filter-contract.js` 的 `applyLegacyFilters`（`js/storage-filters.js` 只留權限＋薄包裝）；特徵邏輯 `js/question-fields.js`；「有未審批事項」→ `js/report-issue.js` staging cache  
+> 長文地圖：[`docs/filter-system-map.md`](../docs/filter-system-map.md)  
+> 代理合約：[`FILTER-SPEC.md`](../FILTER-SPEC.md)、[`js/filter-contract.kb.md`](filter-contract.kb.md)。人用現有 UI；`window.__SFC__` 讀寫同一套篩選。空欄＝不限制。篩選 JSON 不入庫。
 
 ## 流程
 
@@ -33,6 +34,7 @@ flowchart TD
 | staging cache 未就緒 | **`filterQuestions` 先 `await ensureStagingCache`**；matcher 未就緒時當無 match | 避免 excluded 在載入前誤成「全部通過」；載入後再評一次 |
 | 本機已 approve／reject 未 flush | 已從 `partsRows`／`classRows` 移除 → filter 唔再命中 | 與 chip 隱藏一致（`applyPendingOpsToLoadedRows`） |
 | 特徵多選邏輯 | 跨 key **AND** | 同時勾互斥特徵會得到空集（見 filter-system-map） |
+| 代理讀寫篩選 | **`window.__SFC__` only** | 不另做 Copy／Paste JSON。空物件／空字串＝不限制；畫面預設 `Out syl: excluded` 是有值，不是空白 |
 
 ### 常數對照（`js/constants.js`）
 
@@ -50,7 +52,8 @@ flowchart TD
 | Admin blank 獨立 | 「空白／缺漏」不 merge 進特徵 |
 | 考生表現改名 | UI 文案；`partPerformance` key 維持 |
 | 有未審批事項（.32） | admin blank 篩 pending 分類／分題 staging；重用 question-tab cache |
-| 統計與題目共用引擎 | 同一 `applyFilters`；統計自有 tri-state 副本 |
+| 統計與題目共用引擎 | 同一 `applyFilters` → `applyLegacyFilters`；統計自有 tri-state 副本 |
+| Shared Filter Contract v1 | `window.__SFC__` 讀寫題目／統計篩選 JSON；套用仍走原引擎 |
 
 ## 待辦
 
