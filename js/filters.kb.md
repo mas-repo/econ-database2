@@ -35,6 +35,7 @@ flowchart TD
 | 本機已 approve／reject 未 flush | 已從 `partsRows`／`classRows` 移除 → filter 唔再命中 | 與 chip 隱藏一致（`applyPendingOpsToLoadedRows`） |
 | 特徵多選邏輯 | 跨 key **AND** | 同時勾互斥特徵會得到空集（見 filter-system-map） |
 | 代理讀寫篩選 | **`window.__SFC__` only** | 不另做 Copy／Paste JSON。空物件／空字串＝不限制；畫面預設 `Out syl: excluded` 是有值，不是空白 |
+| 無頭套用 | **`node tools/sfc-apply.js`** | 同一套 apply，產出分類 workset。見 FILTER-SPEC 第 10 節 |
 
 ### 常數對照（`js/constants.js`）
 
@@ -54,6 +55,7 @@ flowchart TD
 | 有未審批事項（.32） | admin blank 篩 pending 分類／分題 staging；重用 question-tab cache |
 | 統計與題目共用引擎 | 同一 `applyFilters` → `applyLegacyFilters`；統計自有 tri-state 副本 |
 | Shared Filter Contract v1 | `window.__SFC__` 讀寫題目／統計篩選 JSON；套用仍走原引擎 |
+| 無頭 workset | `tools/sfc-apply.js` 載入同一引擎；不改篩選語意，不加 Copy／Paste JSON |
 
 ## 待辦
 

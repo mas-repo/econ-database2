@@ -6,7 +6,9 @@
 實作：[`js/filter-contract.js`](js/filter-contract.js)。  
 引擎仍是原本的 `applyFilters` 本體（現名 `applyLegacyFilters`）。`IndexedDBStorage.applyFilters`、`gatherFilterState`、`statsStateToFilters` 都走它。
 
-測試：`node tests/filter-contract.test.js`
+測試：`node tests/filter-contract.test.js`（瀏覽器套用）  
+無頭套用：`node tests/filter-contract-cli.test.js`  
+指令：`node tools/sfc-apply.js --help`
 
 ---
 
@@ -258,6 +260,8 @@ const rows = __SFC__.applyQuestionsFilterContract(questions, contract);
 const json = __SFC__.exportFilterJSON();
 ```
 
+沒有瀏覽器時，用同一份 JSON 走無頭套用（第 10 節），不要另寫一套篩選。
+
 ---
 
 ## 9. 與 UI 的對應
@@ -270,3 +274,64 @@ const json = __SFC__.exportFilterJSON();
 | `readStatsFromUI`／`writeStatsToUI` | `getStatsTabState('stats')`（一維與交叉共用這一組），以及畫面上的 `data-sf-search`／`data-sf-scope` |
 
 寫入題目面之後會呼叫既有的 `filterQuestions()`（若已載入），所以列表、徽章、三態外觀跟用手點是同一條路。
+
+---
+
+## 10. 無頭套用（Node）
+
+人繼續用畫面。沒有 `window` 時，代理用**同一套** `applyQuestionsFilterContract`／`applyStatsFilterContract` 過濾本機分片，得到分類 workset。實作是 [`tools/sfc-apply.js`](tools/sfc-apply.js)：它載入頁面的 `js/filter-contract.js`（以及 `question-fields.js`、`condition-match.js`、`ai-explanation.js`），**不**複製 `applyLegacyFilters`。
+
+```bash
+node tools/sfc-apply.js --help
+node tools/sfc-apply.js --contract contract.json --shards database-hkeaa.json database-aristo.json
+node tools/sfc-apply.js --contract contract.json --shards ./shards --out workset.json
+node tools/sfc-apply.js --surface stats --omit-key year --shards shard.json < contract.json
+```
+
+| 輸入 | 規則 |
+| --- | --- |
+| `--contract` | JSON 檔、`--contract -`、或省略並讀 stdin。物件、bundle、或單面合約，認法與 `importFilterJSON` 相同 |
+| 分片 | 一個或多個路徑，或一個目錄。目錄只含該層 `*.json`（檔名排序，不遞迴）。每個檔是 `{ "questions": [] }` 或頂層陣列 |
+| `--surface` | `questions`（bundle 的預設）或 `stats`。單面合約可省略，跟 `surface` 走 |
+| `--omit-key` | 只給統計面，與 `applyStatsFilterContract` 的第三個參數相同 |
+| `--out` | 寫入檔案。省略則 JSON 印到 stdout |
+| `--ai-explanations` | AI解釋 side-file（`byQuestion`）。沒有索引時，每題都是「沒有AI解釋」 |
+
+預設權限是 `mockTests: true`、`admin: true`：分片已經在本機，不套用頁面登入前的 `emptyAccessRights()`（那個預設會拿掉雅集／mock，並略過「空白／缺漏」）。`--no-mock-tests`、`--no-admin` 對齊未授權頁面。`--access-rights '{"mockTests":false,"admin":false}'` 給完整物件；上面的布林旗標覆寫它。
+
+`accessRights.ai` **不**會改寫合約裡的 `triState.ai`。頁面是在 UI 層清掉那一維；引擎收到合約就照合約比。無頭路徑也一樣。
+
+「有未審批事項」依賴回饋 hub 的 staging cache。無頭程序沒有這份 cache，matcher 與「cache 尚未就緒」相同：不當成命中。
+
+這個指令**不**寫分片，也**不**呼叫 `submitClassificationProposal`。分類寫入仍只走 Apps Script staging（見 [`docs/classification-proposals.md`](docs/classification-proposals.md)）。
+
+### 10.1 Workset
+
+```json
+{
+  "version": 1,
+  "app": "econ-database2",
+  "kind": "classification-workset",
+  "surface": "questions",
+  "filterContractVersion": 1,
+  "omitKey": null,
+  "accessRights": { "admin": true, "ai": true, "githubSync": false, "mockTests": true },
+  "inputCount": 0,
+  "count": 0,
+  "sources": [{ "path": "database-hkeaa.json", "count": 0, "matched": 0 }],
+  "questions": []
+}
+```
+
+每一列只留分類要用的欄位（篩選本身仍看完整列）：
+
+| 群組 | 欄位 |
+| --- | --- |
+| 身份 | `id`、`shard`、`publisher`、`examination`、`year`、`paper`、`section`、`questionNumber`、`questionType` |
+| 題幹 | `topic`、`questionTextChi`、`questionTextEng`、`plainText` |
+| 現有標籤 | `concepts`、`stemPatterns`、`patterns`、`graphType`、`tableType`、`calculationType`、`multipleSelectionType`、`curriculumClassification`、`AristochapterClassification`、`questionParts`、`partsStatus`、`outSyl` |
+| 圖／表 | `inlineDiagrams`、`inlineDiagramPaths`、`originalQuestionImage`、`originalQuestionImageEng`、`originalAnswerImage`、`originalAnswerImageEng` |
+
+`partsStatus` 是 `resolvePartsStatus` 的有效狀態（MC 沒有分題 → `none`）。`questionParts` 經 `normalizeQuestionParts`。`inlineDiagramPaths` 與 `js/render.js` 的 `diagramSrcs` 相同：逗號分隔，去掉空字串、含 `..` 的路徑、以及帶 scheme 的 URL。答案與評卷報告不放進 workset。
+
+列的順序跟套用結果一樣（分片路徑的順序，再是檔內順序）。篩選語意與瀏覽器 `apply*FilterContract` 相同；測試對同一份合約比對 id。
