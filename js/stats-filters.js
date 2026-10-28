@@ -494,34 +494,9 @@ function getStatsTabState(tabId) {
 }
 
 function statsStateToFilters(state, omitKey) {
-    const tri = JSON.parse(JSON.stringify(state.triState));
-    if (omitKey && tri[omitKey]) tri[omitKey] = {};
-    // Self-contained: inactive idSet/advanced so applyFilters never inherits
-    // 題目 window.idSetFilter / window.advancedFilter (see filters-review P0).
-    const filters = {
-        search: '',
-        searchScope: 'all',
-        triState: tri,
-        percentageFilter: state.percentage,
-        marksFilter: state.marks,
-        questionNumberFilter: state.qnum,
-        filterLogic: {
-            curriculum: state.logic.curriculum || 'OR',
-            chapter: state.logic.chapter || 'OR'
-        },
-        idSetFilter: (typeof emptyIdSetFilter === 'function')
-            ? emptyIdSetFilter()
-            : { active: false, ids: null, label: '', source: '' },
-        advancedFilter: (typeof emptyAdvancedFilter === 'function')
-            ? emptyAdvancedFilter()
-            : { active: false, conditions: [], label: '' }
-    };
-    const term = (state.search || '').trim();
-    if (term && state.searchScope && state.searchScope !== 'name') {
-        filters.search = term;
-        filters.searchScope = state.searchScope;
-    }
-    return filters;
+    // Self-contained legacy object (inactive idSet/advanced). The projection
+    // lives on the Shared Filter Contract so 統計 and __SFC__ stay aligned.
+    return FilterContract.statsStateToLegacyFilters(state, omitKey);
 }
 
 function questionsMatchingStatsFilters(tabId, questions) {

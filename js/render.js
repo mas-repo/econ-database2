@@ -113,16 +113,7 @@ async function renderQuestions() {
         return;
     }
 
-    const filters = {
-        search: document.getElementById('search').value,
-        searchScope: window.searchScope || 'all',
-        triState: triStateFilters,
-        percentageFilter: window.percentageFilter,
-        marksFilter: window.marksFilter,
-        questionNumberFilter: window.questionNumberFilter,
-        idSetFilter: window.idSetFilter,
-        advancedFilter: window.advancedFilter
-    };
+    const filters = gatherFilterState();
 
     if (!window.storage || typeof storage.getQuestions !== 'function') {
         if (gridEarly) {
@@ -561,17 +552,7 @@ function answerTextForCopy(q) {
 }
 
 async function copyFilteredQuestions() {
-    const searchEl = document.getElementById('search');
-    const filters = {
-        search: searchEl ? searchEl.value : '',
-        searchScope: window.searchScope || 'all',
-        triState: triStateFilters,
-        percentageFilter: window.percentageFilter,
-        marksFilter: window.marksFilter,
-        questionNumberFilter: window.questionNumberFilter,
-        idSetFilter: window.idSetFilter,
-        advancedFilter: window.advancedFilter
-    };
+    const filters = gatherFilterState();
 
     let questions = await storage.getQuestions(filters);
     const sortSelect = document.getElementById('sort-order');

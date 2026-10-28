@@ -5,6 +5,8 @@ Checkout: `main` @ `30d228f` (branch `cursor/filters-review-d2f5` tracks `origin
 Scope: how 題目 / 統計 / 進階篩選 / ConditionMatch / partsStatus / admin blanks / AI解釋 filters relate.  
 Constraint: map + pain points + bugs; prefer consolidations and small fixes over UI rewrites. No drive-by UI rewrite.
 
+**Shared Filter Contract（v1）：** 人繼續用現有篩選 UI。代理只經 `window.__SFC__` 讀寫同一套 session 狀態（空欄＝不限制）。規格 [`FILTER-SPEC.md`](../FILTER-SPEC.md)；實作 [`js/filter-contract.js`](../js/filter-contract.js)；知識檔 [`js/filter-contract.kb.md`](../js/filter-contract.kb.md)。`IndexedDBStorage.applyFilters` 轉呼叫 `applyLegacyFilters`。篩選 JSON 不進 IndexedDB、GitHub sync、或題目匯入／匯出。
+
 ---
 
 ## 1. Architecture sketch
@@ -348,7 +350,8 @@ So an active data-checks ID set or 進階篩選 on 題目 **narrows 統計 count
 
 | Symbol | File |
 | --- | --- |
-| `applyFilters` | `js/storage-filters.js` |
+| `applyFilters` | `js/storage-filters.js`（轉呼叫 `applyLegacyFilters`） |
+| `applyLegacyFilters` / `window.__SFC__` | `js/filter-contract.js`（見 [`FILTER-SPEC.md`](../FILTER-SPEC.md)） |
 | `gatherFilterState` / `filterQuestions` / `clearFilters` | `js/filters.js` |
 | `emptyStatsTriState` / `statsStateToFilters` / `finishJumpToQuestions` | `js/stats-filters.js` |
 | `questionFeatureOn` / `resolvePartsStatus` / `effectiveFeatureItems` | `js/question-fields.js` |
