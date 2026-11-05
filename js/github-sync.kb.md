@@ -39,7 +39,7 @@ flowchart TD
 - Schema gate 讀出版社分片。缺分片（`shards_missing`）或兩邊 `schemaVersion` 不一致（`schema_inconsistent`）→ 明確失敗。不讀 combined。
 - Client 若本地 `SCHEMA_VERSION` < 雲端分片 `schemaVersion` → 拒傳（`schema_too_new`／stale）  
 - 上傳逾時放寬（多 MB JSON；單檔請求）
-- **對帳分片**（admin）：`reconcileBankShards`。回傳 HKEAA／雅集題數、`schemaVersion`、檔案 sha、`idDigest`（排序後 id 以換行串接的 SHA-256 hex）、跨片 id 重疊。不讀 combined、不回傳題幹。
+- **對帳**（admin，**API only，無 UI 按鈕**）：Apps Script `reconcileBankShards`。回傳 HKEAA／雅集題數、`schemaVersion`、檔案 sha、`idDigest`（排序後 id 以換行串接的 SHA-256 hex）、跨片 id 重疊。不讀 combined、不回傳題幹。前端已移除「對帳分片」與 `reconcileBankShardsFromGit`。
 
 ## 架構取捨／決策
 
@@ -58,6 +58,7 @@ flowchart TD
 | D2 shards-only download | 取消 silent combined fallback；`downloadQuestionsFromGit`／`syncDataDownload` 走 shards |
 | D4–D6／D10–D11 shards-only 讀寫 | schema 改讀分片；上傳與 approve 不再寫 combined |
 | 未知 publisher 硬拒 | 避免靜默寫錯分片 |
+| 移除「對帳分片」按鈕 | 分片遷移已完成；UI 不再呼叫對帳。`reconcileBankShards` 留在 Apps Script，供偶爾 API／代理檢查 |
 
 ## 待辦
 
@@ -77,4 +78,4 @@ flowchart TD
 4. 故意把某題 `publisher` 改成未知字串 → 上傳應失敗並提示。  
 5. 用舊前端（較低 `SCHEMA_VERSION`）對新 bank 上傳 → 應被 schema gate 擋住。  
 6. 兩片 `schemaVersion` 不同，或拿掉其中一片 → 上傳／mock 載入應失敗，且不會改去讀 `database.json`。  
-7. Admin 按「對帳分片」：狀態列顯示兩邊題數與是否一致；Network 只有 `reconcileBankShards`，沒有 `database.json`。
+7. Git 同步面板只有「自動同步」「上傳到 GitHub」「從 GitHub 載入」，沒有「對帳分片」按鈕，也沒有 `#git-reconcile-btn`。偶爾對帳改打 Apps Script `reconcileBankShards`（admin）：回傳兩邊題數與 `consistent`，body 不含題幹、不含 `database.json`。

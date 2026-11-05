@@ -57,7 +57,7 @@ flowchart TD
 | --- | --- | --- |
 | 大檔經 Apps Script echo | **否**（優先短命 read token 直連 GitHub） | 避開 googleusercontent 體積／逾時 |
 | Bank load 失敗時 silent `database.json` | **否** | 失敗要可見；合併檔已停用 |
-| 對帳 | `reconcileBankShards`（Apps Script，見 github-sync） | 不靠 combined 對題數／schema／id |
+| 對帳 | `reconcileBankShards`（Apps Script API only，無 UI 按鈕；見 Code.gs） | 不靠 combined 對題數／schema／id |
 | 未知 publisher 分片 | `unknown` 桶；上傳硬拒 | 防靜默寫錯 shard（見 github-sync） |
 | 寫 token 放前端 | **否** | 突變只經 Apps Script |
 

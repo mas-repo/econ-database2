@@ -149,7 +149,7 @@ function setGitStatus(text, kind) {
 
 function setGitBusy(busy) {
     gitSyncState.busy = busy;
-    ['git-upload-btn', 'git-download-btn', 'git-reconcile-btn'].forEach(function (id) {
+    ['git-upload-btn', 'git-download-btn'].forEach(function (id) {
         var button = document.getElementById(id);
         if (button) button.disabled = busy;
     });
@@ -623,60 +623,6 @@ async function downloadQuestionsFromGit(options) {
     });
 }
 
-function formatShardReconcileStatus(summary) {
-    summary = summary || {};
-    var h = summary.hkeaa || {};
-    var a = summary.aristo || {};
-    var msg = '分片對帳：HKEAA '
-        + (h.present === false ? '缺失' : ((h.questionCount || 0) + ' 題（schema ' + (h.schemaVersion || 0) + '）'))
-        + '／雅集 '
-        + (a.present === false ? '缺失' : ((a.questionCount || 0) + ' 題（schema ' + (a.schemaVersion || 0) + '）'))
-        + '；合計 ' + (summary.totalQuestions || 0)
-        + '；id 重疊 ' + (summary.overlapCount || 0);
-    if (summary.missing && summary.missing.length) msg += '；缺失 ' + summary.missing.join('、');
-    if (summary.schemaConsistent === false && h.present !== false && a.present !== false) {
-        msg += '；schema 不一致';
-    }
-    if (summary.declaredCountMismatch) msg += '；questionCount 與陣列長度不符';
-    msg += summary.consistent ? '；一致' : '；不一致';
-    return msg;
-}
-
-async function reconcileBankShardsFromGit() {
-    if (!gitSyncState.allowed) {
-        setGitStatus(gitErrorMessage('feature_unavailable'), 'error');
-        if (typeof showNotification === 'function') {
-            showNotification(gitErrorMessage('feature_unavailable'), 'error');
-        }
-        return;
-    }
-    await runGitJob('manual', async function () {
-        setGitStatus('正在對帳出版社分片…', '');
-        try {
-            var data = await gitProxyRequest({
-                action: 'reconcileBankShards',
-                username: gitUsername()
-            }, 300000);
-            if (!data || data.ok !== true) {
-                var failed = new Error((data && (data.message || data.error)) || 'github_error');
-                failed.code = data && data.error ? data.error : 'github_error';
-                if (data && typeof data.message === 'string' && data.message) failed.message = data.message;
-                throw failed;
-            }
-            var message = formatShardReconcileStatus(data);
-            console.log('[GitHub reconcile] ' + formatGitHubUploadLogTime(new Date()) + ' ' + message);
-            setGitStatus(message, data.consistent ? 'ok' : 'error');
-            if (typeof showNotification === 'function') {
-                showNotification(message, data.consistent ? 'success' : 'error');
-            }
-        } catch (error) {
-            var message = gitFailureText(error);
-            setGitStatus(message, 'error');
-            if (typeof showNotification === 'function') showNotification(message, 'error');
-        }
-    });
-}
-
 async function maybeAutoSyncQuestions() {
     if (gitSyncState.suppressAuto || !readAutoSync()) return;
     gitSyncState.localChanged = true;
@@ -710,12 +656,6 @@ function bindGitSyncControls() {
             downloadQuestionsFromGit({ auto: false });
         });
     }
-    var reconcile = document.getElementById('git-reconcile-btn');
-    if (reconcile) {
-        reconcile.addEventListener('click', function () {
-            reconcileBankShardsFromGit();
-        });
-    }
 }
 
 function initGitSyncFeature() {
@@ -732,5 +672,3 @@ function initGitSyncFeature() {
 
 window.maybeAutoSyncQuestions = maybeAutoSyncQuestions;
 window.initGitSyncFeature = initGitSyncFeature;
-window.reconcileBankShardsFromGit = reconcileBankShardsFromGit;
-window.formatShardReconcileStatus = formatShardReconcileStatus;

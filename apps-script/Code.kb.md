@@ -40,7 +40,7 @@ sequenceDiagram
 | Soft pause | ≥**200** pending 仍接受 | 不堵 agent；提醒協調者 |
 | 大檔讀取 | 短命 read token + 直打 GitHub | 避開 Apps Script 回傳體積／逾時 |
 | 題庫讀寫 | **shards-only**（mock→hkeaa+aristo；否則 hkeaa） | combined `database.json` 已停用 |
-| 對帳 | `reconcileBankShards`（admin） | 題數／schema／id digest／重疊；不讀 combined |
+| 對帳 | `reconcileBankShards`（admin，API only，無 UI 按鈕） | 題數／schema／id digest／重疊；不讀 combined |
 | 寫入 | 一律 Apps Script + `GITHUB_TOKEN` | 前端永不持寫入 PAT |
 | Hub flush 批次（.37） | `flushStagingApprovals` 一鎖驗證後寫 | 避免 N 次 commit／半寫 bank；rate limit 以整批計 |
 | 單檔 Code.gs | 維持單檔 + 地圖註解 | 部署簡單；用 banner 導航 |
@@ -78,4 +78,4 @@ sequenceDiagram
 3. Admin approve 一欄 → 該欄只進 owning shard（另一片與 combined 都不寫）；staging 該欄消失。  
 4. Blank-only 對已填 bank 欄 approve → `blank_only_filled`。  
 5. 改 `Code.gs` 後若未 New version，舊客户端行為不變（驗證 redeploy 習慣）。  
-6. Admin `reconcileBankShards` → 回傳兩邊題數與 `consistent`，body 不含題幹、不含 `database.json`。
+6. Admin POST `reconcileBankShards`（無 UI 按鈕）→ 回傳兩邊題數與 `consistent`，body 不含題幹、不含 `database.json`。
