@@ -606,7 +606,7 @@
         // Fallback if Poe helpers are unavailable: keep a minimal known list.
         var list = provider === 'openrouter'
             ? ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-sonnet-4']
-            : ['Claude-Opus-4.8', 'Claude-Sonnet-5.5', 'Grok-4.7', 'Gemini-3.8-Flash', 'MiniMax-M3', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'GPT-5.4'];
+            : ['Claude-Opus-4.8', 'Claude-Sonnet-5.5', 'Grok-4.7', 'Gemini-3.8-Flash', 'Gemini-4-Hydrogen', 'MiniMax-M3', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'GPT-5.4'];
         var selected = String(selectedModel || '').trim() || list[0];
         selectEl.textContent = '';
         var seen = false;

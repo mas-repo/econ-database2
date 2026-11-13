@@ -49,7 +49,7 @@ sequenceDiagram
 
 ## Poe 預設模型（共用設定）
 
-用戶設定／AI出題的 Poe「預設模型」下拉與 `Poe.POE_MODELS`／Apps Script `POE_ALLOWED_MODELS_` 同步為：`Claude-Opus-4.8`, `Claude-Sonnet-5.5`（系統預設）, `Grok-4.7`, `Gemini-3.8-Flash`, `MiniMax-M3`, `DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `GPT-5.4`。仍可用自訂 bot id；OpenRouter 列表另管。
+用戶設定／AI出題的 Poe「預設模型」下拉與 `Poe.POE_MODELS`／Apps Script `POE_ALLOWED_MODELS_` 同步為：`Claude-Opus-4.8`, `Claude-Sonnet-5.5`（系統預設）, `Grok-4.7`, `Gemini-3.8-Flash`, `Gemini-4-Hydrogen`, `MiniMax-M3`, `DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `GPT-5.4`。仍可用自訂 bot id；OpenRouter 列表另管。
 
 ## 待辦
 
